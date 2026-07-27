@@ -643,6 +643,113 @@ describe('EncodingToolHandlers (handlers.impl.core.runtime)', () => {
 
       expect(body.success).toBe(true);
       expect(body.decoded.status).toBe(99);
+      expect(body.unknownFields).toEqual([]);
+    });
+
+    it('reports closed-enum and schema-unknown fields without losing their wire data', async () => {
+      const schema = `
+        syntax = "proto2";
+        message Event {
+          enum Status { UNKNOWN = 0; READY = 1; }
+          optional Status status = 1;
+        }
+      `;
+      const data = Buffer.from([0x08, 0x63, 0x18, 0x07]).toString('base64');
+
+      const body = parseJson<any>(
+        await handlers.handleProtobufDecodeRaw({ data, schemaText: schema, messageName: 'Event' }),
+      );
+
+      expect(body.success).toBe(true);
+      expect(body.decoded.status).toBe('UNKNOWN');
+      expect(body.unknownFields).toHaveLength(2);
+      expect(body.unknownFields[0]).toMatchObject({
+        hex: '0863',
+        base64: 'CGM=',
+        fields: [{ fieldNumber: 1, wireType: 0, value: 99 }],
+        error: null,
+      });
+      expect(body.unknownFields[1]).toMatchObject({
+        hex: '1807',
+        base64: 'GAc=',
+        fields: [{ fieldNumber: 3, wireType: 0, value: 7 }],
+        error: null,
+      });
+    });
+
+    it('expands google.protobuf.Any message values in ProtoJSON output', async () => {
+      const protobuf = (await import('protobufjs')).default;
+      const schema = `
+        syntax = "proto3";
+        package demo;
+        import "google/protobuf/any.proto";
+        message Payload { string name = 1; }
+        message Envelope { google.protobuf.Any payload = 1; }
+      `;
+      const root = protobuf.Root.fromJSON(protobuf.common.get('google/protobuf/any.proto')!);
+      protobuf.parse(schema, root);
+      root.resolveAll();
+      const Payload = root.lookupType('demo.Payload');
+      const Envelope = root.lookupType('demo.Envelope');
+      const data = Buffer.from(
+        Envelope.encode({
+          payload: {
+            type_url: 'type.googleapis.com/demo.Payload',
+            value: Payload.encode({ name: 'Alice' }).finish(),
+          },
+        }).finish(),
+      ).toString('base64');
+
+      const body = parseJson<any>(
+        await handlers.handleProtobufDecodeRaw({
+          data,
+          schemaText: schema,
+          messageName: 'demo.Envelope',
+        }),
+      );
+
+      expect(body.success).toBe(true);
+      expect(body.decoded.payload).toEqual({
+        name: 'Alice',
+        '@type': 'type.googleapis.com/demo.Payload',
+      });
+    });
+
+    it('does not expand Any type URLs that resolve to non-message schema objects', async () => {
+      const protobuf = (await import('protobufjs')).default;
+      const schema = `
+        syntax = "proto3";
+        package demo;
+        import "google/protobuf/any.proto";
+        enum Status { UNKNOWN = 0; }
+        message Envelope { google.protobuf.Any payload = 1; }
+      `;
+      const root = protobuf.Root.fromJSON(protobuf.common.get('google/protobuf/any.proto')!);
+      protobuf.parse(schema, root);
+      root.resolveAll();
+      const Envelope = root.lookupType('demo.Envelope');
+      const data = Buffer.from(
+        Envelope.encode({
+          payload: {
+            type_url: 'type.googleapis.com/demo.Status',
+            value: Buffer.from([0x00]),
+          },
+        }).finish(),
+      ).toString('base64');
+
+      const body = parseJson<any>(
+        await handlers.handleProtobufDecodeRaw({
+          data,
+          schemaText: schema,
+          messageName: 'demo.Envelope',
+        }),
+      );
+
+      expect(body.success).toBe(true);
+      expect(body.decoded.payload).toEqual({
+        type_url: 'type.googleapis.com/demo.Status',
+        value: 'AA==',
+      });
     });
 
     it('falls back to raw wire-format when no schema/messageName given', async () => {

@@ -87,6 +87,26 @@ type ResponseBodyPayload = {
 
 type ResponseBodyResolver = (requestId: string) => Promise<ResponseBodyPayload | null>;
 
+type ProtobufMessageWithUnknowns = {
+  $unknowns?: readonly Uint8Array[];
+};
+
+function summarizeUnknownProtobufFields(message: unknown, maxDepth: number) {
+  const rawFields = (message as ProtobufMessageWithUnknowns).$unknowns ?? [];
+  return rawFields.map((rawField, index) => {
+    const raw = Buffer.from(rawField);
+    const parsed = parseProtobufMessage(raw, 0, maxDepth);
+    return {
+      index,
+      byteLength: raw.length,
+      hex: raw.toString('hex'),
+      base64: raw.toString('base64'),
+      fields: parsed.fields,
+      error: parsed.error ?? null,
+    };
+  });
+}
+
 function decodeDeclaredPayload(encoding: string, data: string): Buffer {
   switch (encoding) {
     case 'base64':
@@ -418,14 +438,30 @@ export class EncodingToolHandlers {
         const root =
           schemaPath && !schemaText
             ? await protobuf.load(schemaPath)
-            : protobuf.parse(schemaText).root;
+            : (() => {
+                const parsed = protobuf.parse(schemaText);
+                for (const importedFile of [
+                  ...(parsed.imports ?? []),
+                  ...(parsed.weakImports ?? []),
+                ]) {
+                  const commonDefinition = protobuf.common.get(importedFile);
+                  if (commonDefinition) {
+                    protobuf.Root.fromJSON(commonDefinition, parsed.root);
+                  }
+                }
+                return parsed.root;
+              })();
+        root.resolveAll();
         const MessageType = root.lookupType(messageName);
-        const message = MessageType.decode(buffer);
+        const reader = protobuf.Reader.create(buffer);
+        reader.discardUnknown = false;
+        const message = MessageType.decode(reader);
         const decoded = MessageType.toObject(message, {
           longs: String,
           bytes: String,
           enums: String,
           defaults: true,
+          json: true,
         });
         return ok({
           success: true,
@@ -433,6 +469,7 @@ export class EncodingToolHandlers {
           messageName,
           byteLength: buffer.length,
           decoded,
+          unknownFields: summarizeUnknownProtobufFields(message, maxDepth),
           fields: null,
           error: null,
         });

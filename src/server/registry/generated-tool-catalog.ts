@@ -19895,7 +19895,7 @@ export const GENERATED_TOOL_CATALOG = [
   {
     "tool": {
       "name": "protobuf_decode_raw",
-      "description": "Decode protobuf bytes. Raw wire-format walk by default (field numbers/wire types); with schemaText/schemaPath + messageName, typed decode via protobufjs (field numbers -> names).",
+      "description": "Decode protobuf bytes. Raw wire-format walk by default; schema mode returns ProtoJSON, expands valid google.protobuf.Any messages, preserves open-enum numeric values, and reports unknown fields with raw bytes plus wire details.",
       "inputSchema": {
         "type": "object",
         "properties": {

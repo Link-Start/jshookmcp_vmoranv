@@ -85,7 +85,7 @@ export const encodingTools: Tool[] = [
   tool('protobuf_decode_raw', (t) =>
     t
       .desc(
-        'Decode protobuf bytes. Raw wire-format walk by default (field numbers/wire types); with schemaText/schemaPath + messageName, typed decode via protobufjs (field numbers -> names).',
+        'Decode protobuf bytes. Raw wire-format walk by default; schema mode returns ProtoJSON, expands valid google.protobuf.Any messages, preserves open-enum numeric values, and reports unknown fields with raw bytes plus wire details.',
       )
       .string('data', 'Base64-encoded protobuf payload')
       .number('maxDepth', 'Maximum recursive decode depth', { default: 5, minimum: 1, maximum: 20 })
