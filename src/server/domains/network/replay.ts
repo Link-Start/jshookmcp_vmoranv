@@ -7,7 +7,11 @@
  * SSRF guard resolves DNS before checking to defeat rebinding attacks.
  */
 
-import { NETWORK_REPLAY_MAX_REDIRECTS } from '@src/constants';
+import {
+  NETWORK_REPLAY_MAX_BODY_BYTES,
+  NETWORK_REPLAY_MAX_REDIRECTS,
+  NETWORK_REPLAY_TIMEOUT_MS,
+} from '@src/constants';
 import {
   createNetworkAuthorizationPolicy,
   hasAuthorizedTargets,
@@ -272,7 +276,7 @@ async function replayHttp2Request(
 export async function replayRequest(
   base: BaseRequest,
   args: ReplayArgs,
-  maxBodyBytes = 512_000,
+  maxBodyBytes = NETWORK_REPLAY_MAX_BODY_BYTES,
 ): Promise<ReplayResult> {
   const url = args.urlOverride ?? base.url;
   const method = (args.methodOverride ?? base.method).toUpperCase();
@@ -415,7 +419,10 @@ export async function replayRequest(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), args.timeoutMs ?? 30_000);
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    args.timeoutMs ?? NETWORK_REPLAY_TIMEOUT_MS,
+  );
   const MAX_REDIRECTS = NETWORK_REPLAY_MAX_REDIRECTS;
   const useHttp2 = isHttp2Protocol(base.protocol);
 
@@ -438,7 +445,7 @@ export async function replayRequest(
         currentMethod,
         hopHeaders,
         currentMethod !== 'GET' && currentMethod !== 'HEAD' ? currentBody : undefined,
-        args.timeoutMs ?? 30_000,
+        args.timeoutMs ?? NETWORK_REPLAY_TIMEOUT_MS,
         target,
         maxBodyBytes,
       );

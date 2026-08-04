@@ -3,7 +3,7 @@
  * Prefixes: GRAPHQL_*, WASM_*, ANALYSIS_*, MINIAPP_*, DEBUGGER_*, WATCH_*, PROCESS_*, WIN_*, SOURCEMAP_*
  */
 
-import { int } from './helpers.js';
+import { float, int } from './helpers.js';
 
 /* ================================================================== */
 /*  GraphQL                                                            */
@@ -41,6 +41,136 @@ export const ANALYSIS_MAX_SAFE_COLLECTED_BYTES = int(
   256 * 1024,
 );
 export const ANALYSIS_MAX_SAFE_RESPONSE_BYTES = int('ANALYSIS_MAX_SAFE_RESPONSE_BYTES', 220 * 1024);
+
+/* ================================================================== */
+/*  Quality scoring (modules/analyzer/QualityAnalyzer)                 */
+/* ================================================================== */
+
+/** Weighted-quality formula: share of the final 0-100 score per component. */
+export const QUALITY_WEIGHT_SECURITY = float('QUALITY_WEIGHT_SECURITY', 0.4);
+export const QUALITY_WEIGHT_COMPLEXITY = float('QUALITY_WEIGHT_COMPLEXITY', 0.25);
+export const QUALITY_WEIGHT_MAINTAINABILITY = float('QUALITY_WEIGHT_MAINTAINABILITY', 0.2);
+export const QUALITY_WEIGHT_CODE_SMELL = float('QUALITY_WEIGHT_CODE_SMELL', 0.15);
+
+/** Per-severity deduction from the security sub-score (min 0). */
+export const QUALITY_SECURITY_PENALTY_CRITICAL = int('QUALITY_SECURITY_PENALTY_CRITICAL', 20);
+export const QUALITY_SECURITY_PENALTY_HIGH = int('QUALITY_SECURITY_PENALTY_HIGH', 10);
+export const QUALITY_SECURITY_PENALTY_MEDIUM = int('QUALITY_SECURITY_PENALTY_MEDIUM', 5);
+export const QUALITY_SECURITY_PENALTY_LOW = int('QUALITY_SECURITY_PENALTY_LOW', 2);
+
+/** Per-severity deduction from the code-smell sub-score (min 0). */
+export const QUALITY_SMELL_PENALTY_HIGH = int('QUALITY_SMELL_PENALTY_HIGH', 10);
+export const QUALITY_SMELL_PENALTY_MEDIUM = int('QUALITY_SMELL_PENALTY_MEDIUM', 5);
+export const QUALITY_SMELL_PENALTY_LOW = int('QUALITY_SMELL_PENALTY_LOW', 2);
+
+/** Cyclomatic-complexity bands (strictly-above threshold) and their deductions. */
+export const QUALITY_COMPLEXITY_BAND_HIGH = int('QUALITY_COMPLEXITY_BAND_HIGH', 20);
+export const QUALITY_COMPLEXITY_PENALTY_HIGH = int('QUALITY_COMPLEXITY_PENALTY_HIGH', 30);
+export const QUALITY_COMPLEXITY_BAND_MEDIUM = int('QUALITY_COMPLEXITY_BAND_MEDIUM', 10);
+export const QUALITY_COMPLEXITY_PENALTY_MEDIUM = int('QUALITY_COMPLEXITY_PENALTY_MEDIUM', 15);
+export const QUALITY_COMPLEXITY_BAND_LOW = int('QUALITY_COMPLEXITY_BAND_LOW', 5);
+export const QUALITY_COMPLEXITY_PENALTY_LOW = int('QUALITY_COMPLEXITY_PENALTY_LOW', 5);
+
+/** Cognitive-complexity bands and their deductions. */
+export const QUALITY_COGNITIVE_BAND_HIGH = int('QUALITY_COGNITIVE_BAND_HIGH', 15);
+export const QUALITY_COGNITIVE_PENALTY_HIGH = int('QUALITY_COGNITIVE_PENALTY_HIGH', 20);
+export const QUALITY_COGNITIVE_BAND_LOW = int('QUALITY_COGNITIVE_BAND_LOW', 10);
+export const QUALITY_COGNITIVE_PENALTY_LOW = int('QUALITY_COGNITIVE_PENALTY_LOW', 10);
+
+/** Average-complexity fallback bands (used when metrics are not provided). */
+export const QUALITY_AVG_COMPLEXITY_BAND_HIGH = int('QUALITY_AVG_COMPLEXITY_BAND_HIGH', 10);
+export const QUALITY_AVG_COMPLEXITY_PENALTY_HIGH = int('QUALITY_AVG_COMPLEXITY_PENALTY_HIGH', 20);
+export const QUALITY_AVG_COMPLEXITY_BAND_LOW = int('QUALITY_AVG_COMPLEXITY_BAND_LOW', 5);
+export const QUALITY_AVG_COMPLEXITY_PENALTY_LOW = int('QUALITY_AVG_COMPLEXITY_PENALTY_LOW', 10);
+
+/** Defaults when a component has no measurement. */
+export const QUALITY_DEFAULT_MAINTAINABILITY = int('QUALITY_DEFAULT_MAINTAINABILITY', 70);
+export const QUALITY_DEFAULT_AI_SCORE = int('QUALITY_DEFAULT_AI_SCORE', 70);
+
+/* ================================================================== */
+/*  Pattern detection (modules/analyzer/PatternDetector*)              */
+/* ================================================================== */
+
+/** Encryption-pattern confidence reported per evidence location. */
+export const PATTERN_CONFIDENCE_ENCRYPTION_URL = float('PATTERN_CONFIDENCE_ENCRYPTION_URL', 0.7);
+export const PATTERN_CONFIDENCE_ENCRYPTION_POST = float('PATTERN_CONFIDENCE_ENCRYPTION_POST', 0.8);
+export const PATTERN_CONFIDENCE_ENCRYPTION_LOG = float('PATTERN_CONFIDENCE_ENCRYPTION_LOG', 0.9);
+
+/** Critical-request priority scoring weights (ranking, higher first). */
+export const PATTERN_PRIORITY_METHOD_WEIGHT = int('PATTERN_PRIORITY_METHOD_WEIGHT', 10);
+export const PATTERN_PRIORITY_KEYWORD_WEIGHT = int('PATTERN_PRIORITY_KEYWORD_WEIGHT', 5);
+export const PATTERN_PRIORITY_POSTDATA_WEIGHT = int('PATTERN_PRIORITY_POSTDATA_WEIGHT', 5);
+export const PATTERN_PRIORITY_URL_LENGTH_DIVISOR = int('PATTERN_PRIORITY_URL_LENGTH_DIVISOR', 100);
+
+/** Critical-log priority scoring weights (ranking, higher first). */
+export const PATTERN_LOG_PRIORITY_ERROR = int('PATTERN_LOG_PRIORITY_ERROR', 20);
+export const PATTERN_LOG_PRIORITY_WARN = int('PATTERN_LOG_PRIORITY_WARN', 10);
+
+/** Signature-detection confidence reported per location/format. */
+export const PATTERN_SIGNATURE_CONFIDENCE_URL_PARAM = float(
+  'PATTERN_SIGNATURE_CONFIDENCE_URL_PARAM',
+  0.82,
+);
+export const PATTERN_SIGNATURE_CONFIDENCE_HEADER_HMAC = float(
+  'PATTERN_SIGNATURE_CONFIDENCE_HEADER_HMAC',
+  0.88,
+);
+export const PATTERN_SIGNATURE_CONFIDENCE_HEADER_JWT = float(
+  'PATTERN_SIGNATURE_CONFIDENCE_HEADER_JWT',
+  0.92,
+);
+export const PATTERN_SIGNATURE_CONFIDENCE_HEADER_CUSTOM = float(
+  'PATTERN_SIGNATURE_CONFIDENCE_HEADER_CUSTOM',
+  0.75,
+);
+export const PATTERN_SIGNATURE_CONFIDENCE_BODY_HMAC = float(
+  'PATTERN_SIGNATURE_CONFIDENCE_BODY_HMAC',
+  0.85,
+);
+export const PATTERN_SIGNATURE_CONFIDENCE_BODY_JWT = float(
+  'PATTERN_SIGNATURE_CONFIDENCE_BODY_JWT',
+  0.9,
+);
+export const PATTERN_SIGNATURE_CONFIDENCE_BODY_CUSTOM = float(
+  'PATTERN_SIGNATURE_CONFIDENCE_BODY_CUSTOM',
+  0.7,
+);
+export const PATTERN_SIGNATURE_CONFIDENCE_BODY_FORM = float(
+  'PATTERN_SIGNATURE_CONFIDENCE_BODY_FORM',
+  0.65,
+);
+
+/** Token-detection confidence reported per location/format. */
+export const PATTERN_TOKEN_CONFIDENCE_HEADER_JWT = float(
+  'PATTERN_TOKEN_CONFIDENCE_HEADER_JWT',
+  0.95,
+);
+export const PATTERN_TOKEN_CONFIDENCE_HEADER_BEARER = float(
+  'PATTERN_TOKEN_CONFIDENCE_HEADER_BEARER',
+  0.9,
+);
+export const PATTERN_TOKEN_CONFIDENCE_HEADER_CUSTOM = float(
+  'PATTERN_TOKEN_CONFIDENCE_HEADER_CUSTOM',
+  0.75,
+);
+export const PATTERN_TOKEN_CONFIDENCE_PARAM_JWT = float('PATTERN_TOKEN_CONFIDENCE_PARAM_JWT', 0.92);
+export const PATTERN_TOKEN_CONFIDENCE_PARAM_OAUTH = float(
+  'PATTERN_TOKEN_CONFIDENCE_PARAM_OAUTH',
+  0.88,
+);
+export const PATTERN_TOKEN_CONFIDENCE_PARAM_CUSTOM = float(
+  'PATTERN_TOKEN_CONFIDENCE_PARAM_CUSTOM',
+  0.7,
+);
+export const PATTERN_TOKEN_CONFIDENCE_BODY_JWT = float('PATTERN_TOKEN_CONFIDENCE_BODY_JWT', 0.93);
+export const PATTERN_TOKEN_CONFIDENCE_BODY_CUSTOM = float(
+  'PATTERN_TOKEN_CONFIDENCE_BODY_CUSTOM',
+  0.72,
+);
+export const PATTERN_TOKEN_CONFIDENCE_BODY_FORM = float('PATTERN_TOKEN_CONFIDENCE_BODY_FORM', 0.68);
+
+/** Minimum candidate length before a value is treated as a token. */
+export const PATTERN_TOKEN_MIN_LENGTH = int('PATTERN_TOKEN_MIN_LENGTH', 20);
 
 /* ================================================================== */
 /*  Miniapp unpacking                                                  */
