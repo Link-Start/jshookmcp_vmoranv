@@ -114,8 +114,12 @@ async function scanMemoryMacLldb(
   const pyFile = `/tmp/lldb_scan_${tag}.py`;
   const cmdFile = `/tmp/lldb_scan_${tag}.txt`;
 
+  // Keep caps in sync with the native fast-path above (MEMORY_SCAN_* constants).
   const pyScript = `
 import lldb, json, sys
+
+MAX_RESULTS = ${MEMORY_SCAN_MAX_RESULTS}
+MAX_REGION_SIZE = ${MEMORY_SCAN_REGION_MAX_BYTES}
 
 def __lldb_init_module(debugger, internal_dict):
     proc = debugger.GetSelectedTarget().GetProcess()
@@ -130,7 +134,7 @@ def __lldb_init_module(debugger, internal_dict):
             continue
         s = info.GetRegionBase()
         sz = info.GetRegionEnd() - s
-        if sz > 32 * 1024 * 1024:
+        if sz > MAX_REGION_SIZE:
             continue
         err = lldb.SBError()
         data = proc.ReadMemory(s, sz, err)
@@ -145,9 +149,9 @@ def __lldb_init_module(debugger, internal_dict):
                     break
             if match:
                 results.append(hex(s + j))
-                if len(results) >= 1000:
+                if len(results) >= MAX_RESULTS:
                     break
-        if len(results) >= 1000:
+        if len(results) >= MAX_RESULTS:
             break
     sys.stdout.write('SCAN_RESULT:' + json.dumps({
         'success': True,

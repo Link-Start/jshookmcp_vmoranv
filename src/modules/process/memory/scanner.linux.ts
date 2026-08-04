@@ -3,10 +3,7 @@
  */
 import { readFileSync, openSync, readSync, closeSync } from 'node:fs';
 import { logger } from '@utils/logger';
-import {
-  MEMORY_SCAN_MAX_RESULTS,
-  MEMORY_SCAN_REGION_MAX_BYTES,
-} from '@src/constants';
+import { MEMORY_SCAN_MAX_RESULTS, MEMORY_SCAN_REGION_MAX_BYTES } from '@src/constants';
 import type { MemoryScanResult } from '@modules/process/memory/types';
 import { parseProcMaps } from '@src/modules/process/memory/linux/mapsParser';
 import { findPatternInBuffer } from '@native/NativeMemoryManager.utils';
