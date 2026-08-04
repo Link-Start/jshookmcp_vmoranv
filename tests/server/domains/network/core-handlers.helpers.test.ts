@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ConsoleMonitor } from '@modules/monitor/ConsoleMonitor';
 import {
   ensureNetworkEnabled,
   buildNotEnabledResponse,
@@ -43,7 +44,7 @@ describe('core-handlers.helpers', () => {
       },
     };
     const result = await ensureNetworkEnabled(
-      { consoleMonitor: monitor },
+      { consoleMonitor: monitor as unknown as ConsoleMonitor },
       {
         autoEnable: true,
         enableExceptions: true,
@@ -61,7 +62,7 @@ describe('core-handlers.helpers', () => {
       },
     };
     const result = await ensureNetworkEnabled(
-      { consoleMonitor: monitor },
+      { consoleMonitor: monitor as unknown as ConsoleMonitor },
       {
         autoEnable: true,
         enableExceptions: false,
