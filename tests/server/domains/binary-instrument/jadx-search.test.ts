@@ -39,6 +39,7 @@ interface ParsedResponse {
   filesMatched?: number;
   matches?: unknown[];
   truncated?: boolean;
+  autoDecompiled?: boolean;
 }
 
 function makeHandlers(): BinaryInstrumentHandlers {

@@ -72,6 +72,35 @@ describe('constants env parsing', () => {
       (await loadConstants({ SEARCH_WORKFLOW_DOMAIN_BOOST_MULTIPLIER: '2.25' }))
         .SEARCH_WORKFLOW_DOMAIN_BOOST_MULTIPLIER,
     ).toBe(2.25);
+    // Per-tool boost multipliers: fallback to defaults, parse valid floats.
+    expect(
+      (await loadConstants({ SEARCH_EXTENSION_TOOL_BOOST_MULTIPLIER: undefined }))
+        .SEARCH_EXTENSION_TOOL_BOOST_MULTIPLIER,
+    ).toBe(1.12);
+    expect(
+      (await loadConstants({ SEARCH_EXTENSION_TOOL_BOOST_MULTIPLIER: 'abc' }))
+        .SEARCH_EXTENSION_TOOL_BOOST_MULTIPLIER,
+    ).toBe(1.12);
+    expect(
+      (await loadConstants({ SEARCH_EXTENSION_TOOL_BOOST_MULTIPLIER: '1.6' }))
+        .SEARCH_EXTENSION_TOOL_BOOST_MULTIPLIER,
+    ).toBe(1.6);
+    expect(
+      (await loadConstants({ SEARCH_WORKFLOW_TOOL_BOOST_MULTIPLIER: undefined }))
+        .SEARCH_WORKFLOW_TOOL_BOOST_MULTIPLIER,
+    ).toBe(1.35);
+    expect(
+      (await loadConstants({ SEARCH_WORKFLOW_TOOL_BOOST_MULTIPLIER: '2.0' }))
+        .SEARCH_WORKFLOW_TOOL_BOOST_MULTIPLIER,
+    ).toBe(2.0);
+    expect(
+      (await loadConstants({ SEARCH_WORKFLOW_LIST_TOOL_BOOST_MULTIPLIER: undefined }))
+        .SEARCH_WORKFLOW_LIST_TOOL_BOOST_MULTIPLIER,
+    ).toBe(1.25);
+    expect(
+      (await loadConstants({ SEARCH_WORKFLOW_LIST_TOOL_BOOST_MULTIPLIER: '0.9' }))
+        .SEARCH_WORKFLOW_LIST_TOOL_BOOST_MULTIPLIER,
+    ).toBe(0.9);
   });
 
   it('parses string env values with fallback semantics', async () => {

@@ -26,6 +26,26 @@ export const SEARCH_WORKFLOW_DOMAIN_BOOST_MULTIPLIER = float(
 );
 
 /**
+ * Per-tool score multipliers applied by the search engine while building
+ * ToolSearchEngine. Extension/plugin tools receive a flat boost so they
+ * surface alongside built-ins; `run_extension_workflow` and
+ * `list_extension_workflows` get an additional boost only while workflow
+ * runtimes are active at runtime.
+ */
+export const SEARCH_EXTENSION_TOOL_BOOST_MULTIPLIER = float(
+  'SEARCH_EXTENSION_TOOL_BOOST_MULTIPLIER',
+  1.12,
+);
+export const SEARCH_WORKFLOW_TOOL_BOOST_MULTIPLIER = float(
+  'SEARCH_WORKFLOW_TOOL_BOOST_MULTIPLIER',
+  1.35,
+);
+export const SEARCH_WORKFLOW_LIST_TOOL_BOOST_MULTIPLIER = float(
+  'SEARCH_WORKFLOW_LIST_TOOL_BOOST_MULTIPLIER',
+  1.25,
+);
+
+/**
  * When enabled, search_tools automatically activates domains of top
  * inactive results (with TTL). Default: true.
  */
