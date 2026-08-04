@@ -74,7 +74,8 @@ describe('core-handlers.helpers', () => {
 
   it('buildNotEnabledResponse matches the legacy not-enabled shape', () => {
     const response = buildNotEnabledResponse(false);
-    expect(response).toMatchObject({
+    const body = JSON.parse(response.content?.[0]?.text ?? '{}');
+    expect(body).toMatchObject({
       requests: [],
       total: 0,
     });
