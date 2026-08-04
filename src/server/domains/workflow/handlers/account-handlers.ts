@@ -120,7 +120,9 @@ export class AccountHandlers {
         }
       } else {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30_000);
+        // Non-cached path must honor the same env-tunable timeout as the
+        // cached path (previously hardcoded 30_000 bypassed the env knob).
+        const timeoutId = setTimeout(() => controller.abort(), WORKFLOW_JS_BUNDLE_FETCH_TIMEOUT_MS);
         try {
           const resp = await safeFetch(url, controller.signal);
           if (!resp.ok)
