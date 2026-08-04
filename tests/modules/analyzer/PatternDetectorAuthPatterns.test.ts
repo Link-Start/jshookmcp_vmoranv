@@ -83,6 +83,23 @@ describe('PatternDetectorAuthPatterns', () => {
     );
   });
 
+  it('marks URL params named jwt as JWT signature type', () => {
+    const patterns = detectSignaturePatternsInternal([
+      request({
+        url: `${TEST_URLS.api}?jwt_token=eyJhbGciOiJIUzI1NiJ9.abc.def`,
+      }),
+    ]);
+
+    expect(patterns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'JWT',
+          location: expect.stringContaining('(URL params)'),
+        }),
+      ]),
+    );
+  });
+
   it('logs URL parsing failures during signature detection instead of throwing', () => {
     const patterns = detectSignaturePatternsInternal([
       request({

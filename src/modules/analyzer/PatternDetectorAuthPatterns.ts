@@ -10,6 +10,7 @@ export function detectSignaturePatternsInternal(requests: NetworkRequest[]): Sig
     'signature',
     'sig',
     'hmac',
+    'jwt',
     'hash',
     'digest',
     'checksum',
