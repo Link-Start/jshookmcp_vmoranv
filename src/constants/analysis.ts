@@ -43,6 +43,13 @@ export const ANALYSIS_MAX_SAFE_COLLECTED_BYTES = int(
 export const ANALYSIS_MAX_SAFE_RESPONSE_BYTES = int('ANALYSIS_MAX_SAFE_RESPONSE_BYTES', 220 * 1024);
 
 /* ================================================================== */
+/*  LLM-assisted analysis (ai_suggest_exploits)                        */
+/* ================================================================== */
+
+/** Max tokens for exploit-suggestion LLM sampling (exploit JSON output). */
+export const ANALYSIS_EXPLOIT_LLM_MAX_TOKENS = int('ANALYSIS_EXPLOIT_LLM_MAX_TOKENS', 3_072);
+
+/* ================================================================== */
 /*  Quality scoring (modules/analyzer/QualityAnalyzer)                 */
 /* ================================================================== */
 

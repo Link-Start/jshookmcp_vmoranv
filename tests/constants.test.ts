@@ -226,6 +226,22 @@ describe('constants env parsing', () => {
     ).toBe(45_000);
   });
 
+  it('parses ANALYSIS_EXPLOIT_LLM_MAX_TOKENS env with 3072 fallback', async () => {
+    expect(
+      (await loadConstants({ ANALYSIS_EXPLOIT_LLM_MAX_TOKENS: undefined }))
+        .ANALYSIS_EXPLOIT_LLM_MAX_TOKENS,
+    ).toBe(3_072);
+    expect(
+      (await loadConstants({ ANALYSIS_EXPLOIT_LLM_MAX_TOKENS: '4096' }))
+        .ANALYSIS_EXPLOIT_LLM_MAX_TOKENS,
+    ).toBe(4_096);
+    // Invalid values fall back to the 3072 default
+    expect(
+      (await loadConstants({ ANALYSIS_EXPLOIT_LLM_MAX_TOKENS: 'abc' }))
+        .ANALYSIS_EXPLOIT_LLM_MAX_TOKENS,
+    ).toBe(3_072);
+  });
+
   it('parses MEMORY_SCAN_REGION_GUARD_BYTES env with 1 GiB fallback', async () => {
     expect(
       (await loadConstants({ MEMORY_SCAN_REGION_GUARD_BYTES: undefined }))
