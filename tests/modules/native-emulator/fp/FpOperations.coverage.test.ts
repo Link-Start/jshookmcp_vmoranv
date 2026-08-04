@@ -101,7 +101,7 @@ describe('FpContext — IDC flush + IDE trap (inlined slow paths)', () => {
     c.setFPCR(FZ);
     expect(c.fsqrt(DENORMAL)).toBe(0);
     expect(c.getFPSR() & (1 << FPSR_IDC)).toBe(1 << FPSR_IDC);
-    expect(c.getFPSR() & 32).toBe(0); // no undefined-bit pollution
+    expect(c.getFPSR() & (1 << 5)).toBe(0); // no undefined-bit pollution (RES0 bit 5)
   });
 
   it('every inlined op (FZ=1) sets the IDC flag on a denormal input', () => {
