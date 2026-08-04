@@ -1,7 +1,7 @@
 import type { ScriptManager } from '@server/domains/shared/modules';
 import type { DetailedDataManager } from '@utils/DetailedDataManager';
 import { argString, argNumber, argBool } from '@server/domains/shared/parse-args';
-import { SCRIPTS_MAX_CAP } from '@src/constants';
+import { DETAILED_DATA_SMART_THRESHOLD_BYTES, SCRIPTS_MAX_CAP } from '@src/constants';
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 import type { ToolResponse } from '@server/domains/shared/ResponseBuilder';
 
@@ -70,14 +70,16 @@ export class ScriptManagementHandlers {
           showingLines: `${actualStartLine}-${actualEndLine}`,
           content: previewContent,
           hint:
-            size > 51200
+            // Keep the hint threshold in sync with the smartHandle threshold
+            // (DETAILED_DATA_SMART_THRESHOLD_BYTES, env-configurable).
+            size > DETAILED_DATA_SMART_THRESHOLD_BYTES
               ? `Script is large (${(size / 1024).toFixed(1)}KB). Use startLine/endLine to get specific sections, or ` +
                 `set preview=false to get full source (will return detailId).`
               : 'Set preview=false to get full source',
         };
       }
 
-      return this.deps.detailedDataManager.smartHandle(script, 51200) as unknown as Record<
+      return this.deps.detailedDataManager.smartHandle(script) as unknown as Record<
         string,
         unknown
       >;

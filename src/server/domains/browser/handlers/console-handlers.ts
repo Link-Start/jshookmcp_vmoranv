@@ -34,7 +34,8 @@ export class ConsoleHandlers {
       const since = argNumber(args, 'since') as number;
 
       const logs = this.deps.consoleMonitor.getLogs({ type, limit, since });
-      const result = this.deps.detailedDataManager.smartHandle({ count: logs.length, logs }, 51200);
+      // Threshold follows DETAILED_DATA_SMART_THRESHOLD_BYTES (env-configurable).
+      const result = this.deps.detailedDataManager.smartHandle({ count: logs.length, logs });
       return result as Record<string, unknown>;
     });
   }

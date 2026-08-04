@@ -45,6 +45,11 @@ import type {
   RuleMode,
 } from '@modules/dart-inspector/types';
 import { ToolError } from '@errors/ToolError';
+import {
+  DART_CALL_GRAPH_MAX_EDGES,
+  DART_EXEC_MAX_STEPS,
+  DART_TRACE_MAX_STEPS,
+} from '@src/constants/dart';
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 import type { ToolResponse } from '@server/types';
 import {
@@ -529,7 +534,7 @@ export class DartInspectorHandlers {
   handleDartCallGraph(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => {
       const snapshot = await this.resolveSnapshot(args);
-      const maxEdges = argNumber(args, 'maxEdges') ?? 5000;
+      const maxEdges = argNumber(args, 'maxEdges') ?? DART_CALL_GRAPH_MAX_EDGES;
 
       const codes = snapshot.codeObjects;
 
@@ -669,7 +674,7 @@ export class DartInspectorHandlers {
       const functionAddress = argString(args, 'functionAddress');
       const functionName = argString(args, 'functionName');
       const argsRaw = args['args'];
-      const maxSteps = argNumber(args, 'maxSteps') ?? 100000;
+      const maxSteps = argNumber(args, 'maxSteps') ?? DART_EXEC_MAX_STEPS;
       const traceExecution = argBool(args, 'traceExecution') ?? false;
 
       if (!functionAddress && !functionName) {
@@ -751,7 +756,7 @@ export class DartInspectorHandlers {
 
       const functionAddress = argString(args, 'functionAddress');
       const functionName = argString(args, 'functionName');
-      const maxSteps = argNumber(args, 'maxSteps') ?? 1000;
+      const maxSteps = argNumber(args, 'maxSteps') ?? DART_TRACE_MAX_STEPS;
       const argsRaw = args['args'];
 
       if (!functionAddress && !functionName) {

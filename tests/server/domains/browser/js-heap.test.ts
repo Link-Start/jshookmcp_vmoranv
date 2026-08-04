@@ -117,7 +117,6 @@ describe('JSHeapSearchHandlers', () => {
         matchCount: 1,
         truncated: false,
       }),
-      51200,
     );
     expect(body.success).toBe(true);
     expect(body.matchCount).toBe(1);

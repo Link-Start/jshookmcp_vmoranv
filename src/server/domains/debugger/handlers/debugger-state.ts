@@ -1,6 +1,7 @@
 import type { DebuggerManager } from '@server/domains/shared/modules';
 import type { RuntimeInspector } from '@server/domains/shared/modules';
 import { ToolError } from '@errors/ToolError';
+import { DEBUGGER_WAIT_FOR_PAUSED_TIMEOUT_MS } from '@src/constants';
 import { argBool, argNumber } from '@server/domains/shared/parse-args';
 
 interface DebuggerStateHandlersDeps {
@@ -12,7 +13,7 @@ export class DebuggerStateHandlers {
   constructor(private deps: DebuggerStateHandlersDeps) {}
 
   async handleDebuggerWaitForPaused(args: Record<string, unknown>) {
-    const timeout = argNumber(args, 'timeout', 30000);
+    const timeout = argNumber(args, 'timeout', DEBUGGER_WAIT_FOR_PAUSED_TIMEOUT_MS);
 
     try {
       const pausedState = await this.deps.debuggerManager.waitForPaused(timeout);
@@ -107,7 +108,7 @@ export class DebuggerStateHandlers {
   }
 
   async handleDebuggerCaptureHit(args: Record<string, unknown>) {
-    const timeout = argNumber(args, 'timeout', 30000);
+    const timeout = argNumber(args, 'timeout', DEBUGGER_WAIT_FOR_PAUSED_TIMEOUT_MS);
     const includeScope = argBool(args, 'includeScope', true);
     const includeObjectProperties = argBool(args, 'includeObjectProperties', false);
     const maxDepth = argNumber(args, 'maxDepth', 1);

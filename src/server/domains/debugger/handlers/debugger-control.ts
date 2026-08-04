@@ -1,5 +1,6 @@
 import type { DebuggerManager } from '@server/domains/shared/modules';
 import type { RuntimeInspector } from '@server/domains/shared/modules';
+import { DEBUGGER_WAIT_FOR_PAUSED_TIMEOUT_MS } from '@src/constants/analysis';
 import { argNumber, argNumberRequired, argString } from '@server/domains/shared/parse-args';
 
 interface DebuggerControlHandlersDeps {
@@ -138,7 +139,7 @@ export class DebuggerControlHandlers {
     const lineNumber = argNumberRequired(args, 'lineNumber');
     const columnNumber = argNumber(args, 'columnNumber');
     const condition = argString(args, 'condition');
-    const timeout = argNumber(args, 'timeout', 30000);
+    const timeout = argNumber(args, 'timeout', DEBUGGER_WAIT_FOR_PAUSED_TIMEOUT_MS);
 
     if (!url && !scriptId) {
       throw new Error('Either url or scriptId must be provided');

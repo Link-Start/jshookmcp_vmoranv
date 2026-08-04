@@ -1,5 +1,6 @@
 import type { DebuggerManager } from '@server/domains/shared/modules';
 import type { RuntimeInspector } from '@server/domains/shared/modules';
+import { ToolError } from '@errors/ToolError';
 import { argString, argNumber, argBool } from '@server/domains/shared/parse-args';
 
 interface ScopeInspectionHandlersDeps {
@@ -46,6 +47,11 @@ export class ScopeInspectionHandlers {
         ],
       };
     } catch (error: unknown) {
+      // Let classified ToolErrors (including PrerequisiteError) propagate
+      // to MCPServer's unified error handler (same convention as debugger-state)
+      if (error instanceof ToolError) {
+        throw error;
+      }
       return {
         content: [
           {
@@ -105,6 +111,9 @@ export class ScopeInspectionHandlers {
         ],
       };
     } catch (error: unknown) {
+      if (error instanceof ToolError) {
+        throw error;
+      }
       return {
         content: [
           {

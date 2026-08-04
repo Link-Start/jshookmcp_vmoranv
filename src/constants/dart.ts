@@ -104,6 +104,15 @@ export const DART_PP_MAX_SLOTS = int('DART_PP_MAX_SLOTS', 4096);
 export const DART_PP_PREVIEW_BYTES = int('DART_PP_PREVIEW_BYTES', 64);
 export const DART_PP_MAX_DUMP_DURATION_MS = int('DART_PP_MAX_DUMP_DURATION_MS', 10_000);
 
+/**
+ * dart_call_function / dart_trace_execution emulator step budgets. These cap
+ * how many ARM64 instructions the Dart AOT executor may run before returning,
+ * so a pathological loop cannot hang the call. Shared by the tool schemas
+ * (default/maximum) and the handler fallbacks.
+ */
+export const DART_EXEC_MAX_STEPS = int('DART_EXEC_MAX_STEPS', 100_000);
+export const DART_TRACE_MAX_STEPS = int('DART_TRACE_MAX_STEPS', 1_000);
+
 /* ================================================================== */
 /*  Dart snapshot session cache                                         */
 /* ================================================================== */
@@ -123,3 +132,11 @@ export const DART_PP_MAX_DUMP_DURATION_MS = int('DART_PP_MAX_DUMP_DURATION_MS', 
 export const DART_SESSION_IDLE_TTL_MS = int('DART_SESSION_IDLE_TTL_MS', 300_000);
 export const DART_SESSION_SWEEP_MS = int('DART_SESSION_SWEEP_MS', 60_000);
 export const DART_MAX_SESSIONS = int('DART_MAX_SESSIONS', 32);
+
+/**
+ * dart_call_graph cap on emitted edges. Pool-slot scanning can produce one
+ * candidate edge per slot; the cap keeps the response bounded against
+ * pathological snapshots with tens of thousands of slots (excess sets
+ * `truncated=true`).
+ */
+export const DART_CALL_GRAPH_MAX_EDGES = int('DART_CALL_GRAPH_MAX_EDGES', 5000);

@@ -2,7 +2,7 @@ import type { PageController } from '@server/domains/shared/modules/collector';
 import type { FrameResolveOptions } from '@modules/collector/PageController';
 import type { DetailedDataManager } from '@utils/DetailedDataManager';
 import { resolveScreenshotOutputPath } from '@utils/outputPaths';
-import { PAGE_OPERATION_TIMEOUT_MS } from '@src/constants/browser';
+import { PAGE_EVAL_MAX_SIZE_BYTES, PAGE_OPERATION_TIMEOUT_MS } from '@src/constants/browser';
 import {
   argString,
   argNumber,
@@ -80,7 +80,7 @@ export class PageEvaluationHandlers {
     try {
       const code = this.resolveEvaluationSource(args);
       const autoSummarize = argBool(args, 'autoSummarize', true);
-      const maxSize = argNumber(args, 'maxSize', 51200);
+      const maxSize = argNumber(args, 'maxSize', PAGE_EVAL_MAX_SIZE_BYTES);
       const fieldFilterArg = argStringArray(args, 'fieldFilter');
       const doStripBase64 = argBool(args, 'stripBase64', false);
       const frameUrl = argString(args, 'frameUrl');

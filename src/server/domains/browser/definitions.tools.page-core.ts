@@ -1,4 +1,5 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { PAGE_EVAL_MAX_SIZE_BYTES } from '@src/constants/browser';
 import { tool } from '@server/registry/tool-builder';
 import { PAGE_NAVIGATION_WAIT_UNTIL_VALUES } from '@modules/browser/navigation-wait-until';
 
@@ -122,7 +123,7 @@ export const browserPageCoreTools: Tool[] = [
       .string('expression', 'Alias of code')
       .boolean('autoSummarize', 'Auto-summarize large results', { default: true })
       .number('maxSize', 'Max result size in bytes before summarizing', {
-        default: 51200,
+        default: PAGE_EVAL_MAX_SIZE_BYTES,
         minimum: 1024,
         maximum: 10485760,
       })

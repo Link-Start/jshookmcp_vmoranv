@@ -41,6 +41,13 @@ export const PAGE_OPERATION_TIMEOUT_MS = int('PAGE_OPERATION_TIMEOUT_MS', 30_000
  */
 export const PAGE_EVALUATE_TIMEOUT_MS = int('PAGE_EVALUATE_TIMEOUT_MS', 30_000);
 
+/**
+ * Result-size threshold (bytes) beyond which evaluate results are summarized
+ * by the DetailedDataManager (50 KiB default — large enough for most
+ * structured payloads, small enough to keep responses bounded).
+ */
+export const PAGE_EVAL_MAX_SIZE_BYTES = int('PAGE_EVAL_MAX_SIZE_BYTES', 51200);
+
 /* ================================================================== */
 /*  CDP session                                                        */
 /* ================================================================== */

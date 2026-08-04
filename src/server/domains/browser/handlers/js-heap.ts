@@ -135,7 +135,9 @@ export class JSHeapSearchHandlers {
               : 'No matches found. The value may be encrypted, compressed, or stored in a non-string form.',
         };
 
-        return R.ok().build(this.detailedDataManager.smartHandle(result, 51200) as any);
+        // Threshold comes from DETAILED_DATA_SMART_THRESHOLD_BYTES (configurable
+        // via env) — do not pass a hard-coded size here, or env config is bypassed.
+        return R.ok().build(this.detailedDataManager.smartHandle(result) as any);
       } catch (error) {
         logger.error('[js_heap_search] Error:', error);
         return R.fail(error).build();

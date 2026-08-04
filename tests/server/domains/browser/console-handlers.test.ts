@@ -50,16 +50,13 @@ describe('ConsoleHandlers', () => {
       limit: 25,
       since: 1000,
     });
-    expect(detailedDataManager.smartHandle).toHaveBeenCalledWith(
-      {
-        count: 2,
-        logs: [
-          { type: 'error', text: 'boom' },
-          { type: 'warn', text: 'careful' },
-        ],
-      },
-      51200,
-    );
+    expect(detailedDataManager.smartHandle).toHaveBeenCalledWith({
+      count: 2,
+      logs: [
+        { type: 'error', text: 'boom' },
+        { type: 'warn', text: 'careful' },
+      ],
+    });
     expect(body.success).toBe(true);
     expect(body.wrapped).toEqual({
       count: 2,

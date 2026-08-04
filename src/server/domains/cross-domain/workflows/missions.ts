@@ -3,6 +3,8 @@ export interface CrossDomainWorkflowStep {
   args: Record<string, unknown>;
 }
 
+import { DEBUGGER_WAIT_FOR_PAUSED_TIMEOUT_MS } from '@src/constants/analysis';
+
 export interface CrossDomainWorkflowDefinition {
   id: string;
   displayName: string;
@@ -138,7 +140,7 @@ export const WORKFLOWS: Record<string, CrossDomainWorkflowDefinition> = {
     steps: [
       { tool: 'debugger_lifecycle', args: { action: 'enable' } },
       { tool: 'breakpoint', args: { action: 'set', type: 'code' } },
-      { tool: 'debugger_wait_for_paused', args: { timeout: 30000 } },
+      { tool: 'debugger_wait_for_paused', args: { timeout: DEBUGGER_WAIT_FOR_PAUSED_TIMEOUT_MS } },
       { tool: 'get_call_stack', args: {} },
       { tool: 'get_scope_variables_enhanced', args: { includeObjectProperties: true } },
       { tool: 'js_heap_search', args: { pattern: '${input.searchTerm}' } },
