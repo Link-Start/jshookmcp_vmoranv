@@ -2,6 +2,7 @@ import type { PageController } from '@server/domains/shared/modules/collector';
 import type { FrameResolveOptions } from '@modules/collector/PageController';
 import type { DetailedDataManager } from '@utils/DetailedDataManager';
 import { resolveScreenshotOutputPath } from '@utils/outputPaths';
+import { PAGE_OPERATION_TIMEOUT_MS } from '@src/constants/browser';
 import {
   argString,
   argNumber,
@@ -317,7 +318,7 @@ export class PageEvaluationHandlers {
         const page = (await this.deps.getCamoufoxPage()) as CamoufoxPageLike;
 
         try {
-          await page.waitForSelector(selector, { timeout: timeout || 30000 });
+          await page.waitForSelector(selector, { timeout: timeout || PAGE_OPERATION_TIMEOUT_MS });
 
           const element = await page.evaluate((sel: string) => {
             const el = document.querySelector(sel);
