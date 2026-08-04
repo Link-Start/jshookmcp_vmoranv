@@ -40,6 +40,7 @@ import { getReverseEngineeringConfig } from '@utils/reverseEngineeringConfig';
 import { nativeCallFailure, nativeDiagnostics } from './handler-call';
 import { formatOpcodeInput, parseOpcodeInput, parseProgramCounter } from './handler-disasm';
 import { buildJavaFieldValue, buildJavaMockImpl } from './handler-java';
+import { decodeLiteVmWord, LITEVM_KNOWN_DATA } from './handler-litevm';
 import { ensureRawMemorySize, rawMemoryLimit, toUint8 } from './handler-memory';
 import { persistTraceArtifact, traceFilterMatch, traceRow, type TraceMode } from './handler-trace';
 
@@ -1806,19 +1807,7 @@ export class NativeEmulatorHandlers {
       const word = argNumber(args, 'word');
       if (word === undefined) throw new Error('word (u32) is required');
       const w = word >>> 0; // treat as unsigned 32-bit
-
-      // LiteVM opcode format (matching Python sign_algorithm.py Opcode class):
-      // Bits[4:0]   = group (0-7)
-      // Bits[8:5]   = sub (4 bits)
-      // Bits[13:9]  = a1 (5 bits)
-      // Bits[26:14] = imm (13 bits, signed)
-      // Bits[31:27] = fl (5 bits)
-      const group = w & 0x1f;
-      const sub = (w >>> 5) & 0xf;
-      const a1 = (w >>> 9) & 0x1f;
-      const rawImm = (w >>> 14) & 0x1fff;
-      const imm = rawImm < 0x1000 ? rawImm : rawImm - 0x2000; // sign-extend 13-bit
-      const fl = (w >>> 27) & 0x1f;
+      const d = decodeLiteVmWord(w);
 
       // Group-specific fields
       const g3_sel = (w >>> 5) & 0xf;
@@ -1835,51 +1824,20 @@ export class NativeEmulatorHandlers {
       const rawOff = (w >>> 10) & 0x1fff;
       const g7_offset = rawOff < 0x1000 ? rawOff : rawOff - 0x2000;
 
-      // ASCII check — if all 4 bytes are printable ASCII, it's data not an opcode
-      const b0 = w & 0xff,
-        b1 = (w >>> 8) & 0xff,
-        b2 = (w >>> 16) & 0xff,
-        b3 = (w >>> 24) & 0xff;
-      const isAscii =
-        b0 >= 0x20 &&
-        b0 < 0x7f &&
-        b1 >= 0x20 &&
-        b1 < 0x7f &&
-        b2 >= 0x20 &&
-        b2 < 0x7f &&
-        b3 >= 0x20 &&
-        b3 < 0x7f;
-      const knownData = [
-        0x01000000, 0x02000000, 0x04000000, 0x08000000, 0x10000000, 0x20000000, 0x40000000,
-        0x80000000, 0xfffe8d80, 0xfffeaa44,
-      ];
-      const valid = group <= 7 && !isAscii && !knownData.includes(w >>> 0);
-
-      const handlerNames = [
-        'G0:SET',
-        'G1:STORE',
-        'G2:ARITH',
-        'G3',
-        'G4',
-        'G5:ADVANCE',
-        'G6:TABLE',
-        'G7:COND_JMP',
-      ];
-
       return {
         word: `0x${w.toString(16).padStart(8, '0').toUpperCase()}`,
-        group,
-        sub,
-        a1,
-        imm,
-        fl,
-        ...(group === 3 ? { g3_sel, g3_f1, g3_f2, g3_f3 } : {}),
-        ...(group === 4 ? { g4_lsr, g4_ctx4 } : {}),
-        ...(group === 5 ? { g5_imm } : {}),
-        ...(group === 6 ? { g6_a1, g6_sub } : {}),
-        ...(group === 7 ? { g7_operand, g7_offset } : {}),
-        valid,
-        handler: handlerNames[group] ?? `G${group}`,
+        group: d.group,
+        sub: d.sub,
+        a1: d.a1,
+        imm: d.imm,
+        fl: d.fl,
+        ...(d.group === 3 ? { g3_sel, g3_f1, g3_f2, g3_f3 } : {}),
+        ...(d.group === 4 ? { g4_lsr, g4_ctx4 } : {}),
+        ...(d.group === 5 ? { g5_imm } : {}),
+        ...(d.group === 6 ? { g6_a1, g6_sub } : {}),
+        ...(d.group === 7 ? { g7_operand, g7_offset } : {}),
+        valid: d.valid,
+        handler: d.handler,
       };
     });
   }
@@ -1895,44 +1853,6 @@ export class NativeEmulatorHandlers {
       const format = argString(args, 'outputFormat', 'summary');
       if (addr === undefined) throw new Error('address is required');
 
-      const KNOWN_DATA = new Set([
-        0x01000000, 0x02000000, 0x04000000, 0x08000000, 0x10000000, 0x20000000, 0x40000000,
-        0x80000000, 0xfffe8d80, 0xfffeaa44,
-      ]);
-      const decodeWord = (w: number) => {
-        const group = w & 0x1f;
-        const sub = (w >>> 5) & 0xf;
-        const a1 = (w >>> 9) & 0x1f;
-        const rawImm = (w >>> 14) & 0x1fff;
-        const imm = rawImm < 0x1000 ? rawImm : rawImm - 0x2000;
-        const fl = (w >>> 27) & 0x1f;
-        const b0 = w & 0xff,
-          b1 = (w >>> 8) & 0xff,
-          b2 = (w >>> 16) & 0xff,
-          b3 = (w >>> 24) & 0xff;
-        const isAscii =
-          b0 >= 0x20 &&
-          b0 < 0x7f &&
-          b1 >= 0x20 &&
-          b1 < 0x7f &&
-          b2 >= 0x20 &&
-          b2 < 0x7f &&
-          b3 >= 0x20 &&
-          b3 < 0x7f;
-        const valid = group <= 7 && !isAscii && !KNOWN_DATA.has(w >>> 0);
-        const names = [
-          'G0:SET',
-          'G1:STORE',
-          'G2:ARITH',
-          'G3',
-          'G4',
-          'G5:ADVANCE',
-          'G6:TABLE',
-          'G7:COND_JMP',
-        ];
-        return { group, sub, a1, imm, fl, valid, handler: names[group] ?? `G${group}` };
-      };
-
       // Read u32 words from guest memory
       const bytes = session.emulator.readGuestMemory(addr, count * 4);
       const words: number[] = [];
@@ -1946,13 +1866,22 @@ export class NativeEmulatorHandlers {
         );
       }
 
-      // Decode all
-      const decoded = words.map((w, i) => ({
-        index: i,
-        offset: addr + i * 4,
-        word: `0x${w.toString(16).padStart(8, '0').toUpperCase()}`,
-        ...decodeWord(w),
-      }));
+      // Decode all (pick the shared fields; keep the legacy output shape)
+      const decoded = words.map((w, i) => {
+        const d = decodeLiteVmWord(w);
+        return {
+          index: i,
+          offset: addr + i * 4,
+          word: `0x${w.toString(16).padStart(8, '0').toUpperCase()}`,
+          group: d.group,
+          sub: d.sub,
+          a1: d.a1,
+          imm: d.imm,
+          fl: d.fl,
+          valid: d.valid,
+          handler: d.handler,
+        };
+      });
 
       // Format output
       const validOps = decoded.filter((d) => d.valid);
@@ -2078,45 +2007,6 @@ export class NativeEmulatorHandlers {
       const bytesPerWord = wordSize === 'u32' ? 4 : 8;
       const bytes = session.emulator.readGuestMemory(addr, count * bytesPerWord);
 
-      // Decode helpers
-      const knownData = new Set([
-        0x01000000, 0x02000000, 0x04000000, 0x08000000, 0x10000000, 0x20000000, 0x40000000,
-        0x80000000, 0xfffe8d80, 0xfffeaa44,
-      ]);
-      const decodeOp = (w: number) => {
-        const g = w & 0x1f;
-        const s = (w >>> 5) & 0xf;
-        const a = (w >>> 9) & 0x1f;
-        const ri = (w >>> 14) & 0x1fff;
-        const imm = ri < 0x1000 ? ri : ri - 0x2000;
-        const fl = (w >>> 27) & 0x1f;
-        const b0 = w & 0xff,
-          b1 = (w >>> 8) & 0xff,
-          b2 = (w >>> 16) & 0xff,
-          b3 = (w >>> 24) & 0xff;
-        const ascii =
-          b0 >= 0x20 &&
-          b0 < 0x7f &&
-          b1 >= 0x20 &&
-          b1 < 0x7f &&
-          b2 >= 0x20 &&
-          b2 < 0x7f &&
-          b3 >= 0x20 &&
-          b3 < 0x7f;
-        const valid = g <= 7 && !ascii && !knownData.has(w >>> 0);
-        const names = ['G0', 'G1:STORE', 'G2', 'G3', 'G4', 'G5', 'G6', 'G7'];
-        return {
-          group: g,
-          sub: s,
-          a1: a,
-          imm,
-          fl,
-          valid,
-          handler: names[g] ?? `G${g}`,
-          isAscii: ascii,
-        };
-      };
-
       const rows: Array<Record<string, unknown>> = [];
       for (let i = 0; i < count; i++) {
         const off = i * bytesPerWord;
@@ -2143,10 +2033,10 @@ export class NativeEmulatorHandlers {
         // Annotations for u32 mode
         if (wordSize === 'u32') {
           const w = Number(val);
-          const op = decodeOp(w);
+          const op = decodeLiteVmWord(w);
           if (op.valid) row.tag = 'OP';
           else if (op.isAscii) row.tag = 'ASCII';
-          else if (knownData.has(w >>> 0)) row.tag = 'BITMASK';
+          else if (LITEVM_KNOWN_DATA.has(w >>> 0)) row.tag = 'BITMASK';
           else row.tag = 'DATA';
           row.decode = op;
         } else {
