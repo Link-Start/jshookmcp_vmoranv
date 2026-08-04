@@ -25,7 +25,6 @@ import { join } from 'node:path';
 import { logger } from '@utils/logger';
 import { getArtifactDir } from '@utils/artifacts';
 import {
-  isValidFunctionName,
   normalizeFunctionName,
   parseStatusLine,
   shouldWrapAsObjectMember,
