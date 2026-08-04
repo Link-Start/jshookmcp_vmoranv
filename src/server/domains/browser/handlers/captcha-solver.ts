@@ -18,6 +18,7 @@ import {
   CAPTCHA_MAX_TIMEOUT_MS,
   CAPTCHA_MAX_RETRIES,
   CAPTCHA_DEFAULT_RETRIES,
+  CAPTCHA_HOOK_TIMEOUT_MAX_MS,
 } from '@src/constants';
 
 // ── Helpers ──
@@ -544,7 +545,10 @@ export async function handleWidgetChallengeSolve(
   const mode = normalizeSolverMode(args.mode ?? args.provider ?? process.env.CAPTCHA_PROVIDER);
   const externalService = resolveExternalServiceName(args);
   const apiKey = argString(args, 'apiKey', '') || process.env.CAPTCHA_API_KEY || '';
-  const timeoutMs = Math.min(Math.max(argNumber(args, 'timeoutMs', 120_000), 5_000), 600_000);
+  const timeoutMs = Math.min(
+    Math.max(argNumber(args, 'timeoutMs', CAPTCHA_DEFAULT_TIMEOUT_MS), CAPTCHA_MIN_TIMEOUT_MS),
+    CAPTCHA_MAX_TIMEOUT_MS,
+  );
   const injectConfig = normalizeTokenInjectionConfig(args);
   const taskKind = resolveTaskKind(args.taskKind, 'widget');
   const siteKey = argString(args, 'siteKey');
@@ -554,7 +558,7 @@ export async function handleWidgetChallengeSolve(
     if (!siteKey) {
       return R.fail('Widget solving requires an explicit siteKey.').build();
     }
-    const hookTimeoutMs = Math.min(timeoutMs, 30_000);
+    const hookTimeoutMs = Math.min(timeoutMs, CAPTCHA_HOOK_TIMEOUT_MAX_MS);
     const callbackName = argString(args, 'callbackName', '').trim();
     if (!callbackName) {
       return R.fail('Hook mode requires an explicit callbackName.').build();
