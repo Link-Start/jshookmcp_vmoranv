@@ -3,7 +3,12 @@ import type { ExecFileOptionsWithStringEncoding } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { ToolError } from '@errors/ToolError';
-import { ADB_DEFAULT_TIMEOUT_MS, ADB_SHELL_TIMEOUT_MS } from '@src/constants';
+import {
+  ADB_DEFAULT_TIMEOUT_MS,
+  ADB_FILE_TRANSFER_TIMEOUT_MS,
+  ADB_MAX_BUFFER_BYTES,
+  ADB_SHELL_TIMEOUT_MS,
+} from '@src/constants';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,7 +17,7 @@ const DEFAULT_NETWORK_PORT = 5555;
 
 const EXEC_OPTIONS: ExecFileOptionsWithStringEncoding = {
   encoding: 'utf8',
-  maxBuffer: 16 * 1024 * 1024,
+  maxBuffer: ADB_MAX_BUFFER_BYTES,
   windowsHide: true,
 };
 
@@ -257,16 +262,22 @@ export class ADBClient {
 
   async install(deviceId: string, apkPath: string): Promise<void> {
     await this.ensureLocalFileExists(apkPath);
-    await this.runAdb(['-s', deviceId, 'install', '-r', apkPath], 180_000);
+    await this.runAdb(['-s', deviceId, 'install', '-r', apkPath], ADB_FILE_TRANSFER_TIMEOUT_MS);
   }
 
   async pull(deviceId: string, remotePath: string, localPath: string): Promise<void> {
-    await this.runAdb(['-s', deviceId, 'pull', remotePath, localPath], 180_000);
+    await this.runAdb(
+      ['-s', deviceId, 'pull', remotePath, localPath],
+      ADB_FILE_TRANSFER_TIMEOUT_MS,
+    );
   }
 
   async push(deviceId: string, localPath: string, remotePath: string): Promise<void> {
     await this.ensureLocalFileExists(localPath);
-    await this.runAdb(['-s', deviceId, 'push', localPath, remotePath], 180_000);
+    await this.runAdb(
+      ['-s', deviceId, 'push', localPath, remotePath],
+      ADB_FILE_TRANSFER_TIMEOUT_MS,
+    );
   }
 
   async forward(deviceId: string, local: string, remote: string): Promise<void> {
