@@ -112,6 +112,28 @@ export const SEARCH_SYNONYM_EXPANSION_LIMIT = int('SEARCH_SYNONYM_EXPANSION_LIMI
 export const SEARCH_PARAM_TOKEN_WEIGHT = float('SEARCH_PARAM_TOKEN_WEIGHT', 1.1);
 
 /**
+ * Token field weights for the BM25 inverted index. Relative ordering is
+ * significant: name tokens rank above domain tokens, which rank above
+ * description tokens. Parameter-name and scene keywords have their own
+ * weights (SEARCH_PARAM_TOKEN_WEIGHT / SEARCH_SCENE_KEYWORD_WEIGHT). All
+ * weights are enforced as floors (Math.max) during index construction.
+ *
+ * @env SEARCH_NAME_TOKEN_WEIGHT
+ * @default 3
+ */
+export const SEARCH_NAME_TOKEN_WEIGHT = float('SEARCH_NAME_TOKEN_WEIGHT', 3);
+/**
+ * @env SEARCH_DOMAIN_TOKEN_WEIGHT
+ * @default 2
+ */
+export const SEARCH_DOMAIN_TOKEN_WEIGHT = float('SEARCH_DOMAIN_TOKEN_WEIGHT', 2);
+/**
+ * @env SEARCH_DESC_TOKEN_WEIGHT
+ * @default 1
+ */
+export const SEARCH_DESC_TOKEN_WEIGHT = float('SEARCH_DESC_TOKEN_WEIGHT', 1);
+
+/**
  * Generic technology scene keywords — indexed per-tool with this weight
  * in the BM25 inverted index. Keywords describe abstract technical
  * capabilities ("parameter extraction", "bytecode tracing") without

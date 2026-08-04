@@ -180,10 +180,13 @@ export async function handleDeoptTrace(
       });
     }
 
-    // Wait for the collection window. We resolve after durationMs; no orphan
-    // timer is left running (the previous setTimeout was never cleared).
+    // Wait for the full collection window. durationMs is already clamped to
+    // the [100, 60000] schema bounds above; the previous hardcoded 10s cap
+    // silently shortened requested windows (e.g. durationMs=60000 waited only
+    // 10s, contradicting both the schema maximum and the comment below). No
+    // orphan timer is left running (the previous setTimeout was never cleared).
     const elapsed = Date.now() - startTime;
-    const remaining = Math.max(0, Math.min(durationMs, 10000) - elapsed);
+    const remaining = Math.max(0, durationMs - elapsed);
     if (remaining > 0) {
       await new Promise<void>((resolve) => setTimeout(resolve, remaining));
     }

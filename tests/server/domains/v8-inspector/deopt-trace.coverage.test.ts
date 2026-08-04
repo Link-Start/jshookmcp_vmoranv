@@ -65,14 +65,9 @@ describe('handleDeoptTrace — console-based collection', () => {
             }),
           );
         }
-        if (opts.nativesAvailable) {
-          return { result: { value: true } };
-        }
-        // First evaluate is the natives-support probe → report unavailable.
-        if (/DebugTrace/.test(method) && !opts.nativesAvailable) {
-          return { result: { value: false } };
-        }
-        return { result: { value: true } };
+        // The natives-support probe (and every later evaluate) reports the
+        // target's capability; false targets bail out before the wait window.
+        return { result: { value: opts.nativesAvailable } };
       }
       return {};
     });
@@ -113,5 +108,21 @@ describe('handleDeoptTrace — console-based collection', () => {
     expect(rNeg).toMatchObject({ mode: expect.any(String) });
     const rHuge = await handleDeoptTrace({ durationMs: 9_999_999 }, async () => page);
     expect(rHuge).toMatchObject({ mode: expect.any(String) });
+  });
+
+  it('waits the full requested window (no hidden 10s cap)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { session } = makeSession({ nativesAvailable: true });
+      const page = { createCDPSession: async () => session };
+      const promise = handleDeoptTrace({ durationMs: 60000, maxEvents: 5 }, async () => page);
+      await vi.advanceTimersByTimeAsync(60000);
+      const r = await promise;
+      expect(r).toMatchObject({ success: true, mode: 'natives' });
+      // A 60s request must collect for ~60s, not the old hardcoded 10s cap.
+      expect((r as { durationMs: number }).durationMs).toBeGreaterThanOrEqual(59900);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
