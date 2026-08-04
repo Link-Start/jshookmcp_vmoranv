@@ -6,6 +6,9 @@ import type { CodeCompressor } from '@modules/collector/CodeCompressor';
 export class DetailedDataManagerAdapter implements CacheInstance {
   name = 'DetailedDataManager';
 
+  /** Rough per-entry byte estimate for in-memory entries (avg ~50KB each). */
+  private static readonly ESTIMATED_AVG_ENTRY_BYTES = 50 * 1024;
+
   constructor(private manager: DetailedDataManager) {}
 
   getStats(): CacheStats {
@@ -25,7 +28,7 @@ export class DetailedDataManagerAdapter implements CacheInstance {
   }
 
   private estimateSize(entries: number): number {
-    return entries * 50 * 1024;
+    return entries * DetailedDataManagerAdapter.ESTIMATED_AVG_ENTRY_BYTES;
   }
 }
 

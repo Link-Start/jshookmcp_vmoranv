@@ -29,6 +29,20 @@ describe('CacheAdapters', () => {
     });
   });
 
+  it('reports zero estimated size for an empty DetailedDataManager', () => {
+    const manager = {
+      getStats: vi.fn(() => ({
+        cacheSize: 0,
+        defaultTTLSeconds: 60,
+        maxCacheSize: 100,
+      })),
+      clear: vi.fn(),
+    };
+
+    const adapter = new DetailedDataManagerAdapter(manager as any);
+    expect(adapter.getStats().size).toBe(0);
+  });
+
   it('delegates clear to DetailedDataManager', () => {
     const manager = {
       getStats: vi.fn(() => ({
