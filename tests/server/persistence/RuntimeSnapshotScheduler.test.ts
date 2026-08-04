@@ -3,6 +3,7 @@ import { RuntimeSnapshotScheduler } from '@server/persistence/RuntimeSnapshotSch
 import { StateBoardStore } from '@server/domains/coordination/state-board/handlers/shared';
 import { SharedStateBoardHandlers } from '@server/domains/coordination/state-board';
 import { ReverseEvidenceGraph, resetIdCounter } from '@server/evidence/ReverseEvidenceGraph';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -167,6 +168,45 @@ describe('RuntimeSnapshotScheduler', () => {
     await scheduler.start();
     scheduler.dispose();
     // Should not throw or hang
+  });
+
+  it('flushes dirty sources after the default debounce window', async () => {
+    const scheduler = new RuntimeSnapshotScheduler();
+    const store = new StateBoardStore();
+    const filePath = resolve(tmpDir, 'debounce-default', 'current.json');
+    scheduler.register(filePath, store);
+    store.state.set('ns:key', {
+      key: 'key',
+      value: 'hello',
+      namespace: 'ns',
+      createdAt: 1000,
+      updatedAt: 1000,
+      version: 1,
+    });
+    store.recordChange('ns:key', {
+      id: '1',
+      key: 'key',
+      namespace: 'ns',
+      action: 'set',
+      newValue: 'hello',
+      timestamp: Date.now(),
+    });
+    expect(store.isPersistDirty()).toBe(true);
+
+    scheduler.notifyDirty();
+
+    // Before the default debounce window elapses, no snapshot is written.
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
+    await expect(readFile(filePath, 'utf-8')).rejects.toThrow();
+
+    // After the default debounce window (2000 ms), the snapshot is persisted.
+    await waitForCondition(() => existsSync(filePath), 5000);
+    scheduler.dispose();
+
+    const data = JSON.parse(await readFile(filePath, 'utf-8'));
+    expect(data.schemaVersion).toBe(1);
+    expect(data.entries).toHaveLength(1);
+    expect(store.isPersistDirty()).toBe(false);
   });
 });
 

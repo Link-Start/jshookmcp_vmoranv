@@ -97,7 +97,8 @@ export interface DomainManifest<
 
   /**
    * Cross-domain tool dependency declarations.
-   * Used by AffinityGraph to add explicit edges beyond prefix-group affinity.
+   * Consumed by ToolRouter.intent (dynamic cross-domain workflow detection) and
+   * available for affinity-graph explicit edges beyond prefix-group affinity.
    */
   readonly toolDependencies?: ReadonlyArray<{
     /** Source tool in this domain. */

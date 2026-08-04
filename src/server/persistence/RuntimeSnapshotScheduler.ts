@@ -15,6 +15,11 @@ interface SnapshotSourceEntry {
   filePath: string;
 }
 
+/** Default debounce window (ms) before persisting dirty snapshots after notifyDirty(). */
+const DEFAULT_DEBOUNCE_MS = 2000;
+/** Default periodic flush interval (ms) for dirty snapshots while the scheduler is started. */
+const DEFAULT_PERIODIC_MS = 30_000;
+
 export class RuntimeSnapshotScheduler {
   private readonly sources: SnapshotSourceEntry[] = [];
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -25,8 +30,8 @@ export class RuntimeSnapshotScheduler {
   private started = false;
 
   constructor(options?: { debounceMs?: number; periodicMs?: number }) {
-    this.debounceMs = options?.debounceMs ?? 2000;
-    this.periodicMs = options?.periodicMs ?? 30_000;
+    this.debounceMs = options?.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.periodicMs = options?.periodicMs ?? DEFAULT_PERIODIC_MS;
   }
 
   register(filePath: string, source: SnapshotSource): void {
