@@ -12,13 +12,7 @@
 import { writeFile } from 'node:fs/promises';
 import { resolveArtifactPath } from '@utils/artifacts';
 import type { StreamingSharedState, TextToolResponse } from './shared';
-import {
-  asJson,
-  parseBooleanArg,
-  parseNumberArg,
-  parseOptionalStringArg,
-  compileRegex,
-} from './shared';
+import { parseBooleanArg, parseNumberArg, parseOptionalStringArg, compileRegex } from './shared';
 import {
   evaluateWithTimeout,
   evaluateOnNewDocumentWithTimeout,
@@ -31,6 +25,7 @@ import {
   STREAMING_QUERY_LIMIT_MAX,
   WS_PAYLOAD_PREVIEW_LIMIT,
 } from '@src/constants/streaming';
+import { asJsonResponse } from '@server/domains/shared/response';
 
 type ExportFormat = 'json' | 'ndjson';
 
@@ -367,7 +362,10 @@ export class FetchStreamHandlers {
     if (urlFilterRaw) {
       const compiled = compileRegex(urlFilterRaw);
       if (compiled.error)
-        return asJson({ success: false, error: `Invalid urlFilter regex: ${compiled.error}` });
+        return asJsonResponse({
+          success: false,
+          error: `Invalid urlFilter regex: ${compiled.error}`,
+        });
     }
     const persistent = args.persistent === true;
     const result = await this.enable(maxEvents, urlFilterRaw, { persistent });
@@ -376,10 +374,10 @@ export class FetchStreamHandlers {
       result !== null &&
       (result as { success?: unknown }).success === false
     ) {
-      return asJson(result);
+      return asJsonResponse(result);
     }
     this.s.fetchStreamConfig = { maxEvents, urlFilterRaw };
-    return asJson(result);
+    return asJsonResponse(result);
   }
 
   async handleFetchStreamMonitorDisable(_args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -401,7 +399,7 @@ export class FetchStreamHandlers {
       },
       { markerKey: FETCH_STREAM_DISABLED_MARKER },
     );
-    return asJson({
+    return asJsonResponse({
       success: true,
       message: 'fetch-stream monitor disabled (wrapper remains installed; capture paused)',
     });
@@ -497,7 +495,7 @@ export class FetchStreamHandlers {
       },
       { sourceUrl, eventType, limit, offset, fullData },
     );
-    return asJson(result as Record<string, unknown>);
+    return asJsonResponse(result as Record<string, unknown>);
   }
 
   async handleFetchStreamExportCapture(args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -572,7 +570,7 @@ export class FetchStreamHandlers {
       filters?: Record<string, unknown>;
       events?: Array<Record<string, unknown>>;
     };
-    if (!capture.success) return asJson(capture);
+    if (!capture.success) return asJsonResponse(capture);
 
     const events = capture.events ?? [];
     const metadata = {
@@ -600,7 +598,7 @@ export class FetchStreamHandlers {
     });
     await writeFile(artifact.absolutePath, body, 'utf8');
 
-    return asJson({
+    return asJsonResponse({
       success: true,
       artifactPath: artifact.displayPath,
       format,

@@ -10,13 +10,7 @@ import type {
   SseEnableResult,
   SseEventRecord,
 } from './shared';
-import {
-  asJson,
-  parseBooleanArg,
-  parseNumberArg,
-  parseOptionalStringArg,
-  compileRegex,
-} from './shared';
+import { parseBooleanArg, parseNumberArg, parseOptionalStringArg, compileRegex } from './shared';
 import {
   evaluateWithTimeout,
   evaluateOnNewDocumentWithTimeout,
@@ -28,6 +22,7 @@ import {
   STREAMING_QUERY_LIMIT_MAX,
   WS_PAYLOAD_PREVIEW_LIMIT,
 } from '@src/constants/streaming';
+import { asJsonResponse } from '@server/domains/shared/response';
 
 type InternalSseEvent = {
   sourceUrl: string;
@@ -307,17 +302,20 @@ export class SseHandlers {
     if (urlFilterRaw) {
       const compiled = compileRegex(urlFilterRaw);
       if (compiled.error)
-        return asJson({ success: false, error: `Invalid urlFilter regex: ${compiled.error}` });
+        return asJsonResponse({
+          success: false,
+          error: `Invalid urlFilter regex: ${compiled.error}`,
+        });
     }
 
     const persistent = args.persistent === true;
     const result = await this.enableSseInterceptor(maxEvents, urlFilterRaw, { persistent });
 
-    if (!result.success) return asJson(result);
+    if (!result.success) return asJsonResponse(result);
 
     this.s.sseConfig = { maxEvents, urlFilterRaw };
 
-    return asJson({
+    return asJsonResponse({
       success: true,
       message: result.message,
       patched: result.patched,
@@ -433,7 +431,9 @@ export class SseHandlers {
       { sourceUrl, eventType, limit, offset, fullData },
     );
 
-    return asJson(result as { success: boolean; message?: string; events?: SseEventRecord[] });
+    return asJsonResponse(
+      result as { success: boolean; message?: string; events?: SseEventRecord[] },
+    );
   }
 
   async handleSseExportCapture(args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -517,7 +517,7 @@ export class SseHandlers {
       filters?: Record<string, unknown>;
       events?: SseEventRecord[];
     };
-    if (!capture.success) return asJson(capture);
+    if (!capture.success) return asJsonResponse(capture);
 
     const events = capture.events ?? [];
     const metadata = {
@@ -545,7 +545,7 @@ export class SseHandlers {
     });
     await writeFile(artifact.absolutePath, body, 'utf8');
 
-    return asJson({
+    return asJsonResponse({
       success: true,
       artifactPath: artifact.displayPath,
       format,

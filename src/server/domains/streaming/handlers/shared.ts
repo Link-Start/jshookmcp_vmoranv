@@ -172,12 +172,6 @@ export function isGrpcContentType(value: unknown): boolean {
 
 // ── Shared helpers ──
 
-export function asJson(payload: unknown): TextToolResponse {
-  return {
-    content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
-  };
-}
-
 export function parseOptionalStringArg(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.trim();

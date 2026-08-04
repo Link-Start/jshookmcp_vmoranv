@@ -76,6 +76,30 @@ const SYSCALL_NAME_RE = /^[a-z][a-z0-9_]*$/;
  *  cannot blow up the capture_events response. */
 const SUMMARY_TOP_N = 20;
 
+/** Default syscall pool for simulated ebpf traces (pure file/memory I/O, no side effects). */
+const SIMULATED_TRACE_SYSCALLS = [
+  'read',
+  'write',
+  'openat',
+  'close',
+  'fstat',
+  'mmap',
+  'mprotect',
+  'munmap',
+  'brk',
+  'ioctl',
+] as const;
+
+/** Default bpftrace target pool — the base pool plus network/process syscalls. */
+const DEFAULT_EBPF_TRACE_SYSCALLS = [
+  ...SIMULATED_TRACE_SYSCALLS,
+  'connect',
+  'sendto',
+  'recvfrom',
+  'clone',
+  'execve',
+] as const;
+
 /** Known ETW provider names (lowercased) for start_monitor validation. */
 const KNOWN_ETW_PROVIDER_NAMES = new Set(Object.keys(ETW_PROVIDERS));
 
@@ -725,20 +749,7 @@ export class SyscallHookHandlers {
 
     if (simulate) {
       const simulatedEvents: SyscallEvent[] = [];
-      const syscallPool = syscalls?.length
-        ? syscalls
-        : [
-            'read',
-            'write',
-            'openat',
-            'close',
-            'fstat',
-            'mmap',
-            'mprotect',
-            'munmap',
-            'brk',
-            'ioctl',
-          ];
+      const syscallPool = syscalls?.length ? syscalls : SIMULATED_TRACE_SYSCALLS;
       const simulatedTimestampStepMs = durationSec * 50;
       let cumulativeTime = 0;
       for (let i = 0; i < 20; i++) {
@@ -772,25 +783,7 @@ export class SyscallHookHandlers {
     }
 
     // Generate a real bpftrace script for the requested syscalls
-    const targetSyscalls = syscalls?.length
-      ? syscalls
-      : [
-          'read',
-          'write',
-          'openat',
-          'close',
-          'fstat',
-          'mmap',
-          'mprotect',
-          'munmap',
-          'brk',
-          'ioctl',
-          'connect',
-          'sendto',
-          'recvfrom',
-          'clone',
-          'execve',
-        ];
+    const targetSyscalls = syscalls?.length ? syscalls : DEFAULT_EBPF_TRACE_SYSCALLS;
     const pidFilter = pid > 0 ? `/pid == ${pid}/` : '';
     const tracepoints = targetSyscalls
       .map((sc) => `tracepoint:syscalls:sys_enter_${sc}`)

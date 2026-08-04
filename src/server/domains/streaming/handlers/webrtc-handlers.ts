@@ -11,13 +11,7 @@
 import { writeFile } from 'node:fs/promises';
 import { resolveArtifactPath } from '@utils/artifacts';
 import type { StreamingSharedState, TextToolResponse } from './shared';
-import {
-  asJson,
-  parseBooleanArg,
-  parseNumberArg,
-  parseOptionalStringArg,
-  compileRegex,
-} from './shared';
+import { parseBooleanArg, parseNumberArg, parseOptionalStringArg, compileRegex } from './shared';
 import {
   evaluateWithTimeout,
   evaluateOnNewDocumentWithTimeout,
@@ -29,6 +23,7 @@ import {
   STREAMING_QUERY_LIMIT_MAX,
   WS_PAYLOAD_PREVIEW_LIMIT,
 } from '@src/constants/streaming';
+import { asJsonResponse } from '@server/domains/shared/response';
 
 type ExportFormat = 'json' | 'ndjson';
 
@@ -372,7 +367,10 @@ export class WebRtcHandlers {
     if (urlFilterRaw) {
       const compiled = compileRegex(urlFilterRaw);
       if (compiled.error)
-        return asJson({ success: false, error: `Invalid urlFilter regex: ${compiled.error}` });
+        return asJsonResponse({
+          success: false,
+          error: `Invalid urlFilter regex: ${compiled.error}`,
+        });
     }
     const persistent = args.persistent === true;
     const result = await this.enable(maxEvents, urlFilterRaw, { persistent });
@@ -381,10 +379,10 @@ export class WebRtcHandlers {
       result !== null &&
       (result as { success?: unknown }).success === false
     ) {
-      return asJson(result);
+      return asJsonResponse(result);
     }
     this.s.webrtcConfig = { maxEvents, urlFilterRaw };
-    return asJson(result);
+    return asJsonResponse(result);
   }
 
   async handleWebRtcMonitorDisable(_args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -406,7 +404,7 @@ export class WebRtcHandlers {
       },
       { markerKey: WEBRTC_DISABLED_MARKER },
     );
-    return asJson({
+    return asJsonResponse({
       success: true,
       message: 'WebRTC monitor disabled (wrapper remains installed; capture paused)',
     });
@@ -505,7 +503,7 @@ export class WebRtcHandlers {
       },
       { label, direction, limit, offset, fullData },
     );
-    return asJson(result as Record<string, unknown>);
+    return asJsonResponse(result as Record<string, unknown>);
   }
 
   async handleWebRtcExportCapture(args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -583,7 +581,7 @@ export class WebRtcHandlers {
       filters?: Record<string, unknown>;
       events?: Array<Record<string, unknown>>;
     };
-    if (!capture.success) return asJson(capture);
+    if (!capture.success) return asJsonResponse(capture);
 
     const events = capture.events ?? [];
     const metadata = {
@@ -611,7 +609,7 @@ export class WebRtcHandlers {
     });
     await writeFile(artifact.absolutePath, body, 'utf8');
 
-    return asJson({
+    return asJsonResponse({
       success: true,
       artifactPath: artifact.displayPath,
       format,

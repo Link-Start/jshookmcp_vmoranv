@@ -23,13 +23,13 @@ import type {
   CdpSessionLike,
 } from './shared';
 import {
-  asJson,
   parseBooleanArg,
   parseNumberArg,
   parseOptionalStringArg,
   parseWsDirection,
   compileRegex,
 } from './shared';
+import { asJsonResponse } from '@server/domains/shared/response';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -323,7 +323,10 @@ export class WsHandlers {
     if (urlFilterRaw) {
       const compiled = compileRegex(urlFilterRaw);
       if (compiled.error)
-        return asJson({ success: false, error: `Invalid urlFilter regex: ${compiled.error}` });
+        return asJsonResponse({
+          success: false,
+          error: `Invalid urlFilter regex: ${compiled.error}`,
+        });
       urlFilter = compiled.regex;
     }
 
@@ -400,7 +403,7 @@ export class WsHandlers {
       }
     }
 
-    return asJson({
+    return asJsonResponse({
       success: true,
       message: 'WebSocket monitor enabled',
       config: { maxFrames, urlFilter: urlFilterRaw ?? null, exposeInstances },
@@ -437,7 +440,7 @@ export class WsHandlers {
     await this.teardownWsSession();
     this.s.wsConfig = { ...this.s.wsConfig, enabled: false };
 
-    return asJson(summary);
+    return asJsonResponse(summary);
   }
 
   async handleWsGetFrames(args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -455,7 +458,7 @@ export class WsHandlers {
     });
     const fullPayload = parseBooleanArg(args.fullPayload, false);
     const { direction, payloadFilterRaw, filtered, error } = this.selectWsFrames(args);
-    if (error) return asJson({ success: false, error });
+    if (error) return asJsonResponse({ success: false, error });
 
     const pageItems = filtered.slice(offset, offset + limit).map((frame) => {
       const item: Record<string, unknown> = {
@@ -471,7 +474,7 @@ export class WsHandlers {
       return item;
     });
 
-    return asJson({
+    return asJsonResponse({
       success: true,
       monitorEnabled: this.s.wsConfig.enabled,
       filters: { direction, payloadFilter: payloadFilterRaw ?? null, fullPayload },
@@ -508,7 +511,7 @@ export class WsHandlers {
         };
       });
 
-    return asJson({
+    return asJsonResponse({
       success: true,
       monitorEnabled: this.s.wsConfig.enabled,
       total: connections.length,
@@ -520,7 +523,7 @@ export class WsHandlers {
     const format = parseExportFormat(args.format);
     const includePayload = parseBooleanArg(args.includePayload, true);
     const { direction, payloadFilterRaw, filtered, error } = this.selectWsFrames(args);
-    if (error) return asJson({ success: false, error });
+    if (error) return asJsonResponse({ success: false, error });
 
     const exportedAt = new Date().toISOString();
     const records = filtered.map((frame) => {
@@ -571,7 +574,7 @@ export class WsHandlers {
     });
     await writeFile(artifact.absolutePath, body, 'utf8');
 
-    return asJson({
+    return asJsonResponse({
       success: true,
       artifactPath: artifact.displayPath,
       format,
@@ -585,9 +588,9 @@ export class WsHandlers {
   async handleWsSendFrame(args: Record<string, unknown>): Promise<TextToolResponse> {
     const url = parseOptionalStringArg(args.url);
     const payloadRaw = args.payload;
-    if (!url) return asJson({ success: false, error: 'url is required' });
+    if (!url) return asJsonResponse({ success: false, error: 'url is required' });
     if (typeof payloadRaw !== 'string')
-      return asJson({ success: false, error: 'payload is required' });
+      return asJsonResponse({ success: false, error: 'payload is required' });
     const binary = parseBooleanArg(args.binary, false);
 
     const page = await this.s.collector.getActivePage();
@@ -651,6 +654,6 @@ export class WsHandlers {
       },
       { url, payload: payloadRaw, binary },
     );
-    return asJson(result as Record<string, unknown>);
+    return asJsonResponse(result as Record<string, unknown>);
   }
 }

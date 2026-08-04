@@ -24,6 +24,10 @@ import {
   type NetworkRequestPayload,
 } from './handlers.base.types';
 import { getMergedNetworkRequestsFromMonitor } from './request-merge';
+import {
+  ensureNetworkEnabled as ensureNetworkEnabledHelper,
+  buildNotEnabledResponse,
+} from './handlers/core-handlers.helpers';
 import { handleSafe, R } from '@server/domains/shared/ResponseBuilder';
 import type { ToolResponse } from '@server/types';
 
@@ -77,30 +81,7 @@ export class NetworkHandlersCore {
     autoEnable: boolean;
     enableExceptions: boolean;
   }): Promise<{ enabled: boolean; autoEnabled: boolean; error?: string }> {
-    if (this.consoleMonitor.isNetworkEnabled()) {
-      return { enabled: true, autoEnabled: false };
-    }
-
-    if (!options.autoEnable) {
-      return { enabled: false, autoEnabled: false };
-    }
-
-    try {
-      await this.consoleMonitor.enable({
-        enableNetwork: true,
-        enableExceptions: options.enableExceptions,
-      });
-      return {
-        enabled: this.consoleMonitor.isNetworkEnabled(),
-        autoEnabled: true,
-      };
-    } catch (error) {
-      return {
-        enabled: false,
-        autoEnabled: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
+    return ensureNetworkEnabledHelper({ consoleMonitor: this.consoleMonitor }, options);
   }
 
   protected async getMergedNetworkRequests(): Promise<NetworkRequestPayload[]> {
@@ -201,32 +182,7 @@ export class NetworkHandlersCore {
       });
 
       if (!networkState.enabled) {
-        if (autoEnable && networkState.error) {
-          return R.fail('Failed to auto-enable network monitoring')
-            .merge({
-              detail: networkState.error,
-              solution: {
-                step1: 'Ensure browser page is active and reachable',
-                step2: 'Call network_enable manually',
-                step3: 'Navigate to target page: page_navigate(url)',
-                step4: 'Get requests: network_get_requests',
-              },
-            })
-            .json();
-        }
-
-        return R.fail(' Network monitoring is not enabled')
-          .merge({
-            requests: [],
-            total: 0,
-            solution: {
-              step1: 'Enable network monitoring: network_enable',
-              step2: 'Navigate to target page: page_navigate(url)',
-              step3: 'Get requests: network_get_requests',
-            },
-            tip: 'Set autoEnable=true to auto-enable monitoring in this call',
-          })
-          .json();
+        return buildNotEnabledResponse(autoEnable, networkState.error);
       }
 
       const url = asOptionalString(args.url);
