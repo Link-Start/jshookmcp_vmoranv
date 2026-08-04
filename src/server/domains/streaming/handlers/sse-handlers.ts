@@ -22,7 +22,7 @@ import {
   STREAMING_QUERY_LIMIT_MAX,
   WS_PAYLOAD_PREVIEW_LIMIT,
 } from '@src/constants/streaming';
-import { asJsonResponse } from '@server/domains/shared/response';
+import { asJson } from './shared';
 
 type InternalSseEvent = {
   sourceUrl: string;
@@ -302,7 +302,7 @@ export class SseHandlers {
     if (urlFilterRaw) {
       const compiled = compileRegex(urlFilterRaw);
       if (compiled.error)
-        return asJsonResponse({
+        return asJson({
           success: false,
           error: `Invalid urlFilter regex: ${compiled.error}`,
         });
@@ -311,11 +311,11 @@ export class SseHandlers {
     const persistent = args.persistent === true;
     const result = await this.enableSseInterceptor(maxEvents, urlFilterRaw, { persistent });
 
-    if (!result.success) return asJsonResponse(result);
+    if (!result.success) return asJson(result);
 
     this.s.sseConfig = { maxEvents, urlFilterRaw };
 
-    return asJsonResponse({
+    return asJson({
       success: true,
       message: result.message,
       patched: result.patched,
@@ -431,9 +431,7 @@ export class SseHandlers {
       { sourceUrl, eventType, limit, offset, fullData },
     );
 
-    return asJsonResponse(
-      result as { success: boolean; message?: string; events?: SseEventRecord[] },
-    );
+    return asJson(result as { success: boolean; message?: string; events?: SseEventRecord[] });
   }
 
   async handleSseExportCapture(args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -517,7 +515,7 @@ export class SseHandlers {
       filters?: Record<string, unknown>;
       events?: SseEventRecord[];
     };
-    if (!capture.success) return asJsonResponse(capture);
+    if (!capture.success) return asJson(capture);
 
     const events = capture.events ?? [];
     const metadata = {
@@ -545,7 +543,7 @@ export class SseHandlers {
     });
     await writeFile(artifact.absolutePath, body, 'utf8');
 
-    return asJsonResponse({
+    return asJson({
       success: true,
       artifactPath: artifact.displayPath,
       format,

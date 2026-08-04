@@ -5,6 +5,7 @@
 import type { CodeCollector } from '@server/domains/shared/modules/collector';
 import { RingBuffer } from '@utils/RingBuffer';
 import type { GrpcMessageFrame } from '@server/domains/network/grpc-raw';
+import { asJsonResponse } from '@server/domains/shared/response';
 
 export type TextToolResponse = {
   content: [{ type: 'text'; text: string }];
@@ -171,6 +172,11 @@ export function isGrpcContentType(value: unknown): boolean {
 }
 
 // ── Shared helpers ──
+
+/** JSON-stringify a payload as a text tool response (thin typed wrapper over shared asJsonResponse). */
+export function asJson(payload: unknown): TextToolResponse {
+  return asJsonResponse(payload) as TextToolResponse;
+}
 
 export function parseOptionalStringArg(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;

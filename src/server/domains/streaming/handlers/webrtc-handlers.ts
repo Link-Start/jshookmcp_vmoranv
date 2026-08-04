@@ -23,7 +23,7 @@ import {
   STREAMING_QUERY_LIMIT_MAX,
   WS_PAYLOAD_PREVIEW_LIMIT,
 } from '@src/constants/streaming';
-import { asJsonResponse } from '@server/domains/shared/response';
+import { asJson } from './shared';
 
 type ExportFormat = 'json' | 'ndjson';
 
@@ -367,7 +367,7 @@ export class WebRtcHandlers {
     if (urlFilterRaw) {
       const compiled = compileRegex(urlFilterRaw);
       if (compiled.error)
-        return asJsonResponse({
+        return asJson({
           success: false,
           error: `Invalid urlFilter regex: ${compiled.error}`,
         });
@@ -379,10 +379,10 @@ export class WebRtcHandlers {
       result !== null &&
       (result as { success?: unknown }).success === false
     ) {
-      return asJsonResponse(result);
+      return asJson(result);
     }
     this.s.webrtcConfig = { maxEvents, urlFilterRaw };
-    return asJsonResponse(result);
+    return asJson(result);
   }
 
   async handleWebRtcMonitorDisable(_args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -404,7 +404,7 @@ export class WebRtcHandlers {
       },
       { markerKey: WEBRTC_DISABLED_MARKER },
     );
-    return asJsonResponse({
+    return asJson({
       success: true,
       message: 'WebRTC monitor disabled (wrapper remains installed; capture paused)',
     });
@@ -503,7 +503,7 @@ export class WebRtcHandlers {
       },
       { label, direction, limit, offset, fullData },
     );
-    return asJsonResponse(result as Record<string, unknown>);
+    return asJson(result as Record<string, unknown>);
   }
 
   async handleWebRtcExportCapture(args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -581,7 +581,7 @@ export class WebRtcHandlers {
       filters?: Record<string, unknown>;
       events?: Array<Record<string, unknown>>;
     };
-    if (!capture.success) return asJsonResponse(capture);
+    if (!capture.success) return asJson(capture);
 
     const events = capture.events ?? [];
     const metadata = {
@@ -609,7 +609,7 @@ export class WebRtcHandlers {
     });
     await writeFile(artifact.absolutePath, body, 'utf8');
 
-    return asJsonResponse({
+    return asJson({
       success: true,
       artifactPath: artifact.displayPath,
       format,

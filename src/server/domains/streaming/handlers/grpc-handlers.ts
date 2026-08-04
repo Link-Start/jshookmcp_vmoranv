@@ -28,7 +28,7 @@ import {
   parseBooleanArg,
 } from './shared';
 import { parseGrpcFrames } from '@server/domains/network/grpc-raw';
-import { asJsonResponse } from '@server/domains/shared/response';
+import { asJson } from './shared';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -164,7 +164,7 @@ export class GrpcHandlers {
     if (urlFilterRaw) {
       const compiled = compileRegex(urlFilterRaw);
       if (compiled.error) {
-        return asJsonResponse({
+        return asJson({
           success: false,
           error: `Invalid urlFilter regex: ${compiled.error}`,
         });
@@ -259,7 +259,7 @@ export class GrpcHandlers {
     this.s.grpcListeners = listeners;
     this.s.grpcConfig = { enabled: true, maxCalls, urlFilterRaw, urlFilter };
 
-    return asJsonResponse({
+    return asJson({
       success: true,
       message: 'gRPC monitor enabled',
       config: { maxCalls, urlFilter: urlFilterRaw ?? null },
@@ -285,7 +285,7 @@ export class GrpcHandlers {
     };
     await this.teardownGrpcSession();
     this.s.grpcConfig = { ...this.s.grpcConfig, enabled: false };
-    return asJsonResponse(summary);
+    return asJson(summary);
   }
 
   async handleGrpcGetCalls(args: Record<string, unknown>): Promise<TextToolResponse> {
@@ -308,7 +308,7 @@ export class GrpcHandlers {
     if (urlFilterRaw) {
       const compiled = compileRegex(urlFilterRaw);
       if (compiled.error) {
-        return asJsonResponse({
+        return asJson({
           success: false,
           error: `Invalid urlFilter regex: ${compiled.error}`,
         });
@@ -348,7 +348,7 @@ export class GrpcHandlers {
       return item;
     });
 
-    return asJsonResponse({
+    return asJson({
       success: true,
       monitorEnabled: this.s.grpcConfig.enabled,
       filters: { urlFilter: urlFilterRaw ?? null, fullMessages },
@@ -373,7 +373,7 @@ export class GrpcHandlers {
     if (urlFilterRaw) {
       const compiled = compileRegex(urlFilterRaw);
       if (compiled.error) {
-        return asJsonResponse({
+        return asJson({
           success: false,
           error: `Invalid urlFilter regex: ${compiled.error}`,
         });
@@ -443,7 +443,7 @@ export class GrpcHandlers {
     });
     await writeFile(artifact.absolutePath, body, 'utf8');
 
-    return asJsonResponse({
+    return asJson({
       success: true,
       artifactPath: artifact.displayPath,
       format,
