@@ -278,168 +278,173 @@ export class JSVMPSymbolicExecutor extends SymbolicExecutor {
     return state.stack.pop();
   }
 
-  private executeAdd(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('number', `${a.name} + ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} + ${b.name}`, '');
-      state.stack.push(result);
+  /**
+   * Pop the two operands of a binary operation. On stack underflow the stack is
+   * left untouched and undefined is returned — popping first and checking the
+   * values afterwards silently dropped the top value when the stack had a
+   * single element.
+   */
+  private popBinaryOperands(
+    state: SymbolicState,
+    opName: string,
+  ): { a: SymbolicValue; b: SymbolicValue } | undefined {
+    if (state.stack.length < 2) {
+      logger.warn(
+        `JSVMP stack underflow at PC=0x${state.pc.toString(16)}: ${opName} requires 2 operands, stack depth ${state.stack.length}`,
+      );
+      return undefined;
     }
+    const b = state.stack.pop()!;
+    const a = state.stack.pop()!;
+    return { a, b };
+  }
+
+  /**
+   * Pop the single operand of a unary operation. On stack underflow the stack
+   * is left untouched and undefined is returned.
+   */
+  private popUnaryOperand(state: SymbolicState, opName: string): SymbolicValue | undefined {
+    if (state.stack.length < 1) {
+      logger.warn(
+        `JSVMP stack underflow at PC=0x${state.pc.toString(16)}: ${opName} requires 1 operand, stack depth 0`,
+      );
+      return undefined;
+    }
+    return state.stack.pop()!;
+  }
+
+  private executeAdd(state: SymbolicState): void {
+    const operands = this.popBinaryOperands(state, 'ADD');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('number', `${a.name} + ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} + ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeSub(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('number', `${a.name} - ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} - ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'SUB');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('number', `${a.name} - ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} - ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeMul(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('number', `${a.name} * ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} * ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'MUL');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('number', `${a.name} * ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} * ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeDiv(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('number', `${a.name} / ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} / ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'DIV');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('number', `${a.name} / ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} / ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeMod(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('number', `${a.name} % ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} % ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'MOD');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('number', `${a.name} % ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} % ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeAnd(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('boolean', `${a.name} && ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} && ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'AND');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('boolean', `${a.name} && ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} && ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeOr(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('boolean', `${a.name} || ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} || ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'OR');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('boolean', `${a.name} || ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} || ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeNot(state: SymbolicState): void {
-    const a = state.stack.pop();
-
-    if (a) {
-      const result = this.createSymbolicValue('boolean', `!${a.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = !${a.name}`, '');
-      state.stack.push(result);
-    }
+    const a = this.popUnaryOperand(state, 'NOT');
+    if (!a) return;
+    const result = this.createSymbolicValue('boolean', `!${a.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = !${a.name}`, '');
+    state.stack.push(result);
   }
 
   private executeXor(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('boolean', `${a.name} ^ ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} ^ ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'XOR');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('boolean', `${a.name} ^ ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} ^ ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeEq(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('boolean', `${a.name} === ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} === ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'EQ');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('boolean', `${a.name} === ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} === ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeNe(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('boolean', `${a.name} !== ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} !== ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'NE');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('boolean', `${a.name} !== ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} !== ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeLt(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('boolean', `${a.name} < ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} < ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'LT');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('boolean', `${a.name} < ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} < ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeLe(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('boolean', `${a.name} <= ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} <= ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'LE');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('boolean', `${a.name} <= ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} <= ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeGt(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('boolean', `${a.name} > ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} > ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'GT');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('boolean', `${a.name} > ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} > ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeGe(state: SymbolicState): void {
-    const b = state.stack.pop();
-    const a = state.stack.pop();
-
-    if (a && b) {
-      const result = this.createSymbolicValue('boolean', `${a.name} >= ${b.name}`);
-      this.addConstraint(result, 'custom', `${result.name} = ${a.name} >= ${b.name}`, '');
-      state.stack.push(result);
-    }
+    const operands = this.popBinaryOperands(state, 'GE');
+    if (!operands) return;
+    const { a, b } = operands;
+    const result = this.createSymbolicValue('boolean', `${a.name} >= ${b.name}`);
+    this.addConstraint(result, 'custom', `${result.name} = ${a.name} >= ${b.name}`, '');
+    state.stack.push(result);
   }
 
   private executeJnz(state: SymbolicState, target: number): void {
