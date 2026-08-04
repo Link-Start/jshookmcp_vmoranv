@@ -21,7 +21,7 @@ import type {
 import { createPlatformProvider } from './platform/factory.js';
 import type { PlatformMemoryAPI } from './platform/PlatformMemoryAPI.js';
 import type { ProcessHandle } from './platform/types.js';
-import { RttiParser } from './StructureAnalyzer.RttiParser.js';
+import { RttiParser, demangleMsvcName } from './StructureAnalyzer.RttiParser.js';
 import { FieldClassifier } from './StructureAnalyzer.FieldClassifier.js';
 import { StructAnalyzerUtils } from './StructureAnalyzer.Utils.js';
 
@@ -318,18 +318,8 @@ export class StructureAnalyzer {
    */
   // @ts-expect-error - Private method only used in tests via `(analyzer as any).demangleMsvcName`
   private demangleMsvcName(name: string): string {
-    // Inline implementation for backward compatibility
-    // ".?AVClassName@@" → "ClassName"
-    // ".?AUStructName@@" → "StructName"
-    const match = name.match(/\.?\?A[VU](.+?)@@/);
-    if (match) return match[1]!;
-
-    // ".?AW4EnumName@@" → "EnumName" (enums)
-    const enumMatch = name.match(/\.?\?AW4(.+?)@@/);
-    if (enumMatch) return enumMatch[1]!;
-
-    // Remove leading "." and trailing "@@"
-    return name.replace(/^\./, '').replace(/@@$/, '');
+    // Delegate to the shared implementation in RttiParser (single source of truth).
+    return demangleMsvcName(name);
   }
 
   /**

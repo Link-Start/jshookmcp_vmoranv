@@ -70,6 +70,9 @@ const { state, mockKoffi, posixMocks } = vi.hoisted(() => {
   const posixClose = vi.fn(() => 0);
   const posixSendto = vi.fn(() => 32);
   const posixRecv = vi.fn(() => 0);
+  const posixSetSockOpt = vi.fn(
+    (_fd: number, _level: number, _optname: number, _optval: Buffer, _optlen: number) => 0,
+  );
 
   return {
     state: shared,
@@ -84,13 +87,13 @@ const { state, mockKoffi, posixMocks } = vi.hoisted(() => {
           if (signature.includes('close')) return posixClose;
           if (signature.includes('sendto')) return posixSendto;
           if (signature.includes('recv')) return posixRecv;
-          if (signature.includes('setsockopt')) return vi.fn(() => 0);
+          if (signature.includes('setsockopt')) return posixSetSockOpt;
           return vi.fn();
         }),
         unload: vi.fn(),
       })),
     },
-    posixMocks: { posixSocket, posixClose, posixSendto, posixRecv },
+    posixMocks: { posixSocket, posixClose, posixSendto, posixRecv, posixSetSockOpt },
   };
 });
 
@@ -267,6 +270,46 @@ describe('IcmpProbe POSIX reply source-IP validation', () => {
     // Same id (raw socket broadcast), wrong source → treated as noise.
     expect(result.alive).toBe(false);
     expect(result.icmpStatus).toBe('UNEXPECTED_REPLY');
+
+    unloadIcmpLibraries();
+  });
+});
+
+describe('IcmpProbe POSIX default TTL from config', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
+  });
+
+  /** Find the setsockopt(fd, IPPROTO_IP=0, IP_TTL=2, ...) call that set the TTL. */
+  function ttlSetCalls(): number[] {
+    return posixMocks.posixSetSockOpt.mock.calls
+      .filter(([, level, optname]) => level === 0 && optname === 2)
+      .map(([, , , buf]) => (buf as Buffer).readInt32LE(0));
+  }
+
+  it('uses ICMP_DEFAULT_TTL (128) when the caller does not override ttl', async () => {
+    vi.resetModules();
+    const { icmpProbe, unloadIcmpLibraries } = await import('@src/native/IcmpProbe');
+
+    await icmpProbe({ target: '1.2.3.4', timeout: 1000 });
+
+    expect(ttlSetCalls()).toContain(128);
+
+    unloadIcmpLibraries();
+  });
+
+  it('honours an explicit ttl override', async () => {
+    vi.resetModules();
+    const { icmpProbe, unloadIcmpLibraries } = await import('@src/native/IcmpProbe');
+
+    await icmpProbe({ target: '1.2.3.4', ttl: 64, timeout: 1000 });
+
+    expect(ttlSetCalls()).toEqual([64]);
 
     unloadIcmpLibraries();
   });

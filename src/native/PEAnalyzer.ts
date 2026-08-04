@@ -739,8 +739,11 @@ export class PEAnalyzer {
    * Convert an RVA to a file offset using the section table parsed by
    * {@link parsePEFromBuffer} — no duplicated section-header parsing. Returns
    * -1 when the buffer is not a valid PE or the RVA maps to no section.
+   * Public so sibling native modules (e.g. AntiCheatDetector's disk-vs-memory
+   * integrity scan) reuse the same mapping instead of re-parsing section
+   * headers with raw offsets.
    */
-  private rvaToFileOffset(peData: Buffer, rva: number): number {
+  rvaToFileOffset(peData: Buffer, rva: number): number {
     let parsed: PEParsedBuffer;
     try {
       parsed = this.parsePEFromBuffer(peData);

@@ -61,6 +61,14 @@ function getNtClose() {
 const MEM_COMMIT = 0x1000;
 const MEM_RESERVE = 0x2000;
 
+/**
+ * NtCreateThreadEx ThreadDesiredAccess mask. Note: the Windows SDK defines
+ * THREAD_ALL_ACCESS as 0x1F03FF; 0x1FFFFF is the PROCESS_ALL_ACCESS mask.
+ * Passing the broader mask requests every thread access right at once, which
+ * NtCreateThreadEx accepts; kept as-is for behavioral compatibility.
+ */
+const THREAD_DESIRED_ACCESS = 0x1fffff;
+
 export function ntCreateThreadEx(
   hProcess: bigint,
   startAddr: bigint,
@@ -70,7 +78,7 @@ export function ntCreateThreadEx(
   const handleBuf = Buffer.alloc(8);
   const status = getNtCTE()(
     koffi.address(handleBuf),
-    0x1fffff,
+    THREAD_DESIRED_ACCESS,
     null,
     hProcess,
     startAddr as unknown as bigint,

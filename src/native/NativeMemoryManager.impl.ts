@@ -30,7 +30,7 @@ import type {
 } from '@native/NativeMemoryManager.types';
 import { findPatternInBuffer, parsePattern } from '@native/NativeMemoryManager.utils';
 import { checkNativeMemoryAvailability } from '@native/NativeMemoryManager.availability';
-import { USERSPACE_MAX_ADDRESS } from '@src/constants';
+import { USERSPACE_MAX_ADDRESS, NATIVE_SCAN_MAX_RESULTS } from '@src/constants';
 export type {
   MemoryRegion,
   ModuleInfo,
@@ -283,7 +283,7 @@ export class NativeMemoryManager {
         return { success: false, addresses: [], error: 'Invalid pattern' };
       }
 
-      const maxResults = 10000;
+      const maxResults = NATIVE_SCAN_MAX_RESULTS;
       const readableRegions: Array<{ baseAddress: bigint; regionSize: number }> = [];
       const handle = this.provider.openProcess(pid, false);
       let regionMatches: bigint[][] = [];

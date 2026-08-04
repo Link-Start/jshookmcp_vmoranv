@@ -11,6 +11,24 @@ import { STRUCT_RTTI_MAX_STRING_LEN } from '@src/constants';
 import type { PlatformMemoryAPI } from './platform/PlatformMemoryAPI.js';
 import type { ProcessHandle } from './platform/types.js';
 
+/**
+ * Demangle a basic MSVC RTTI name ("?.?AVClassName@@" → "ClassName").
+ * Shared by RttiParser and the StructureAnalyzer test-compat wrapper.
+ */
+export function demangleMsvcName(name: string): string {
+  // ".?AVClassName@@" → "ClassName"
+  // ".?AUStructName@@" → "StructName"
+  const match = name.match(/\.?\?A[VU](.+?)@@/);
+  if (match) return match[1]!;
+
+  // ".?AW4EnumName@@" → "EnumName" (enums)
+  const enumMatch = name.match(/\.?\?AW4(.+?)@@/);
+  if (enumMatch) return enumMatch[1]!;
+
+  // Remove leading "." and trailing "@@"
+  return name.replace(/^\./, '').replace(/@@$/, '');
+}
+
 export class RttiParser {
   constructor(
     private provider: PlatformMemoryAPI,
@@ -99,7 +117,7 @@ export class RttiParser {
     if (!className) return null;
 
     // Demangle basic MSVC names: ".?AVClassName@@" → "ClassName"
-    return this.demangleMsvcName(className);
+    return demangleMsvcName(className);
   }
 
   private async readClassDescriptor(
@@ -137,7 +155,7 @@ export class RttiParser {
               STRUCT_RTTI_MAX_STRING_LEN,
             );
             if (baseName) {
-              baseClasses.push(this.demangleMsvcName(baseName));
+              baseClasses.push(demangleMsvcName(baseName));
             }
           } catch {
             break;
@@ -148,19 +166,5 @@ export class RttiParser {
       // Best-effort
     }
     return baseClasses;
-  }
-
-  private demangleMsvcName(name: string): string {
-    // ".?AVClassName@@" → "ClassName"
-    // ".?AUStructName@@" → "StructName"
-    const match = name.match(/\.?\?A[VU](.+?)@@/);
-    if (match) return match[1]!;
-
-    // ".?AW4EnumName@@" → "EnumName" (enums)
-    const enumMatch = name.match(/\.?\?AW4(.+?)@@/);
-    if (enumMatch) return enumMatch[1]!;
-
-    // Remove leading "." and trailing "@@"
-    return name.replace(/^\./, '').replace(/@@$/, '');
   }
 }

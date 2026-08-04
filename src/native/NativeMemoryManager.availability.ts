@@ -1,4 +1,5 @@
 import { isKoffiAvailable, isWindows } from '@native/Win32API';
+import { NATIVE_ADMIN_CHECK_TIMEOUT_MS, MEMORY_PROBE_CMD_TIMEOUT_MS } from '@src/constants';
 
 export async function checkNativeMemoryAvailability(
   execAsync: (
@@ -37,7 +38,7 @@ export async function checkNativeMemoryAvailability(
   try {
     const { stdout } = await execAsync(
       'powershell.exe -NoProfile -Command "([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)"',
-      { timeout: 5000 },
+      { timeout: NATIVE_ADMIN_CHECK_TIMEOUT_MS },
     );
 
     if (stdout.trim().toLowerCase() !== 'true') {
@@ -80,7 +81,9 @@ async function checkDarwinAvailability(
   // 2. Check SIP status (informational — not blocking)
   let sipInfo = '';
   try {
-    const { stdout } = await execAsync('csrutil status 2>&1 || true', { timeout: 5000 });
+    const { stdout } = await execAsync('csrutil status 2>&1 || true', {
+      timeout: MEMORY_PROBE_CMD_TIMEOUT_MS,
+    });
     sipInfo = stdout.trim();
   } catch {
     // SIP check is informational only

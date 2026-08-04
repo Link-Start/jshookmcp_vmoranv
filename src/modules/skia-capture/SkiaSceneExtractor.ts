@@ -5,6 +5,25 @@ import type {
   SkiaSceneTree as LegacySkiaSceneTree,
 } from './types';
 
+// ── Scene extraction limits ────────────────────────────────────────────────────
+
+/** Maximum DOM children expanded per scene node (guards deep DOM trees). */
+const MAX_SCENE_CHILD_NODES = 12;
+/** Maximum sibling nodes attached to the root canvas node. */
+const MAX_SCENE_SIBLING_NODES = 8;
+
+// ── Renderer-detection confidence weights ──────────────────────────────────────
+// Accumulated evidence weights; final confidence is clamped to ≤ 1.
+
+/** Baseline confidence when no probe evidence is present. */
+const BASE_SKIA_CONFIDENCE = 0.1;
+/** Weight added when a WebGL probe reports a Skia backend. */
+const WEBGL_PROBE_CONFIDENCE_WEIGHT = 0.5;
+/** Weight added when a known Skia-adjacent engine is detected. */
+const ENGINE_PROBE_CONFIDENCE_WEIGHT = 0.3;
+/** Weight added when font-bounding-box signatures are present. */
+const FONT_PROBE_CONFIDENCE_WEIGHT = 0.1;
+
 export interface Rect {
   x: number;
   y: number;
@@ -196,7 +215,7 @@ function elementVisible(element: Element): boolean | undefined {
 
 function sceneNodeFromElement(element: Element, fallbackId: string): SceneNode {
   const children = Array.from(element.children)
-    .slice(0, 12)
+    .slice(0, MAX_SCENE_CHILD_NODES)
     .map((child, index) => sceneNodeFromElement(child, `${fallbackId}-${index}`));
 
   return {
@@ -457,15 +476,15 @@ function buildLegacyRendererFromProbes(
     engineProbe.isSkiaEngine ||
     fontProbe.hasSkiaFontSignatures;
 
-  let confidence = 0.1;
+  let confidence = BASE_SKIA_CONFIDENCE;
   if (webglResults.some((probe) => probe.hasSkiaBackend)) {
-    confidence += 0.5;
+    confidence += WEBGL_PROBE_CONFIDENCE_WEIGHT;
   }
   if (engineProbe.isSkiaEngine) {
-    confidence += 0.3;
+    confidence += ENGINE_PROBE_CONFIDENCE_WEIGHT;
   }
   if (fontProbe.hasSkiaFontSignatures) {
-    confidence += 0.1;
+    confidence += FONT_PROBE_CONFIDENCE_WEIGHT;
   }
 
   const gpuBackend = isSkiaBacked ? legacyGpuBackend(rendererStrings) : 'software';
@@ -560,7 +579,7 @@ export class SkiaSceneExtractor {
     if (selected.parentElement) {
       const siblingNodes = Array.from(selected.parentElement.children)
         .filter((child) => child !== selected)
-        .slice(0, 8)
+        .slice(0, MAX_SCENE_SIBLING_NODES)
         .map((child, index) => sceneNodeFromElement(child, `skia-sibling-${index}`));
       root.children.push(...siblingNodes);
     }

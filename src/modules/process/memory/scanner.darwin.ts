@@ -5,7 +5,12 @@ import { promises as fs } from 'node:fs';
 import { logger } from '@utils/logger';
 import type { MemoryScanResult } from '@modules/process/memory/types';
 import { execAsync } from '@modules/process/memory/types';
-import { MEMORY_SCAN_TIMEOUT_MS } from '@src/constants';
+import {
+  MEMORY_SCAN_MAX_REGIONS,
+  MEMORY_SCAN_MAX_RESULTS,
+  MEMORY_SCAN_REGION_MAX_BYTES,
+  MEMORY_SCAN_TIMEOUT_MS,
+} from '@src/constants';
 import { patternToBytesMac } from './scanner.patterns';
 import { findPatternInBuffer } from '@native/NativeMemoryManager.utils';
 
@@ -56,12 +61,14 @@ async function scanMemoryMacNative(
 
   const handle = provider.openProcess(pid, false);
   const foundAddresses: string[] = [];
-  const maxResults = 1000;
-  const maxRegionSize = 32 * 1024 * 1024; // 32MB cap per region
+  // Caps are env-tunable via @src/constants (MEMORY_SCAN_*) and kept in sync
+  // with the lldb fallback script below (which receives interpolated values).
+  const maxResults = MEMORY_SCAN_MAX_RESULTS;
+  const maxRegionSize = MEMORY_SCAN_REGION_MAX_BYTES;
 
   try {
     let address = 0n;
-    for (let i = 0; i < 50000 && foundAddresses.length < maxResults; i++) {
+    for (let i = 0; i < MEMORY_SCAN_MAX_REGIONS && foundAddresses.length < maxResults; i++) {
       const region = provider.queryRegion(handle, address);
       if (!region) break;
 
