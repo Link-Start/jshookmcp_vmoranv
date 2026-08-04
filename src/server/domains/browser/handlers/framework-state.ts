@@ -1,7 +1,12 @@
 import { argString, argNumber } from '@server/domains/shared/parse-args';
+import { PAGE_EVALUATE_TIMEOUT_MS } from '@src/constants';
 import { PrerequisiteError } from '@errors/PrerequisiteError';
 import { R } from '@server/domains/shared/ResponseBuilder';
 import type { ToolResponse } from '@server/domains/shared/ResponseBuilder';
+
+/** How long the pre-flight CDP health check may take before the debugger is
+ *  considered to be blocking page evaluation. */
+const CDP_HEALTH_CHECK_TIMEOUT_MS = 3000;
 
 interface EvaluatablePage {
   evaluate(pageFunction: unknown, ...args: unknown[]): Promise<unknown>;
@@ -31,7 +36,7 @@ export class FrameworkStateHandlers {
         await Promise.race([
           cdp.send('Runtime.evaluate', { expression: '1', returnByValue: true }),
           new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('cdp_unreachable')), 3000),
+            setTimeout(() => reject(new Error('cdp_unreachable')), CDP_HEALTH_CHECK_TIMEOUT_MS),
           ),
         ]);
       } catch {
@@ -690,7 +695,10 @@ export class FrameworkStateHandlers {
       const result = (await Promise.race([
         evalPromise,
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('page.evaluate timed out after 30000ms')), 30000),
+          setTimeout(
+            () => reject(new Error(`page.evaluate timed out after ${PAGE_EVALUATE_TIMEOUT_MS}ms`)),
+            PAGE_EVALUATE_TIMEOUT_MS,
+          ),
         ),
       ])) as Record<string, unknown>;
 

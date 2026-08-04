@@ -28,6 +28,7 @@ import {
   isKoffiAvailable,
   PAGE,
   MEM,
+  MEM_TYPE,
 } from '../../Win32API.js';
 
 // ── Internal handle storage ──
@@ -80,9 +81,11 @@ function win32StateToState(state: number): MemoryRegionState {
 }
 
 function win32TypeToType(type: number): MemoryRegionType {
-  if (type === 0x1000000) return 'image'; // MEM_IMAGE
-  if (type === 0x40000) return 'mapped'; // MEM_MAPPED
-  if (type === 0x20000) return 'private'; // MEM_PRIVATE
+  // Reuse the MEM_TYPE constants from Win32API so the numeric values
+  // (MEM_IMAGE/MEM_MAPPED/MEM_PRIVATE) live in exactly one place.
+  if (type === MEM_TYPE.IMAGE) return 'image';
+  if (type === MEM_TYPE.MAPPED) return 'mapped';
+  if (type === MEM_TYPE.PRIVATE) return 'private';
   return 'unknown';
 }
 

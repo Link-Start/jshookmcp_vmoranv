@@ -37,12 +37,18 @@ const state = vi.hoisted(() => ({
     RESERVE: 0x2000,
     RELEASE: 0x8000,
   },
+  MEM_TYPE: {
+    IMAGE: 0x1000000,
+    MAPPED: 0x40000,
+    PRIVATE: 0x20000,
+  },
 }));
 
 vi.mock('@native/Win32API', () => ({
   ...state,
   PAGE: state.PAGE,
   MEM: state.MEM,
+  MEM_TYPE: state.MEM_TYPE,
 }));
 
 // Use dynamic import since Win32MemoryProvider imports Win32API at top level
