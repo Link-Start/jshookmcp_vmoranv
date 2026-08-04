@@ -13,17 +13,10 @@ import {
 } from '@server/domains/analysis/handlers/inline-deobfuscation';
 import { solveConstraints } from '@server/domains/analysis/handlers/solve-constraints';
 import { runWebcrack } from '@modules/deobfuscator/webcrack';
-
-function requireCodeArg(args: ToolArgs, _toolName: string): string | null {
-  const code = args.code;
-  if (typeof code !== 'string' || code.trim().length === 0) {
-    return null;
-  }
-  return code;
-}
+import { requireCodeArg } from './shared';
 
 export async function handleJsDeobfuscatePipeline(args: ToolArgs): Promise<ToolResponse> {
-  const code = requireCodeArg(args, 'js_deobfuscate_pipeline');
+  const code = requireCodeArg(args);
   if (!code) {
     return asJsonResponse({ success: false, error: 'code is required' });
   }
@@ -127,7 +120,7 @@ export async function handleJsDeobfuscatePipeline(args: ToolArgs): Promise<ToolR
 }
 
 export async function handleJsSolveConstraints(args: ToolArgs): Promise<ToolResponse> {
-  const code = requireCodeArg(args, 'js_solve_constraints');
+  const code = requireCodeArg(args);
   if (!code) {
     return asJsonResponse({ success: false, error: 'code is required' });
   }

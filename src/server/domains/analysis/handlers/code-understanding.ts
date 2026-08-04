@@ -10,22 +10,15 @@ import type {
   ObfuscationDetector,
 } from '@server/domains/shared/modules';
 import type { ToolArgs, ToolResponse } from '@server/types';
+import { requireCodeArg } from './shared';
 
 const FOCUS_MODES = new Set(['structure', 'business', 'security', 'all'] as const);
-
-function requireCodeArg(args: ToolArgs, _toolName: string): string | null {
-  const code = args.code;
-  if (typeof code !== 'string' || code.trim().length === 0) {
-    return null;
-  }
-  return code;
-}
 
 export async function handleUnderstandCode(
   args: ToolArgs,
   analyzer: CodeAnalyzer,
 ): Promise<ToolResponse> {
-  const code = requireCodeArg(args, 'understand_code');
+  const code = requireCodeArg(args);
   if (!code) {
     return asJsonResponse({
       success: false,
@@ -46,7 +39,7 @@ export async function handleDetectCrypto(
   args: ToolArgs,
   cryptoDetector: CryptoDetector,
 ): Promise<ToolResponse> {
-  const code = requireCodeArg(args, 'detect_crypto');
+  const code = requireCodeArg(args);
   if (!code) {
     return asJsonResponse({
       success: false,
@@ -65,7 +58,7 @@ export async function handleDetectObfuscation(
   args: ToolArgs,
   obfuscationDetector: ObfuscationDetector,
 ): Promise<ToolResponse> {
-  const code = requireCodeArg(args, 'detect_obfuscation');
+  const code = requireCodeArg(args);
   if (!code) {
     return asJsonResponse({
       success: false,

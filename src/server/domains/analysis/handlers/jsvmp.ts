@@ -7,20 +7,13 @@ import { asJsonResponse } from '@server/domains/shared/response';
 import type { ToolArgs, ToolResponse } from '@server/types';
 import { JSVMPDeobfuscator } from '@modules/deobfuscator/JSVMPDeobfuscator';
 import { buildVmAnalysisResponse } from '@server/domains/analysis/handlers/vm-analysis';
-
-function requireCodeArg(args: ToolArgs, _toolName: string): string | null {
-  const code = args.code;
-  if (typeof code !== 'string' || code.trim().length === 0) {
-    return null;
-  }
-  return code;
-}
+import { requireCodeArg } from './shared';
 
 export async function handleJsDeobfuscateJsvmp(
   args: ToolArgs,
   jsvmpDeobfuscator: JSVMPDeobfuscator,
 ): Promise<ToolResponse> {
-  const code = requireCodeArg(args, 'js_deobfuscate_jsvmp');
+  const code = requireCodeArg(args);
   if (!code) {
     return asJsonResponse({
       success: false,
@@ -65,7 +58,7 @@ export async function handleJsAnalyzeVm(
   args: ToolArgs,
   jsvmpDeobfuscator: JSVMPDeobfuscator,
 ): Promise<ToolResponse> {
-  const code = requireCodeArg(args, 'js_analyze_vm');
+  const code = requireCodeArg(args);
   if (!code) {
     return asJsonResponse({ success: false, error: 'code is required' });
   }

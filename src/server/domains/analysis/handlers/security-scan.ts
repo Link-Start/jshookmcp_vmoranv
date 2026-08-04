@@ -5,14 +5,14 @@
  * Returns a structured list of vulnerabilities with severity, location, and recommendations.
  */
 
-import { argString } from '@server/domains/shared/parse-args';
 import { asJsonResponse } from '@server/domains/shared/response';
 import type { ToolArgs, ToolResponse } from '@server/types';
 import { identifySecurityRisks } from '@modules/analyzer/SecurityCodeAnalyzer';
+import { requireCodeArg } from './shared';
 
 export async function handleAnalysisSecurityScan(args: ToolArgs): Promise<ToolResponse> {
-  const code = argString(args, 'code');
-  if (!code || code.trim().length === 0) {
+  const code = requireCodeArg(args);
+  if (!code) {
     return asJsonResponse({
       success: false,
       error: 'code is required and must be a non-empty string',
