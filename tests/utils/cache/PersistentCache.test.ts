@@ -58,6 +58,26 @@ describe('PersistentCache', () => {
       await cache.close();
     });
 
+    it('creates a missing parent directory for the db file (cross-platform)', async () => {
+      // Nested path whose parent directory does not exist. On Windows the old
+      // lastIndexOf('/') dir split returned '' for backslash paths, so the
+      // directory was never created and init degraded to a silent no-op cache.
+      const nestedDir = join(tmpdir(), `jshook-test-cache-nested-${Date.now()}`);
+      const nestedDb = join(nestedDir, 'sub', 'cache.db');
+      try {
+        const cache = new PersistentCache({ dbPath: nestedDb, name: 'nested-dir-test' });
+        await cache.init();
+        expect(cache.isReady()).toBe(true);
+
+        await cache.set('nested-key', { ok: true });
+        expect(await cache.get<{ ok: boolean }>('nested-key')).toEqual({ ok: true });
+
+        await cache.close();
+      } finally {
+        rmSync(nestedDir, { recursive: true, force: true });
+      }
+    });
+
     it('should be idempotent', async () => {
       const cache = new PersistentCache({ dbPath: testDbPath, name: 'idempotent-test' });
       await cache.init();

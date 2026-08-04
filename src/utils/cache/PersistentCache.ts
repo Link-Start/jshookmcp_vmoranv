@@ -1,4 +1,4 @@
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { mkdirSync, existsSync } from 'fs';
 import { homedir } from 'node:os';
 import { logger } from '@utils/logger';
@@ -61,8 +61,12 @@ export class PersistentCache {
     try {
       const dbPath = this.resolveDbPath();
 
-      // Ensure directory exists
-      const dir = dbPath.substring(0, dbPath.lastIndexOf('/'));
+      // Ensure directory exists. dirname() is cross-platform: the old
+      // lastIndexOf('/') split produced an empty dir on Windows paths
+      // (C:\Users\...), so the parent directory was never created and init
+      // silently degraded to a no-op cache whenever the default
+      // ~/.jshookmcp/ directory did not already exist.
+      const dir = dirname(dbPath);
       if (dir && !existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
       }
