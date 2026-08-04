@@ -13,6 +13,7 @@ import {
   type PcapngPacketSummary,
   type PcapngReadResult,
   type PcapngWriteInput,
+  parseNonNegativeInteger,
   type PcapngWritePacket,
 } from './shared';
 import { ProtocolAnalysisFingerprintHandlers } from './fingerprint-handlers';
@@ -173,12 +174,7 @@ export class ProtocolAnalysisPcapngHandlers extends ProtocolAnalysisFingerprintH
   }
 }
 
-function parseNonNegativeInteger(value: unknown, label: string): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    throw new Error(`${label} must be a non-negative integer`);
-  }
-  return value;
-}
+// parseNonNegativeInteger now imported from ./shared
 
 function parseWriteInterface(
   value: unknown,
