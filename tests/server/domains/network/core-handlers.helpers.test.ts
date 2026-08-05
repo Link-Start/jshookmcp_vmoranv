@@ -74,14 +74,16 @@ describe('core-handlers.helpers', () => {
 
   it('buildNotEnabledResponse matches the legacy not-enabled shape', () => {
     const response = buildNotEnabledResponse(false);
-    const body = JSON.parse(response.content?.[0]?.text ?? '{}');
+    // content blocks are a discriminated union; assert the text shape before reading .text
+    const payloadText = (response.content?.[0] as { text?: string } | undefined)?.text ?? '{}';
+    const body = JSON.parse(payloadText);
     expect(body).toMatchObject({
       requests: [],
       total: 0,
     });
-    const text = JSON.stringify(response);
-    expect(text).toContain('Network monitoring is not enabled');
-    expect(text).toContain('Set autoEnable=true');
+    const serialized = JSON.stringify(response);
+    expect(serialized).toContain('Network monitoring is not enabled');
+    expect(serialized).toContain('Set autoEnable=true');
 
     const failed = buildNotEnabledResponse(true, 'boom');
     expect(failed.content?.[0]).toBeDefined();

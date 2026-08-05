@@ -15,10 +15,15 @@ import type {
   NetworkStatsResponse,
 } from '@tests/shared/common-test-types';
 
+const smartHandleThresholds = vi.hoisted(() => ({ values: [] as number[] }));
+
 vi.mock('@src/utils/DetailedDataManager', () => ({
   DetailedDataManager: {
     getInstance: () => ({
-      smartHandle: (payload: any) => payload,
+      smartHandle: (payload: any, threshold?: number) => {
+        if (threshold !== undefined) smartHandleThresholds.values.push(threshold);
+        return payload;
+      },
     }),
   },
 }));
@@ -29,6 +34,7 @@ vi.mock('@src/server/domains/shared/modules', () => ({
   CodeCollector: vi.fn(),
 }));
 
+import { NETWORK_SMART_HANDLE_THRESHOLD_BYTES } from '@src/constants';
 import { AdvancedHandlersBase } from '@server/domains/network/handlers.base';
 import { TEST_URLS, withPath } from '@tests/shared/test-urls';
 
@@ -106,6 +112,28 @@ describe('AdvancedHandlersBase (requests)', () => {
         type: 'Fetch',
         injected: true,
       });
+    });
+
+    it('passes NETWORK_SMART_HANDLE_THRESHOLD_BYTES to smartHandle', async () => {
+      consoleMonitor.isNetworkEnabled.mockReturnValue(true);
+      consoleMonitor.getNetworkRequests.mockReturnValue([
+        {
+          requestId: 'req-1',
+          url: `${testUrls.TEST_URLS.root}/api/one`,
+          method: 'GET',
+          type: 'XHR',
+          timestamp: 111,
+        },
+      ]);
+      consoleMonitor.getFetchRequests.mockResolvedValue([]);
+      consoleMonitor.getXHRRequests.mockResolvedValue([]);
+      smartHandleThresholds.values.length = 0;
+
+      const body = parseJson<NetworkRequestsResponse>(
+        await handler.handleNetworkGetRequests({ limit: 100 }),
+      );
+      expect(body.success).toBe(true);
+      expect(smartHandleThresholds.values).toEqual([NETWORK_SMART_HANDLE_THRESHOLD_BYTES]);
     });
 
     it('merges injected requests with CDP requests without duplicating identical entries', async () => {

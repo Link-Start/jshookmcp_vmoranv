@@ -144,7 +144,6 @@ vi.mock('@utils/UnifiedCacheManager', () => ({
 }));
 vi.mock('@utils/artifactRetention', () => ({ cleanupArtifacts: vi.fn() }));
 vi.mock('@utils/environmentDoctor', () => ({ runEnvironmentDoctor: vi.fn() }));
-vi.mock('@services/LLMService', () => ({ LLMService: vi.fn().mockImplementation(() => ({})) }));
 vi.mock('@utils/DetailedDataManager', () => ({
   DetailedDataManager: vi.fn().mockImplementation(() => ({})),
 }));
