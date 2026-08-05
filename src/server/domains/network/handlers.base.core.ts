@@ -29,6 +29,7 @@ import {
   buildNotEnabledResponse,
 } from './handlers/core-handlers.helpers';
 import { handleSafe, R } from '@server/domains/shared/ResponseBuilder';
+import { NETWORK_SMART_HANDLE_THRESHOLD_BYTES } from '@src/constants';
 import type { ToolResponse } from '@server/types';
 
 export class NetworkHandlersCore {
@@ -390,7 +391,10 @@ export class NetworkHandlersCore {
           }),
       };
 
-      const processedResult = this.detailedDataManager.smartHandle(finalPayload, 25600);
+      const processedResult = this.detailedDataManager.smartHandle(
+        finalPayload,
+        NETWORK_SMART_HANDLE_THRESHOLD_BYTES,
+      );
       return R.ok()
         .merge(processedResult as Record<string, unknown>)
         .json();

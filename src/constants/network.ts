@@ -17,6 +17,20 @@ export const NETWORK_HAR_BODY_CONCURRENCY = int('NETWORK_HAR_BODY_CONCURRENCY', 
 /** Cap on in-memory request/response records kept by the Playwright monitor. */
 export const NETWORK_MAX_RECORDS = int('NETWORK_MAX_RECORDS', 500);
 
+/**
+ * Smart-handle threshold (bytes) for network_get_requests payloads: responses
+ * larger than this are truncated to a summary + detailId. Kept lower than the
+ * global DETAILED_DATA_SMART_THRESHOLD_BYTES (50 KB) because request listings
+ * are LLM-facing and rarely need full fidelity.
+ *
+ * @env NETWORK_SMART_HANDLE_THRESHOLD_BYTES
+ * @default 25600
+ */
+export const NETWORK_SMART_HANDLE_THRESHOLD_BYTES = int(
+  'NETWORK_SMART_HANDLE_THRESHOLD_BYTES',
+  25 * 1024,
+);
+
 /** Response-body cache budgets shared by CDP and Playwright monitors. */
 export const NETWORK_BODY_CACHE_MAX_ENTRIES = int('NETWORK_BODY_CACHE_MAX_ENTRIES', 200);
 export const NETWORK_BODY_CACHE_MAX_BODY_BYTES = int(
