@@ -161,7 +161,6 @@ export default defineConfig({
       { find: '@modules', replacement: resolve(root, 'src/modules') },
       { find: '@native', replacement: resolve(root, 'src/native') },
       { find: '@utils', replacement: resolve(root, 'src/utils') },
-      { find: '@services', replacement: resolve(root, 'src/services') },
       { find: '@errors', replacement: resolve(root, 'src/errors') },
       { find: '@internal-types', replacement: resolve(root, 'src/types') },
       { find: '@extension-sdk', replacement: resolve(root, 'packages/extension-sdk/src') },

@@ -14,7 +14,6 @@
       "@modules/*": ["./src/modules/*"],
       "@native/*": ["./src/native/*"],
       "@server/*": ["./src/server/*"],
-      "@services/*": ["./src/services/*"],
       "@tests/*": ["./tests/*"],
       "@internal-types/*": ["./src/types/*"],
       "@utils/*": ["./src/utils/*"]
