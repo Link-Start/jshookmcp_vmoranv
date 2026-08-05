@@ -216,55 +216,78 @@ export class LargeDataOffloader {
       // ── Data URI (base64 image) → write binary file ──
       const dataUriMatch = text.match(DATA_URI_RE);
       if (dataUriMatch) {
-        const file = await this.writeOffloadedFile(text, dataUriMatch[1]);
-        content[i] = {
-          ...record,
-          text: JSON.stringify(
-            {
-              _offload: {
-                type: 'file',
-                path: file.path,
-                size: file.size,
-                mimeType: dataUriMatch[1],
+        try {
+          const file = await this.writeOffloadedFile(text, dataUriMatch[1]);
+          content[i] = {
+            ...record,
+            text: JSON.stringify(
+              {
+                _offload: {
+                  type: 'file',
+                  path: file.path,
+                  size: file.size,
+                  mimeType: dataUriMatch[1],
+                },
               },
-            },
-            null,
-            2,
-          ),
-        };
-        changed = true;
+              null,
+              2,
+            ),
+          };
+          changed = true;
+        } catch (error) {
+          // Never drop the tool's payload because offloading failed — keep
+          // the original text and surface a warning instead.
+          logger.warn(
+            `[Offloader] Failed to offload data URI from ${toolName} (entry ${i}), keeping original text`,
+            error,
+          );
+        }
         continue;
       }
 
       // ── Large JSON string → DetailedDataManager ──
       const parsed = this.tryParseJson(text);
       if (parsed !== null) {
-        content[i] = {
-          ...record,
-          text: JSON.stringify(this.storeInDetailManager(parsed, toolName, i), null, 2),
-        };
-        changed = true;
+        try {
+          content[i] = {
+            ...record,
+            text: JSON.stringify(this.storeInDetailManager(parsed, toolName, i), null, 2),
+          };
+          changed = true;
+        } catch (error) {
+          logger.warn(
+            `[Offloader] Failed to store ${toolName} payload (entry ${i}) in DetailDataManager, keeping original text`,
+            error,
+          );
+        }
         continue;
       }
 
       // ── Large non-JSON string → file ──
       if (text.length >= this.fileThreshold) {
-        const file = await this.writeOffloadedFile(text, undefined);
-        content[i] = {
-          ...record,
-          text: JSON.stringify(
-            {
-              _offload: {
-                type: 'file',
-                path: file.path,
-                size: file.size,
+        try {
+          const file = await this.writeOffloadedFile(text, undefined);
+          content[i] = {
+            ...record,
+            text: JSON.stringify(
+              {
+                _offload: {
+                  type: 'file',
+                  path: file.path,
+                  size: file.size,
+                },
               },
-            },
-            null,
-            2,
-          ),
-        };
-        changed = true;
+              null,
+              2,
+            ),
+          };
+          changed = true;
+        } catch (error) {
+          logger.warn(
+            `[Offloader] Failed to offload large string from ${toolName} (entry ${i}), keeping original text`,
+            error,
+          );
+        }
         continue;
       }
     }

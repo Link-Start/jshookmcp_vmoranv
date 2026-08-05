@@ -55,6 +55,27 @@ export async function resolveSafeOutputPath(
     throw new Error(`outputPath must be within the ${options.allowedRootsDescription}.`);
   }
 
+  // Symlink-aware containment: the string-level check above can be bypassed
+  // by a symlink inside a root that points outside it. Resolve the real path
+  // of the deepest existing ancestor of the candidate and require it to stay
+  // inside one of the (existing) roots' real paths. Roots that do not exist
+  // yet cannot host a symlink, so the string check already suffices for them.
+  const realCandidate = await resolveExistingAncestorRealPath(candidatePath);
+  let checkedExistingRoot = false;
+  for (const rootPath of normalizedRoots) {
+    const realRoot = await realpathIfExists(rootPath);
+    if (!realRoot) {
+      continue;
+    }
+    checkedExistingRoot = true;
+    if (isPathInsideOrEqual(realRoot, realCandidate)) {
+      return candidatePath;
+    }
+  }
+  if (checkedExistingRoot) {
+    throw new Error(`outputPath must be within the ${options.allowedRootsDescription}.`);
+  }
+
   return candidatePath;
 }
 
@@ -141,6 +162,14 @@ async function writeFileAtomically(
     }
   }
 
+  // The path's final component must be a real file name — "." or ".."
+  // basenames would resolve the temp path / rename target to a directory
+  // reference and could wipe or misplace data.
+  const fileBaseName = basename(absolutePath);
+  if (!fileBaseName || fileBaseName === '.' || fileBaseName === '..') {
+    throw new Error('outputPath must point to a file name, not a directory reference.');
+  }
+
   if (options?.rejectSymbolicLink !== false) {
     try {
       const existing = await lstat(absolutePath);
@@ -166,7 +195,7 @@ async function writeFileAtomically(
 
   const tempPath = resolve(
     parentDir,
-    `.${basename(absolutePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+    `.${fileBaseName}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
   );
 
   let handle: FileHandle | null = null;
@@ -190,6 +219,14 @@ async function writeFileAtomically(
       }
     }
 
+    // Some platforms (Windows) refuse to rename over an existing target.
+    // Remove it first, but only after confirming it is still a regular file —
+    // a directory or symlink could have been swapped in since the earlier
+    // lstat, and removing either would be destructive.
+    const existingTarget = await lstat(absolutePath).catch(() => null);
+    if (existingTarget && (existingTarget.isDirectory() || existingTarget.isSymbolicLink())) {
+      throw new Error('outputPath must be a file path, not a directory or symbolic link.');
+    }
     await rm(absolutePath, { force: true });
     await rename(tempPath, absolutePath);
   } catch (error) {
