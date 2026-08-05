@@ -68,6 +68,7 @@ vi.mock('node:worker_threads', () => {
 });
 
 import { WorkerPool } from '@utils/WorkerPool';
+import { ProcessRegistry } from '@utils/ProcessRegistry';
 
 describe('WorkerPool', () => {
   beforeEach(() => {
@@ -137,6 +138,36 @@ describe('WorkerPool', () => {
     expect(worker.terminate).toHaveBeenCalled();
 
     await pool.close();
+  });
+
+  it('terminating a worker deregisters it from ProcessRegistry and keeps its exit listener', async () => {
+    const pool = new WorkerPool<{ value: number }, number>({
+      workerScript: 'mock-script',
+      minWorkers: 1,
+      maxWorkers: 1,
+    });
+    const worker = workerState.instances[0]!;
+    const unregisterSpy = vi.spyOn(ProcessRegistry, 'unregister');
+
+    const task = pool.submit({ value: 1 });
+    worker.emit('message', { jobId: 1, ok: true, result: 1 });
+    await task;
+
+    await pool.close();
+
+    // The 'exit' listener must survive termination: ProcessRegistry relies on
+    // its own once('exit') to auto-deregister, and stripping it here would
+    // leave the dead worker referenced in the registry forever.
+    const exitRemovals = worker.removeAllListeners.mock.calls.filter((call) => call[0] === 'exit');
+    expect(exitRemovals).toHaveLength(0);
+
+    // The terminated worker is deregistered from ProcessRegistry instead of
+    // accumulating in the registry's process set.
+    expect(unregisterSpy).toHaveBeenCalledTimes(1);
+    const registryProcesses = (ProcessRegistry as unknown as { processes: Set<unknown> }).processes;
+    expect(registryProcesses.size).toBe(0);
+
+    unregisterSpy.mockRestore();
   });
 
   it('queues jobs when max workers are busy', async () => {

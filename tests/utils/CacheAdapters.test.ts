@@ -122,4 +122,19 @@ describe('CacheAdapters', () => {
       'CodeCompressor',
     ]);
   });
+
+  it('skips null/undefined caches instead of registering broken adapters', () => {
+    // A lazily-constructed collector may not have a CodeCache/CodeCompressor
+    // yet; registering an adapter around null would throw on every getStats().
+    const manager = {
+      getStats: vi.fn(() => ({ cacheSize: 0, defaultTTLSeconds: 60, maxCacheSize: 100 })),
+      clear: vi.fn(),
+    };
+
+    const adapters = createCacheAdapters(manager as any, null, undefined);
+    expect(adapters).toHaveLength(1);
+    expect(adapters[0]?.name).toBe('DetailedDataManager');
+
+    expect(createCacheAdapters(null, null, null)).toHaveLength(0);
+  });
 });

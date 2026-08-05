@@ -224,6 +224,26 @@ describe('config utilities', () => {
     expect(config.transformWorkbench.maxSteps).toBe(5);
   });
 
+  it('malformed reverse-engineering env values do not fail the whole config validation', async () => {
+    process.env.TRANSFORM_WORKBENCH_MAX_STEPS = 'abc';
+    process.env.FRIDA_DEX_DUMP_TIMEOUT_MS = 'not-a-number';
+    process.env.NEMU_GUEST_PAGE_SIZE_BYTES = '0';
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { getConfig } = await import('@utils/config');
+    const config = getConfig();
+
+    // RE values are soft-coerced per key: invalid → safe default, `0` → clamped to 1.
+    expect(config.reverseEngineering.transformWorkbench.maxSteps).toBe(32);
+    expect(config.reverseEngineering.frida.dexDumpTimeoutMs).toBe(180_000);
+    expect(config.reverseEngineering.nativeEmulator.guestPageSizeBytes).toBe(1);
+    // The rest of the config is still schema-validated — no whole-config
+    // degradation and no "Validation errors" fallback log for a bad RE var.
+    expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining('Validation errors'));
+    expect(config.puppeteer.timeout).toBe(30000);
+    consoleError.mockRestore();
+  });
+
   it('resolves executable path by priority order', async () => {
     process.env.BROWSER_EXECUTABLE_PATH = 'browser-path';
     process.env.PUPPETEER_EXECUTABLE_PATH = 'puppeteer-path';
@@ -247,6 +267,17 @@ describe('config utilities', () => {
     const { getConfig } = await import('@utils/config');
     const config = getConfig();
     expect(config.cache.dir).toBe(join(getProjectRoot(), '.cache/custom'));
+  });
+
+  it('resolves relative cache directory against the writable base in npx contexts', async () => {
+    // In npx/global-install contexts the package root is an immutable install
+    // cache; a relative CACHE_DIR must land in the user's cwd or the cache
+    // silently degrades to a no-op (and pollutes the install dir).
+    process.env.NPX_CACHE = '/tmp/npx-cache';
+    process.env.CACHE_DIR = '.cache/npx-test';
+    const { getConfig } = await import('@utils/config');
+    const config = getConfig();
+    expect(config.cache.dir).toBe(join(process.cwd(), '.cache/npx-test'));
   });
 
   it('validateConfig reports invalid performance settings', async () => {

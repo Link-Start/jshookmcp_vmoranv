@@ -4,11 +4,13 @@ import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ToolRegistry } from '@modules/external/ToolRegistry';
+import type { ProbeResult } from '@modules/external/ToolProbe';
 import { GHIDRA_BRIDGE_ENDPOINT, IDA_BRIDGE_ENDPOINT } from '@src/constants';
 import { getProjectRoot } from '@utils/outputPaths';
 import { getArtifactRetentionConfig } from '@utils/artifactRetention';
 import { probeBetterSqlite3 } from '@utils/betterSqlite3';
 import { ioLimit } from '@utils/concurrency';
+import { logger } from '@utils/logger';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -73,28 +75,73 @@ function readInstalledPackageJson(packageName: string): { version?: string } {
   return require(resolvePackageJsonPath(packageName)) as { version?: string };
 }
 
+/**
+ * Convert a single check's rejection into a warn entry so that one failing
+ * sub-check (e.g. an endpoint probe) can never cascade into failing the whole
+ * doctor report.
+ */
+function toSafeCheck(name: string, check: Promise<DoctorCheck>): Promise<DoctorCheck> {
+  return check.catch((error: unknown) => ({
+    name,
+    status: 'warn' as DoctorStatus,
+    detail: `Check failed: ${error instanceof Error ? error.message : String(error)}`,
+  }));
+}
+
+/** External-tool probe with the same no-cascade guarantee (degrades to empty). */
+function safeExternalProbe(registry: ToolRegistry): Promise<Record<string, ProbeResult>> {
+  return registry.probeAll(true).catch((error: unknown) => {
+    logger.warn(`[environmentDoctor] External tool probing failed: ${String(error)}`);
+    return {};
+  });
+}
+
 export async function runEnvironmentDoctor(options?: {
   includeBridgeHealth?: boolean;
 }): Promise<EnvironmentDoctorReport> {
   const includeBridgeHealth = options?.includeBridgeHealth ?? true;
   const registry = getSharedRegistry();
-  const externalResultsPromise = registry.probeAll(true);
-  const gitCommandPromise = ioLimit(() => checkCommand('git', ['--version']));
-  const pythonCommandPromise = ioLimit(() => checkCommand('python', ['--version']));
-  const pnpmCommandPromise = ioLimit(() => checkPnpmCommand());
-  const corepackCheckPromise = ioLimit(() => checkCommand('corepack', ['--version']));
+  const externalResultsPromise = safeExternalProbe(registry);
+  const gitCommandPromise = toSafeCheck(
+    'git',
+    ioLimit(() => checkCommand('git', ['--version'])),
+  );
+  const pythonCommandPromise = toSafeCheck(
+    'python',
+    ioLimit(() => checkCommand('python', ['--version'])),
+  );
+  const pnpmCommandPromise = toSafeCheck(
+    'pnpm',
+    ioLimit(() => checkPnpmCommand()),
+  );
+  const corepackCheckPromise = toSafeCheck(
+    'corepack',
+    ioLimit(() => checkCommand('corepack', ['--version'])),
+  );
   const bridgesPromise = includeBridgeHealth
     ? Promise.all([
-        ioLimit(() =>
-          checkHttpEndpoint('ghidra-bridge', `${GHIDRA_BRIDGE_ENDPOINT.replace(/\/$/, '')}/health`),
+        toSafeCheck(
+          'ghidra-bridge',
+          ioLimit(() =>
+            checkHttpEndpoint(
+              'ghidra-bridge',
+              `${GHIDRA_BRIDGE_ENDPOINT.replace(/\/$/, '')}/health`,
+            ),
+          ),
         ),
-        ioLimit(() =>
-          checkHttpEndpoint('ida-bridge', `${IDA_BRIDGE_ENDPOINT.replace(/\/$/, '')}/health`),
+        toSafeCheck(
+          'ida-bridge',
+          ioLimit(() =>
+            checkHttpEndpoint('ida-bridge', `${IDA_BRIDGE_ENDPOINT.replace(/\/$/, '')}/health`),
+          ),
         ),
-        ioLimit(() =>
-          checkHttpEndpoint(
-            'burp-mcp-sse',
-            process.env.BURP_MCP_SSE_URL?.trim() || 'http://127.0.0.1:9876',
+        toSafeCheck(
+          'burp-mcp-sse',
+          ioLimit(() =>
+            checkHttpEndpoint(
+              'burp-mcp-sse',
+              process.env.BURP_MCP_SSE_URL?.trim() || 'http://127.0.0.1:9876',
+            ),
           ),
         ),
       ])

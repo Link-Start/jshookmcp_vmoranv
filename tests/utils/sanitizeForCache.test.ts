@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sanitizeForCache } from '@utils/sanitizeForCache';
@@ -15,7 +15,9 @@ describe('sanitizeForCache', () => {
   let outDir: string;
 
   beforeAll(async () => {
-    outDir = await mkdtemp(join(tmpdir(), 'sanitize-cache-'));
+    // The offload dir must live inside the project root: the sanitizer now
+    // refuses to write outside it (path-guard, mirroring resolveArtifactPath).
+    outDir = join(getProjectRoot(), 'artifacts', `offloaded-test-${Date.now()}`);
   });
 
   afterAll(async () => {
@@ -123,5 +125,85 @@ describe('sanitizeForCache', () => {
     };
     expect(out.url._offload.path).toBe('');
     expect(out.url._offload.sample).toContain('data:image/png;base64,');
+  });
+
+  it('does not pollute prototypes via __proto__ keys in captured data', () => {
+    // JSON.parse creates __proto__ as an OWN key — exactly what hostile page
+    // data can smuggle through the collector.
+    const hostile = JSON.parse('{"__proto__": {"polluted": true}, "data": "x"}');
+    const out = sanitizeForCache(hostile, opts()) as Record<string, unknown>;
+
+    expect((out as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.getPrototypeOf(out)).not.toHaveProperty('polluted');
+    expect(Object.prototype.hasOwnProperty.call(out, 'data')).toBe(true);
+  });
+
+  it('drops constructor and prototype keys when sanitizing objects', () => {
+    const hostile = JSON.parse(
+      '{"constructor": {"prototype": {"hijacked": 1}}, "prototype": {"x": 1}, "blob": "' +
+        'y'.repeat(100 * 1024) +
+        '"}',
+    );
+    const out = sanitizeForCache(hostile, { ...opts(), threshold: 64 * 1024 }) as Record<
+      string,
+      unknown
+    >;
+
+    expect(Object.prototype.hasOwnProperty.call(out, 'constructor')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(out, 'prototype')).toBe(false);
+    expect((out as Record<string, unknown>).hijacked).toBeUndefined();
+    // Legit fields still sanitized normally.
+    expect(isPlaceholder(out.blob)).toBe(true);
+  });
+
+  it('nested objects with unsafe keys are also cleaned', () => {
+    const hostile = JSON.parse('{"nested": {"__proto__": {"pwned": true}, "ok": 1}}');
+    const out = sanitizeForCache(hostile, opts()) as {
+      nested: Record<string, unknown>;
+    };
+
+    expect(out.nested.pwned).toBeUndefined();
+    expect(Object.getPrototypeOf(out.nested)).not.toHaveProperty('pwned');
+  });
+
+  it('does not treat a polluted prototype chain as an offload placeholder', () => {
+    const fake = JSON.parse('{"blob": "' + 'y'.repeat(100 * 1024) + '"}');
+    // Prototype claims to be an offload placeholder with attacker data — the
+    // idempotency check must only honor OWN _offload keys, so sanitizing still
+    // runs on the real payload instead of passing it through untouched.
+    Object.setPrototypeOf(fake, { _offload: { type: 'file', path: '../../etc/passwd' } });
+
+    const out = sanitizeForCache(fake, { ...opts(), threshold: 64 * 1024 }) as Record<
+      string,
+      unknown
+    >;
+    expect(isPlaceholder(out.blob)).toBe(true);
+  });
+
+  it('refuses to write offload files outside the project root', async () => {
+    const escapedDir = await mkdtemp(join(tmpdir(), 'sanitize-escape-'));
+    const out = sanitizeForCache(
+      { url: DATA_URI },
+      { outputDir: escapedDir, writeFile: true },
+    ) as unknown as { url: { _offload: { path: string } } };
+
+    // Placeholder points back into the real offload dir, not the escaped dir…
+    expect(out.url._offload.path).toContain('artifacts/offloaded');
+    expect(out.url._offload.path.split('/')[0]).not.toBe('..');
+    // …and nothing was written into the attacker-chosen directory.
+    expect(await readdir(escapedDir)).toEqual([]);
+    await rm(escapedDir, { recursive: true, force: true });
+  });
+
+  it('accepts a relative outputDir inside the project root', async () => {
+    const out = sanitizeForCache(
+      { url: DATA_URI },
+      { outputDir: `artifacts/offloaded-test-rel-${Date.now()}` },
+    ) as unknown as { url: { _offload: { path: string } } };
+
+    expect(out.url._offload.path).toContain('artifacts/offloaded-test-rel');
+    // Clean up the file written relative to the project root.
+    const abs = join(getProjectRoot(), ...out.url._offload.path.split('/'));
+    await rm(abs, { force: true });
   });
 });

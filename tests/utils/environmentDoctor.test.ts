@@ -492,6 +492,28 @@ describe('runEnvironmentDoctor', () => {
     const report = await runEnvironmentDoctor({ includeBridgeHealth: false });
     expect(report.recommendations.some((r) => r.includes('wabt'))).toBe(true);
   });
+
+  it('survives a rejecting external-tool probe without failing the whole report', async () => {
+    probeAllMock.mockRejectedValue(new Error('probe engine exploded'));
+
+    const report = await runEnvironmentDoctor({ includeBridgeHealth: false });
+
+    // The report still materializes with runtime info and the other checks.
+    expect(report.runtime.platform).toBe(process.platform);
+    expect(report.commands.find((c) => c.name === 'git')).toBeDefined();
+    // No external tools were resolved — but the report must not throw.
+    expect(report.commands.filter((c) => c.name.startsWith('wabt.')).length).toBe(0);
+  });
+
+  it('survives a rejecting command probe (defense-in-depth) without failing the report', async () => {
+    execFileMock.mockImplementation(() => Promise.reject(new Error('exec exploded')));
+    probeAllMock.mockResolvedValue({});
+
+    const report = await runEnvironmentDoctor({ includeBridgeHealth: false });
+
+    expect(report.runtime.platform).toBe(process.platform);
+    expect(report.commands.every((c) => c.status === 'missing' || c.status === 'warn')).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -41,6 +41,12 @@ export class TokenBudgetManager {
   private trackingEnabled = true;
   private autoCleanupArmed = true;
 
+  /** Guards against re-entrant auto-cleanup through the external cleanup callback. */
+  private cleanupRunning = false;
+  /** Cooldown after an auto-cleanup before another one may trigger (prevents async callback loops). */
+  private lastCleanupAt = 0;
+  private static readonly AUTO_CLEANUP_COOLDOWN_MS = 1000;
+
   private readonly MAX_ESTIMATION_DEPTH = 4;
   private readonly MAX_ESTIMATION_ARRAY_ITEMS = 50;
   private readonly MAX_ESTIMATION_OBJECT_KEYS = 50;
@@ -99,7 +105,7 @@ export class TokenBudgetManager {
 
       this.checkWarnings();
 
-      if (this.shouldAutoCleanup()) {
+      if (this.isAutoCleanupDue()) {
         this.autoCleanup();
       }
     } catch (error) {
@@ -315,43 +321,69 @@ export class TokenBudgetManager {
     return this.autoCleanupArmed && ratio >= this.AUTO_CLEANUP_THRESHOLD;
   }
 
+  /**
+   * Whether an automatic cleanup may fire right now. Enforces both the armed
+   * state and a cooldown after the last cleanup, so an async external cleanup
+   * callback that records more tool calls cannot chain-trigger cleanups.
+   */
+  private isAutoCleanupDue(): boolean {
+    if (Date.now() - this.lastCleanupAt < TokenBudgetManager.AUTO_CLEANUP_COOLDOWN_MS) {
+      return false;
+    }
+    return this.shouldAutoCleanup();
+  }
+
   private autoCleanup(): void {
-    this.autoCleanupArmed = false;
-    logger.info('Auto-cleanup triggered at 90% usage.');
+    // Re-entrance guard: the external cleanup callback may synchronously call
+    // manualCleanup() or recordToolCall(), which would otherwise recurse into
+    // autoCleanup() until the stack overflows.
+    if (this.cleanupRunning) {
+      return;
+    }
+    this.cleanupRunning = true;
+    try {
+      this.autoCleanupArmed = false;
+      logger.info('Auto-cleanup triggered at 90% usage.');
 
-    const beforeUsage = this.currentUsage;
+      const beforeUsage = this.currentUsage;
 
-    if (this.externalCleanupFn) {
-      try {
-        this.externalCleanupFn();
-        logger.info('External cleanup callback invoked');
-      } catch (e) {
-        logger.warn('External cleanup callback failed:', e);
+      if (this.externalCleanupFn) {
+        try {
+          this.externalCleanupFn();
+          logger.info('External cleanup callback invoked');
+        } catch (e) {
+          logger.warn('External cleanup callback failed:', e);
+        }
       }
+
+      const cutoff = Date.now() - this.HISTORY_RETENTION;
+      const beforeCount = this.toolCallHistory.length;
+      this.toolCallHistory = this.toolCallHistory.filter((call) => call.timestamp > cutoff);
+      const removedCount = beforeCount - this.toolCallHistory.length;
+      logger.info(`Removed ${removedCount} old tool call records`);
+
+      this.recalculateUsage();
+
+      const afterUsage = this.currentUsage;
+      const freed = beforeUsage - afterUsage;
+      const freedPercentage = Math.round((freed / this.MAX_TOKENS) * 100);
+
+      logger.info(
+        `Cleanup complete. Freed ${freed} tokens (${freedPercentage}%). ` +
+          `Usage: ${afterUsage}/${this.MAX_TOKENS} (${this.getUsagePercentage()}%)`,
+      );
+
+      const newRatio = afterUsage / this.MAX_TOKENS;
+      if (newRatio < this.AUTO_CLEANUP_REARM_THRESHOLD) {
+        this.autoCleanupArmed = true;
+      }
+      this.warnings = new Set(
+        Array.from(this.warnings).filter((threshold) => newRatio >= threshold),
+      );
+    } finally {
+      this.cleanupRunning = false;
+      this.lastCleanupAt = Date.now();
     }
-
-    const cutoff = Date.now() - this.HISTORY_RETENTION;
-    const beforeCount = this.toolCallHistory.length;
-    this.toolCallHistory = this.toolCallHistory.filter((call) => call.timestamp > cutoff);
-    const removedCount = beforeCount - this.toolCallHistory.length;
-    logger.info(`Removed ${removedCount} old tool call records`);
-
-    this.recalculateUsage();
-
-    const afterUsage = this.currentUsage;
-    const freed = beforeUsage - afterUsage;
-    const freedPercentage = Math.round((freed / this.MAX_TOKENS) * 100);
-
-    logger.info(
-      `Cleanup complete. Freed ${freed} tokens (${freedPercentage}%). ` +
-        `Usage: ${afterUsage}/${this.MAX_TOKENS} (${this.getUsagePercentage()}%)`,
-    );
-
-    const newRatio = afterUsage / this.MAX_TOKENS;
-    if (newRatio < this.AUTO_CLEANUP_REARM_THRESHOLD) {
-      this.autoCleanupArmed = true;
-    }
-    this.warnings = new Set(Array.from(this.warnings).filter((threshold) => newRatio >= threshold));
   }
 
   private recalculateUsage(): void {

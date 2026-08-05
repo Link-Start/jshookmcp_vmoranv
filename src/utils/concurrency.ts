@@ -11,8 +11,29 @@
 
 type LimitFunction = <T>(fn: () => Promise<T> | T) => Promise<T>;
 
+/** Default concurrency per resource category. */
+const IO_CONCURRENCY_DEFAULT = 4;
+const CPU_CONCURRENCY_DEFAULT = 2;
+const CDP_CONCURRENCY_DEFAULT = 2;
+
+/**
+ * Parse a concurrency env value, falling back to `fallback` when the value is
+ * missing, non-numeric, or not a positive integer. A raw `parseInt` result of
+ * NaN slips past `concurrency < 1` and deadlocks the limiter (every task stays
+ * queued because `activeCount < NaN` is always false), so it must be guarded.
+ */
+function parseConcurrency(envValue: string | undefined, fallback: number): number {
+  if (envValue === undefined || envValue.trim().length === 0) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(envValue, 10);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : fallback;
+}
+
 function pLimit(concurrency: number): LimitFunction {
-  if (concurrency < 1) throw new RangeError('concurrency must be >= 1');
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new RangeError('concurrency must be an integer >= 1');
+  }
 
   let activeCount = 0;
   const queue: Array<() => void> = [];
@@ -54,10 +75,16 @@ function pLimit(concurrency: number): LimitFunction {
 }
 
 /** External CLI calls, HAR export, large file I/O */
-export const ioLimit = pLimit(parseInt(process.env.jshook_IO_CONCURRENCY || '4', 10));
+export const ioLimit = pLimit(
+  parseConcurrency(process.env.jshook_IO_CONCURRENCY, IO_CONCURRENCY_DEFAULT),
+);
 
 /** CPU-heavy: AST parsing, deobfuscation, binary decoding */
-export const cpuLimit = pLimit(parseInt(process.env.jshook_CPU_CONCURRENCY || '2', 10));
+export const cpuLimit = pLimit(
+  parseConcurrency(process.env.jshook_CPU_CONCURRENCY, CPU_CONCURRENCY_DEFAULT),
+);
 
 /** CDP-heavy: heap snapshots, traces, profiling */
-export const cdpLimit = pLimit(parseInt(process.env.jshook_CDP_CONCURRENCY || '2', 10));
+export const cdpLimit = pLimit(
+  parseConcurrency(process.env.jshook_CDP_CONCURRENCY, CDP_CONCURRENCY_DEFAULT),
+);

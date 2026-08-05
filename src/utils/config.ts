@@ -324,165 +324,11 @@ const ConfigSchema = z.object({
   OFFLOADER_OUTPUT_DIR: z.string().optional().default(CONFIG_DEFAULTS.offloader.outputDir),
   OFFLOADER_EXCLUDE_TOOLS: z.string().optional().default(''),
 
-  // Reverse engineering runtime limits
-  COLLECTOR_DEFAULT_TIMEOUT_MS: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.collector.defaultTimeoutMs,
-  ).pipe(z.number().min(1)),
-  COLLECTOR_DYNAMIC_SCRIPT_WAIT_MS: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.collector.dynamicScriptWaitMs,
-  ).pipe(z.number().min(1)),
-  TRANSFORM_WORKBENCH_DEFAULT_PREVIEW_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.transformWorkbench.defaultPreviewBytes,
-  ).pipe(z.number().min(1)),
-  TRANSFORM_WORKBENCH_MAX_PREVIEW_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.transformWorkbench.maxPreviewBytes,
-  ).pipe(z.number().min(1)),
-  TRANSFORM_WORKBENCH_TEXT_SAMPLE_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.transformWorkbench.textSampleBytes,
-  ).pipe(z.number().min(1)),
-  TRANSFORM_WORKBENCH_MAX_INPUT_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.transformWorkbench.maxInputBytes,
-  ).pipe(z.number().min(1)),
-  TRANSFORM_WORKBENCH_MAX_OUTPUT_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.transformWorkbench.maxOutputBytes,
-  ).pipe(z.number().min(1)),
-  TRANSFORM_WORKBENCH_MAX_STEPS: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.transformWorkbench.maxSteps,
-  ).pipe(z.number().min(1)),
-  REVERSE_SESSION_MAX_INLINE_TRANSFORM_INPUT_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.reverseSession.maxInlineTransformInputBytes,
-  ).pipe(z.number().min(1)),
-  REVERSE_SESSION_PROMOTED_TRANSFORM_PREVIEW_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.reverseSession.promotedTransformPreviewBytes,
-  ).pipe(z.number().min(1)),
-  REVERSE_SESSION_RUN_MAX_STEPS: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.reverseSession.runMaxSteps,
-  ).pipe(z.number().min(1)),
-  REVERSE_SESSION_EVIDENCE_REF_SEGMENT_MAX_CHARS: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.reverseSession.evidenceRefSegmentMaxChars,
-  ).pipe(z.number().min(1)),
-  BINARY_MAGIC_HINT_PREFIX_MAX_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.binaryMagic.hintPrefixMaxBytes,
-  ).pipe(z.number().min(1)),
-  DEX_MAGIC_ASCII: z
-    .string()
-    .optional()
-    .default(CONFIG_DEFAULTS.reverseEngineering.binaryMagic.dexMagicAscii),
-  CDEX_MAGIC_ASCII: z
-    .string()
-    .optional()
-    .default(CONFIG_DEFAULTS.reverseEngineering.binaryMagic.compactDexMagicAscii),
-  NEMU_CSTRING_DEFAULT_LIMIT_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.nativeEmulator.cstringDefaultLimitBytes,
-  ).pipe(z.number().min(1)),
-  NEMU_CSTRING_READ_CHUNK_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.nativeEmulator.cstringReadChunkBytes,
-  ).pipe(z.number().min(1)),
-  NEMU_GUEST_PAGE_SIZE_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.nativeEmulator.guestPageSizeBytes,
-  ).pipe(z.number().min(1)),
-  NEMU_SYSCALL_CSTRING_LIMIT_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.nativeEmulator.syscallCStringLimitBytes,
-  ).pipe(z.number().min(1)),
-  NEMU_RAW_MEMORY_MAX_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.nativeEmulator.rawMemoryMaxBytes,
-  ).pipe(z.number().min(1)),
-  NEMU_RAW_MEMORY_PREVIEW_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.nativeEmulator.rawMemoryPreviewBytes,
-  ).pipe(z.number().min(1)),
-  APK_STATIC_TRIAGE_MIN_ENTRIES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.staticTriageMinEntries,
-  ).pipe(z.number().min(1)),
-  APK_STATIC_TRIAGE_DEFAULT_ENTRIES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.staticTriageDefaultEntries,
-  ).pipe(z.number().min(1)),
-  APK_STATIC_TRIAGE_MAX_ENTRIES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.staticTriageMaxEntries,
-  ).pipe(z.number().min(1)),
-  APK_STATIC_TRIAGE_ASSET_HINT_LIMIT: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.staticTriageAssetHintLimit,
-  ).pipe(z.number().min(1)),
-  APK_STATIC_TRIAGE_NATIVE_LIB_LIMIT: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.staticTriageNativeLibLimit,
-  ).pipe(z.number().min(1)),
-  APK_DEX_INTAKE_DEFAULT_DEX_FILES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.dexIntakeDefaultDexFiles,
-  ).pipe(z.number().min(1)),
-  APK_DEX_INTAKE_MAX_DEX_FILES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.dexIntakeMaxDexFiles,
-  ).pipe(z.number().min(1)),
-  APK_DEX_INTAKE_MANIFEST_TEXT_SAMPLE_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.dexIntakeManifestTextSampleBytes,
-  ).pipe(z.number().min(1)),
-  APK_DEX_INTAKE_MANIFEST_CONTROL_BYTE_RATIO: envFloat(
-    CONFIG_DEFAULTS.reverseEngineering.apk.dexIntakeManifestControlByteRatio,
-  ).pipe(z.number().min(0).max(1)),
-  APK_DEX_INTAKE_COMPONENT_LIMIT: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.dexIntakeComponentLimit,
-  ).pipe(z.number().min(1)),
-  APK_DEX_INTAKE_FEATURE_LIMIT: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.dexIntakeFeatureLimit,
-  ).pipe(z.number().min(1)),
-  APK_DEX_INTAKE_UNIQUE_LIMIT_DEFAULT: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.apk.dexIntakeUniqueLimitDefault,
-  ).pipe(z.number().min(1)),
-  DEX_SCAN_DEFAULT_MAX_HITS: envInt(CONFIG_DEFAULTS.reverseEngineering.dex.scanDefaultMaxHits).pipe(
-    z.number().min(1),
-  ),
-  DEX_SCAN_MAX_HITS: envInt(CONFIG_DEFAULTS.reverseEngineering.dex.scanMaxHits).pipe(
-    z.number().min(1),
-  ),
-  DEX_SCAN_MAX_EXTRACT_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.dex.scanMaxExtractBytes,
-  ).pipe(z.number().min(1)),
-  DEX_ARTIFACT_DEFAULT_LIMIT: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.dex.artifactDefaultLimit,
-  ).pipe(z.number().min(1)),
-  DEX_ARTIFACT_MAX_LIMIT: envInt(CONFIG_DEFAULTS.reverseEngineering.dex.artifactMaxLimit).pipe(
-    z.number().min(1),
-  ),
-  DEX_ARTIFACT_MIN_READ_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.dex.artifactMinReadBytes,
-  ).pipe(z.number().min(1)),
-  DEX_ARTIFACT_DEFAULT_MAX_FILE_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.dex.artifactDefaultMaxFileBytes,
-  ).pipe(z.number().min(1)),
-  DEX_ARTIFACT_DEFAULT_MAX_TOTAL_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.dex.artifactDefaultMaxTotalBytes,
-  ).pipe(z.number().min(1)),
-  DEX_ARTIFACT_MAX_READ_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.dex.artifactMaxReadBytes,
-  ).pipe(z.number().min(1)),
-  DEX_STRING_SCAN_MAX_BYTES: envInt(CONFIG_DEFAULTS.reverseEngineering.dex.stringScanMaxBytes).pipe(
-    z.number().min(1),
-  ),
-  FRIDA_DEX_DUMP_TIMEOUT_MS: envInt(CONFIG_DEFAULTS.reverseEngineering.frida.dexDumpTimeoutMs).pipe(
-    z.number().min(1),
-  ),
-  FRIDA_DEX_DUMP_MAX_BUFFER_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.frida.dexDumpMaxBufferBytes,
-  ).pipe(z.number().min(1)),
-  FRIDA_DEX_DUMP_FILE_LIMIT: envInt(CONFIG_DEFAULTS.reverseEngineering.frida.dexDumpFileLimit).pipe(
-    z.number().min(1),
-  ),
-  JADX_DECOMPILE_TIMEOUT_MS: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.jadx.decompileTimeoutMs,
-  ).pipe(z.number().min(1000)),
-  JADX_SEARCH_TIMEOUT_MS: envInt(CONFIG_DEFAULTS.reverseEngineering.jadx.searchTimeoutMs).pipe(
-    z.number().min(1000),
-  ),
-  JADX_SINGLE_CLASS_TIMEOUT_MS: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.jadx.singleClassTimeoutMs,
-  ).pipe(z.number().min(1000)),
-  JADX_THREADS_COUNT: envInt(CONFIG_DEFAULTS.reverseEngineering.jadx.threadsCount).pipe(
-    z.number().min(1).max(64),
-  ),
-  ANDROID_RUNTIME_MAPS_MAX_BYTES: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.androidRuntime.mapsMaxBytes,
-  ).pipe(z.number().min(1)),
-  ANDROID_RUNTIME_MAPS_MODULE_LIMIT: envInt(
-    CONFIG_DEFAULTS.reverseEngineering.androidRuntime.mapsModuleLimit,
-  ).pipe(z.number().min(1)),
+  // NOTE: reverse-engineering keys are intentionally NOT part of this schema.
+  // They are read exactly once, directly from process.env, by
+  // buildReverseEngineeringConfig() below (soft per-key coercion). Keeping them
+  // here too would double-read the env with different semantics and let a
+  // single malformed RE var fail validation of the entire config.
 });
 
 function parseJsonArrayEnv(key: string): unknown[] | undefined {
@@ -757,7 +603,12 @@ function parseBrowserFleetWorkers(
   }
 }
 
-function buildReverseEngineeringConfig(env: Record<string, unknown>): ReverseEngineeringConfig {
+function buildReverseEngineeringConfig(): ReverseEngineeringConfig {
+  // Single read of the env for the reverse-engineering section (see note on
+  // ConfigSchema). process.env is read here directly because this function is
+  // the only consumer of these keys — routing them through the schema-parsed
+  // `env` object would re-introduce the double-read.
+  const env = process.env;
   const defaults = CONFIG_DEFAULTS.reverseEngineering;
   return {
     transformWorkbench: {
@@ -1001,12 +852,16 @@ export function getConfig(): Config {
     (env.PUPPETEER_EXECUTABLE_PATH as string) ||
     (env.CHROME_PATH as string) ||
     (env.BROWSER_EXECUTABLE_PATH as string);
+  const writableBase = getWritableBaseDir();
+  // Cache is written at runtime, so a relative CACHE_DIR must resolve against the
+  // writable base (user cwd in npx/global installs), not the immutable install
+  // cache. Previously projectRoot was used, silently degrading cache to a no-op
+  // whenever the package root was not writable.
   const absoluteCacheDir =
     cacheDir.startsWith('/') || cacheDir.match(/^[A-Za-z]:/)
       ? cacheDir
-      : join(projectRoot, cacheDir);
+      : join(writableBase, cacheDir);
   const search = buildSearchConfig();
-  const writableBase = getWritableBaseDir();
   const paths = {
     screenshotDir: resolveConfigPath(
       (env.MCP_SCREENSHOT_DIR as string) || CONFIG_DEFAULTS.paths.screenshotDir,
@@ -1127,7 +982,7 @@ export function getConfig(): Config {
       outputDir: stringEnv(env.OFFLOADER_OUTPUT_DIR, CONFIG_DEFAULTS.offloader.outputDir),
       excludeTools: parseCsvList(env.OFFLOADER_EXCLUDE_TOOLS),
     },
-    reverseEngineering: buildReverseEngineeringConfig(env),
+    reverseEngineering: buildReverseEngineeringConfig(),
     search,
   };
 }

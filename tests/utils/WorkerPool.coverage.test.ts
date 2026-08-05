@@ -444,7 +444,9 @@ describe('WorkerPool – v8 ignore branch coverage', () => {
 
     expect(worker.removeAllListeners).toHaveBeenCalledWith('message');
     expect(worker.removeAllListeners).toHaveBeenCalledWith('error');
-    expect(worker.removeAllListeners).toHaveBeenCalledWith('exit');
+    // The 'exit' listener must survive termination: ProcessRegistry relies on
+    // its own once('exit') to auto-deregister the dead worker.
+    expect(worker.removeAllListeners).not.toHaveBeenCalledWith('exit');
     // idleTimer was set by armIdleTimer and cleared by terminateWorker
     expect(pooledWorker?.idleTimer).toBeNull();
 

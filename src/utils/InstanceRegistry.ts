@@ -129,20 +129,37 @@ export async function registerServerInstance(options?: {
     );
   }
 
-  const warned = liveCount >= Math.max(1, JSHOOK_INSTANCE_WARN_AT);
+  // Post-registration re-check: closes the check-then-act race window where
+  // concurrent registrations all pass the pre-check above and collectively
+  // exceed the cap. Roll our own record back when the cap is exceeded.
+  const postPeers = await listLiveInstances(self.pid);
+  const postLiveCount = postPeers.length + 1;
+  if (JSHOOK_MAX_INSTANCES > 0 && postLiveCount > JSHOOK_MAX_INSTANCES) {
+    await unregisterServerInstance(self.pid).catch(() => undefined);
+    const peerSummary = postPeers
+      .map((peer) => `${peer.pid}(${peer.profile}/${peer.transport})`)
+      .join(', ');
+    throw new Error(
+      `jshook instance limit reached: ${postLiveCount} > JSHOOK_MAX_INSTANCES=${JSHOOK_MAX_INSTANCES}. ` +
+        `Live peers: ${peerSummary || '(none)'}. Stop unused MCP hosts, raise the limit, or share one ` +
+        `HTTP server across clients.`,
+    );
+  }
+
+  const warned = postLiveCount >= Math.max(1, JSHOOK_INSTANCE_WARN_AT);
   if (warned) {
-    const peerSummary = peers
+    const peerSummary = postPeers
       .map((peer) => `pid=${peer.pid} profile=${peer.profile} transport=${peer.transport}`)
       .join('; ');
     logger.warn(
-      `[instance] ${liveCount} live jshook processes detected (self pid=${self.pid} rss=${formatRssMb()}). ` +
+      `[instance] ${postLiveCount} live jshook processes detected (self pid=${self.pid} rss=${formatRssMb()}). ` +
         `Each stdio MCP host owns a separate process. Peers: ${peerSummary || '(none)'}. ` +
         `Disable unused MCP entries, configure JSHOOK_MAX_INSTANCES, or use one shared HTTP server.`,
     );
   } else {
     logger.info(
       `[instance] registered pid=${self.pid} transport=${self.transport} profile=${self.profile} ` +
-        `rss=${formatRssMb()} peers=${peers.length}`,
+        `rss=${formatRssMb()} peers=${postPeers.length}`,
     );
   }
 
@@ -154,7 +171,7 @@ export async function registerServerInstance(options?: {
     }
   });
 
-  return { self, livePeers: peers, liveCount, warned, blocked: false };
+  return { self, livePeers: postPeers, liveCount: postLiveCount, warned, blocked: false };
 }
 
 export async function unregisterServerInstance(pid = process.pid): Promise<void> {

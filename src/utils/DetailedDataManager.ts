@@ -73,6 +73,32 @@ interface PersistenceMetrics {
   totalBytesRead: number;
 }
 
+/**
+ * Snapshot returned by getStats(). All numeric metrics are plain numbers —
+ * consumers must not need to parse formatted strings.
+ */
+export interface DetailedDataManagerStats {
+  cacheSize: number;
+  maxCacheSize: number;
+  totalMemoryMB: number;
+  maxMemoryMB: number;
+  memoryUtilization: number;
+  defaultTTLSeconds: number;
+  maxTTLSeconds: number;
+  totalSizeKB: number;
+  avgAccessCount: number;
+  autoExtendEnabled: boolean;
+  extendDurationSeconds: number;
+  persistence: {
+    enabled: boolean;
+    persistedCount: number;
+    compressedCount: number;
+    gzipEnabled: boolean;
+    gzipThresholdKB: number;
+  };
+  metrics: PersistenceMetrics;
+}
+
 export class DetailedDataManager {
   private static instance: DetailedDataManager | undefined;
   private cache = new Map<string, CacheEntry>();
@@ -591,7 +617,7 @@ export class DetailedDataManager {
     );
   }
 
-  getStats() {
+  getStats(): DetailedDataManagerStats {
     let totalSize = 0;
     let totalAccessCount = 0;
     let persistedCount = 0;
@@ -608,13 +634,13 @@ export class DetailedDataManager {
     return {
       cacheSize: this.cache.size,
       maxCacheSize: this.MAX_CACHE_SIZE,
-      totalMemoryMB: (totalSize / (1024 * 1024)).toFixed(2),
-      maxMemoryMB: (this.MAX_TOTAL_MEMORY_BYTES / (1024 * 1024)).toFixed(0),
-      memoryUtilization: ((totalSize / this.MAX_TOTAL_MEMORY_BYTES) * 100).toFixed(1) + '%',
+      totalMemoryMB: totalSize / (1024 * 1024),
+      maxMemoryMB: this.MAX_TOTAL_MEMORY_BYTES / (1024 * 1024),
+      memoryUtilization: (totalSize / this.MAX_TOTAL_MEMORY_BYTES) * 100,
       defaultTTLSeconds: this.DEFAULT_TTL / 1000,
       maxTTLSeconds: this.MAX_TTL / 1000,
-      totalSizeKB: (totalSize / 1024).toFixed(1),
-      avgAccessCount: entries.length > 0 ? (totalAccessCount / entries.length).toFixed(1) : '0',
+      totalSizeKB: totalSize / 1024,
+      avgAccessCount: entries.length > 0 ? totalAccessCount / entries.length : 0,
       autoExtendEnabled: this.AUTO_EXTEND_ON_ACCESS,
       extendDurationSeconds: this.EXTEND_DURATION / 1000,
       persistence: {
@@ -622,7 +648,7 @@ export class DetailedDataManager {
         persistedCount,
         compressedCount,
         gzipEnabled: ENABLE_GZIP,
-        gzipThresholdKB: (GZIP_THRESHOLD_BYTES / 1024).toFixed(1),
+        gzipThresholdKB: GZIP_THRESHOLD_BYTES / 1024,
       },
       metrics: { ...this.metrics },
     };

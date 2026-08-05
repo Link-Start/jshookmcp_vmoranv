@@ -17,6 +17,11 @@ export class RingBuffer<T> {
   }
 
   push(item: T): void {
+    // shift() uses undefined as the "buffer empty" sentinel, so storing an
+    // undefined value would make the two states indistinguishable.
+    if (item === undefined) {
+      throw new TypeError('RingBuffer cannot store undefined values');
+    }
     if (this.count === this.buf.length) {
       // Buffer full — grow by 2x up to capacity, or overwrite oldest
       if (this.buf.length < this.capacity) {
@@ -50,10 +55,11 @@ export class RingBuffer<T> {
     this.count = 0;
   }
 
-  *[Symbol.iterator](): Iterator<T> {
-    for (let i = 0; i < this.count; i++) {
-      yield this.buf[(this.head + i) % this.buf.length] as T;
-    }
+  [Symbol.iterator](): Iterator<T> {
+    // Iterate over a snapshot: callers that push/shift while consuming (e.g.
+    // draining inside a for-of loop) would otherwise see a corrupted walk as
+    // head/tail move under the iterator.
+    return this.toArray()[Symbol.iterator]();
   }
 
   toArray(): T[] {

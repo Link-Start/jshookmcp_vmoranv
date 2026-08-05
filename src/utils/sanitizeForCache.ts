@@ -21,7 +21,7 @@
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { resolve, relative } from 'node:path';
+import { resolve, relative, isAbsolute, sep } from 'node:path';
 import { getArtifactDir, getArtifactsRoot } from '@utils/artifacts';
 import { getProjectRoot } from '@utils/outputPaths';
 import { OFFLOAD_FIELD_SANITIZE_THRESHOLD_BYTES } from '@src/constants';
@@ -32,6 +32,15 @@ export const DATA_URI_RE = /^data:([a-zA-Z0-9/+.-]+);base64,/;
 
 /** Length (chars) of the human-readable sample retained in the placeholder. */
 const SAMPLE_LENGTH = 128;
+
+/**
+ * Object keys that must never be copied when sanitizing captured data. Hostile
+ * page content can carry `__proto__` / `constructor` / `prototype` as own keys
+ * (via JSON.parse); assigning them onto a plain result object would pollute
+ * its prototype chain. Such keys are dropped — they are never legitimate
+ * payload fields for caching.
+ */
+const UNSAFE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 export interface OffloadFilePlaceholder {
   _offload: {
@@ -68,7 +77,10 @@ export function formatSize(bytes: number): string {
 }
 
 function isOffloadPlaceholder(value: object): boolean {
-  return '_offload' in value;
+  // Own-property check only: a polluted prototype chain must not be able to
+  // make arbitrary objects look like placeholders (which would bypass the
+  // idempotency guard and pass attacker data through untouched).
+  return Object.prototype.hasOwnProperty.call(value, '_offload');
 }
 
 /** Write raw string bytes to artifacts/offloaded and return the project-relative path. */
@@ -163,14 +175,32 @@ function sanitizeValue(
   }
 
   let mutated = false;
+  let skippedUnsafe = false;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
+    if (UNSAFE_KEYS.has(key)) {
+      skippedUnsafe = true;
+      continue;
+    }
     const sanitized = sanitizeValue(item, opts, seen);
     if (sanitized !== item) mutated = true;
     result[key] = sanitized;
   }
   seen.delete(value);
-  return mutated ? result : value;
+  // An unsafe key forces a fresh copy even when nothing else mutated, so the
+  // original object (with its hostile own key) is never returned as-is.
+  return mutated || skippedUnsafe ? result : value;
+}
+
+/** True when `target` resolves to `base` or a directory inside it. */
+function isInsideDir(baseDir: string, targetPath: string): boolean {
+  const rel = relative(baseDir, targetPath);
+  return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+/** True when a path is absolute on this platform (incl. Windows drive letters). */
+function isUserAbsolutePath(inputPath: string): boolean {
+  return isAbsolute(inputPath) || /^[A-Za-z]:[\\/]/.test(inputPath) || inputPath.startsWith('\\\\');
 }
 
 /**
@@ -180,9 +210,26 @@ function sanitizeValue(
  * detect "no-op").
  */
 export function sanitizeForCache<T>(data: T, options: SanitizeOptions = {}): T {
+  const projectRoot = getProjectRoot();
+  const requestedDir = options.outputDir ?? getArtifactDir('offloaded');
+  // Path-guard: offload files are only ever written inside the project root,
+  // even when a caller supplies a custom outputDir (mirrors the guard in
+  // resolveArtifactPath). A relative outputDir is resolved against the project
+  // root; anything that escapes falls back to the default offload dir.
+  const candidateDir = isUserAbsolutePath(requestedDir)
+    ? resolve(requestedDir)
+    : resolve(projectRoot, requestedDir);
+  const outputDir = isInsideDir(projectRoot, candidateDir)
+    ? candidateDir
+    : (logger.warn(
+        `[sanitizeForCache] Refusing outputDir outside project root (${requestedDir}); ` +
+          `falling back to default offload dir`,
+      ),
+      getArtifactDir('offloaded'));
+
   const opts: Required<SanitizeOptions> = {
     threshold: options.threshold ?? OFFLOAD_FIELD_SANITIZE_THRESHOLD_BYTES,
-    outputDir: options.outputDir ?? getArtifactDir('offloaded'),
+    outputDir,
     writeFile: options.writeFile ?? true,
   };
   return sanitizeValue(data, opts, new WeakSet<object>()) as T;

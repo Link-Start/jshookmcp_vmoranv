@@ -391,7 +391,7 @@ describe('DetailedDataManager – v8 ignore branch coverage', () => {
     manager.store({ b: 2 });
     manager.clear();
     expect(manager.getStats().cacheSize).toBe(0);
-    expect(manager.getStats().totalSizeKB).toBe('0.0');
+    expect(manager.getStats().totalSizeKB).toBe(0);
   });
 
   // ── shutdown ─────────────────────────────────────────────────────────────

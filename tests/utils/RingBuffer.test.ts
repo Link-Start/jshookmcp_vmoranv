@@ -57,4 +57,25 @@ describe('RingBuffer', () => {
     expect(buffer.toArray()[0]).toBe(0);
     expect(buffer.toArray()[69]).toBe(69);
   });
+
+  it('rejects storing undefined so shift() keeps a single empty signal', () => {
+    const buffer = new RingBuffer<number | undefined>(3);
+    expect(() => buffer.push(undefined)).toThrow(TypeError);
+    expect(buffer.length).toBe(0);
+  });
+
+  it('iterates over a snapshot even when the buffer is mutated mid-iteration', () => {
+    const buffer = new RingBuffer<number>(4);
+    buffer.push(1);
+    buffer.push(2);
+
+    // Iterator creation takes the snapshot; later mutations must not corrupt it.
+    const iterator = buffer[Symbol.iterator]();
+    buffer.push(3);
+    buffer.shift();
+
+    expect(iterator.next()).toEqual({ value: 1, done: false });
+    expect(iterator.next()).toEqual({ value: 2, done: false });
+    expect(iterator.next()).toEqual({ value: undefined, done: true });
+  });
 });

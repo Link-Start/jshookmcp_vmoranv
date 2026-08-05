@@ -88,14 +88,20 @@ export class CodeCompressorAdapter implements CacheInstance {
   }
 }
 
+/**
+ * Build adapters for the caches that are actually present. Callers that
+ * construct a collector lazily may not have a CodeCache/CodeCompressor yet;
+ * registering an adapter around null would make getStats() throw on every
+ * stats aggregation instead of simply being absent.
+ */
 export function createCacheAdapters(
-  detailedDataManager: DetailedDataManager,
-  codeCache: CodeCache,
-  codeCompressor: CodeCompressor,
+  detailedDataManager: DetailedDataManager | null | undefined,
+  codeCache: CodeCache | null | undefined,
+  codeCompressor: CodeCompressor | null | undefined,
 ): CacheInstance[] {
-  return [
-    new DetailedDataManagerAdapter(detailedDataManager),
-    new CodeCacheAdapter(codeCache),
-    new CodeCompressorAdapter(codeCompressor),
-  ];
+  const adapters: CacheInstance[] = [];
+  if (detailedDataManager) adapters.push(new DetailedDataManagerAdapter(detailedDataManager));
+  if (codeCache) adapters.push(new CodeCacheAdapter(codeCache));
+  if (codeCompressor) adapters.push(new CodeCompressorAdapter(codeCompressor));
+  return adapters;
 }

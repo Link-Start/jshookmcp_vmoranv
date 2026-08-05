@@ -300,6 +300,46 @@ describe('PersistentCache', () => {
     });
   });
 
+  describe('corrupted entries', () => {
+    it('discards a corrupted JSON entry and removes the poison row', async () => {
+      const cache = new PersistentCache({ dbPath: testDbPath, name: 'corrupt-test' });
+      await cache.init();
+
+      // Simulate a torn write / manual DB edit: row exists, value is not JSON.
+      (
+        cache as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }
+      ).db
+        .prepare(
+          'INSERT OR REPLACE INTO cache_entries (key, value, expiresAt, createdAt) VALUES (?, ?, ?, ?)',
+        )
+        .run('corrupt-key', '{not valid json', Date.now() + 60_000, Date.now());
+
+      expect(await cache.get('corrupt-key')).toBeNull();
+      // Poison row is deleted — a second get is a clean miss, not another error.
+      expect(await cache.has('corrupt-key')).toBe(false);
+      expect(await cache.get('corrupt-key')).toBeNull();
+      await cache.close();
+    });
+
+    it('discards an entry that is not in the wrapped __cached format', async () => {
+      const cache = new PersistentCache({ dbPath: testDbPath, name: 'unwrap-test' });
+      await cache.init();
+
+      // Raw JSON without the { __cached: true, data } wrapper (external write).
+      (
+        cache as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }
+      ).db
+        .prepare(
+          'INSERT OR REPLACE INTO cache_entries (key, value, expiresAt, createdAt) VALUES (?, ?, ?, ?)',
+        )
+        .run('raw-key', JSON.stringify({ hello: 'world' }), Date.now() + 60_000, Date.now());
+
+      expect(await cache.get('raw-key')).toBeNull();
+      expect(await cache.has('raw-key')).toBe(false);
+      await cache.close();
+    });
+  });
+
   describe('disabled cache behavior', () => {
     it('should return null from get when disabled', async () => {
       const cache = new PersistentCache({ enabled: false });
