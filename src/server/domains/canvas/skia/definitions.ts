@@ -4,6 +4,7 @@ const emptyProperties: Record<string, object> = {};
 const extractSceneProperties: Record<string, object> = {
   canvasId: {
     type: 'string',
+    description: 'Optional canvas element ID to target for extraction.',
   },
 };
 const correlateProperties: Record<string, object> = {

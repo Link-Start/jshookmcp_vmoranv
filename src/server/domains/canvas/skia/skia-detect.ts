@@ -68,16 +68,25 @@ export async function correlateObjects(
   const sceneTree = await extractSceneTree(pageController, canvasId || undefined, true);
 
   if (sceneTree.layers.length === 0 && sceneTree.drawCommands.length === 0) {
-    throw new ToolError('PREREQUISITE', 'No Skia scene data available for correlation');
+    throw new ToolError(
+      'PREREQUISITE',
+      `No Skia scene data available for correlation (canvasId=${canvasId || 'auto'})`,
+    );
   }
 
-  // Get JS objects from v8-inspector if available
+  // Get JS objects from v8-inspector if available — degrade gracefully, but
+  // surface the failure so 'no correlations' is distinguishable from a
+  // v8-inspector integration error.
   let jsObjects: JSObjectInfo[] = [];
+  let jsObjectsWarning: string | undefined;
   if (getJSObjects) {
     try {
       jsObjects = await getJSObjects();
-    } catch {
+    } catch (err) {
       jsObjects = [];
+      jsObjectsWarning = `v8-inspector JS object fetch failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`;
     }
   }
 
@@ -102,5 +111,6 @@ export async function correlateObjects(
     canvasId: canvasId || 'auto',
     skiaNodeIds: skiaNodeIds.length > 0 ? skiaNodeIds : undefined,
     correlationComplete: true,
+    ...(jsObjectsWarning ? { warning: jsObjectsWarning } : {}),
   };
 }
