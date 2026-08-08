@@ -86,7 +86,7 @@ export const isNetworkResponsePayload = (value: unknown): value is NetworkRespon
   if (!isObjectRecord(value)) {
     return false;
   }
-  return typeof value.status === 'number';
+  return isFiniteNumber(value.status);
 };
 
 export const isFiniteNumber = (value: unknown): value is number =>

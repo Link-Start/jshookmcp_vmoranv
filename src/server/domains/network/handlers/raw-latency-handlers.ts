@@ -357,19 +357,29 @@ export class RawLatencyHandlers {
   probeTcp(host: string, port: number, timeoutMs: number): Promise<number> {
     return new Promise((resolve, reject) => {
       const start = performance.now();
+      let settled = false;
+      let socket: net.Socket | null = null;
+      // Same settled guard as probeTls/probeHttp: the timeout path must also
+      // destroy the socket, otherwise a slow-connecting socket leaks past the
+      // timeout and the timer keeps the process alive.
+      const finish = (callback: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timer);
+        socket?.destroy();
+        callback();
+      };
       const timer = setTimeout(
-        () => reject(new Error(`TCP probe timed out after ${timeoutMs}ms`)),
+        () => finish(() => reject(new Error(`TCP probe timed out after ${timeoutMs}ms`))),
         timeoutMs,
       );
-      const socket = net.createConnection({ host, port }, () => {
-        clearTimeout(timer);
-        socket.destroy();
-        resolve(roundMs(performance.now() - start));
+      socket = net.createConnection({ host, port }, () => {
+        finish(() => resolve(roundMs(performance.now() - start)));
       });
       socket.on('error', (err) => {
-        clearTimeout(timer);
-        socket.destroy();
-        reject(err);
+        finish(() => reject(err));
       });
     });
   }

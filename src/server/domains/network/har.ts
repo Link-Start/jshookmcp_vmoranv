@@ -149,7 +149,10 @@ export async function buildHar(params: BuildHarParams): Promise<Har> {
   const entries: HarEntry[] = [];
 
   // Parallel body fetching with concurrency limit to avoid overwhelming CDP
-  const bodyResults = new Map<string, { text?: string; _bodyUnavailable?: boolean }>();
+  const bodyResults = new Map<
+    string,
+    { text?: string; encoding?: 'base64'; _bodyUnavailable?: boolean }
+  >();
   if (includeBodies) {
     const BODY_CONCURRENCY = NETWORK_HAR_BODY_CONCURRENCY;
     for (let i = 0; i < requests.length; i += BODY_CONCURRENCY) {
@@ -159,7 +162,15 @@ export async function buildHar(params: BuildHarParams): Promise<Har> {
           try {
             const bodyResult = await getResponseBody(req.requestId);
             if (bodyResult) {
-              return { requestId: req.requestId, text: bodyResult.body };
+              // HAR 1.2 requires content.encoding='base64' for base64-encoded
+              // bodies, otherwise viewers decode the raw base64 as UTF-8 text.
+              return bodyResult.base64Encoded
+                ? {
+                    requestId: req.requestId,
+                    text: bodyResult.body,
+                    encoding: 'base64' as const,
+                  }
+                : { requestId: req.requestId, text: bodyResult.body };
             }
             return { requestId: req.requestId, _bodyUnavailable: true as const };
           } catch {
@@ -173,7 +184,9 @@ export async function buildHar(params: BuildHarParams): Promise<Har> {
           bodyResults.set(
             val.requestId,
 
-            '_bodyUnavailable' in val ? { _bodyUnavailable: true } : { text: val.text },
+            '_bodyUnavailable' in val
+              ? { _bodyUnavailable: true }
+              : { text: val.text, encoding: val.encoding },
           );
         }
       }

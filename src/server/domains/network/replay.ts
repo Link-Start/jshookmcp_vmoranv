@@ -432,33 +432,66 @@ export async function replayRequest(
     let currentBody: string | undefined = body;
 
     if (useHttp2) {
-      // HTTP/2 path - no redirect handling in this version (HTTP/2 doesn't support manual redirect)
-      const { pinnedUrl, originalHost, target } = await resolvePinned(currentUrl);
-      const parsedUrl = new URL(pinnedUrl);
-      const hopHeaders = { ...mergedHeaders };
-      if (target.parsedUrl.protocol === 'http:' && target.resolvedAddress && !target.isIpLiteral) {
-        hopHeaders.Host = originalHost;
+      // HTTP/2 path — follows redirects like the HTTP/1.1 path below.
+      for (let hop = 0; hop < MAX_REDIRECTS; hop++) {
+        const { pinnedUrl, originalHost, target } = await resolvePinned(currentUrl);
+        const parsedUrl = new URL(pinnedUrl);
+        const hopHeaders = { ...mergedHeaders };
+        if (
+          target.parsedUrl.protocol === 'http:' &&
+          target.resolvedAddress &&
+          !target.isIpLiteral
+        ) {
+          hopHeaders.Host = originalHost;
+        }
+
+        const result = await replayHttp2Request(
+          parsedUrl,
+          currentMethod,
+          hopHeaders,
+          currentMethod !== 'GET' && currentMethod !== 'HEAD' ? currentBody : undefined,
+          args.timeoutMs ?? NETWORK_REPLAY_TIMEOUT_MS,
+          target,
+          maxBodyBytes,
+        );
+
+        if (result.status >= 300 && result.status < 400) {
+          const location = result.headers['location'] ?? result.headers['Location'];
+          if (!location) {
+            return {
+              dryRun: false,
+              status: result.status,
+              statusText: result.statusText,
+              headers: result.headers,
+              body: result.body,
+              bodyTruncated: result.bodyTruncated,
+              requestId: args.requestId,
+            };
+          }
+          currentUrl = new URL(location, currentUrl).toString();
+          // 301/302/303 → method becomes GET, body dropped; 307/308 → preserve
+          if (result.status === 301 || result.status === 302 || result.status === 303) {
+            currentMethod = 'GET';
+            currentBody = undefined;
+          }
+          // Remove stale Host header for new destination
+          delete mergedHeaders['Host'];
+          delete mergedHeaders['host'];
+          continue;
+        }
+
+        return {
+          dryRun: false,
+          status: result.status,
+          statusText: result.statusText,
+          headers: result.headers,
+          body: result.body,
+          bodyTruncated: result.bodyTruncated,
+          requestId: args.requestId,
+        };
       }
 
-      const result = await replayHttp2Request(
-        parsedUrl,
-        currentMethod,
-        hopHeaders,
-        currentMethod !== 'GET' && currentMethod !== 'HEAD' ? currentBody : undefined,
-        args.timeoutMs ?? NETWORK_REPLAY_TIMEOUT_MS,
-        target,
-        maxBodyBytes,
-      );
-
-      return {
-        dryRun: false,
-        status: result.status,
-        statusText: result.statusText,
-        headers: result.headers,
-        body: result.body,
-        bodyTruncated: result.bodyTruncated,
-        requestId: args.requestId,
-      };
+      throw new Error(`Replay blocked: too many redirects (>${MAX_REDIRECTS})`);
     }
 
     // HTTP/1.1 path with fetch
