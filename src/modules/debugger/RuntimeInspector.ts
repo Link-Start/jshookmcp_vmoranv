@@ -411,6 +411,15 @@ export class RuntimeInspector {
   }
 
   async close(): Promise<void> {
+    // Drain any in-flight init before tearing down, or its completion would
+    // re-enable a session after close() has already returned.
+    if (this.initPromise) {
+      try {
+        await this.initPromise;
+      } catch {
+        // init failure is fine — nothing to tear down.
+      }
+    }
     this.initPromise = undefined;
     if (this.enabled) {
       await this.disable();

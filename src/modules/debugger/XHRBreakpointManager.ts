@@ -76,12 +76,12 @@ export class XHRBreakpointManager {
         await this.cdpSession.send('DOMDebugger.removeXHRBreakpoint', {
           url: bp.urlPattern,
         });
+        this.xhrBreakpoints.delete(bp.id);
       } catch (error) {
         logger.warn(`Failed to remove XHR breakpoint ${bp.id}:`, error);
       }
     }
 
-    this.xhrBreakpoints.clear();
     logger.info('All XHR breakpoints cleared');
   }
 

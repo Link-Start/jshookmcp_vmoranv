@@ -1,7 +1,6 @@
 import type { CodeCollector } from '@modules/collector/CodeCollector';
 import type { CDPSessionLike } from '@modules/browser/CDPSessionLike';
 import { logger } from '@utils/logger';
-import { CDP_SESSION_TIMEOUT_MS } from '@src/constants';
 import { NetworkMonitor } from '@modules/monitor/NetworkMonitor';
 import { PlaywrightNetworkMonitor } from '@modules/monitor/PlaywrightNetworkMonitor';
 import type { NetworkMonitorLike } from '@modules/monitor/NetworkMonitor.types';
@@ -10,6 +9,7 @@ import type {
   FetchInterceptRule,
   FetchInterceptRuleInput,
 } from '@modules/monitor/FetchInterceptor';
+import { createCDPSessionWithTimeout } from '@modules/monitor/cdp-utils';
 import {
   clearExceptionsCore,
   clearLogsCore,
@@ -86,6 +86,7 @@ export class ConsoleMonitor {
   private readonly MAX_INJECTED_DYNAMIC_SCRIPTS = 500;
   private readonly MAX_OBJECT_CACHE_SIZE = 1000;
   private objectCache: Map<string, InspectedObjectProperties> = new Map();
+  private inflight: Map<string, Promise<InspectedObjectProperties>> = new Map();
   private initPromise?: Promise<void>;
   private lastEnableOptions: { enableNetwork?: boolean; enableExceptions?: boolean } = {};
   constructor(private collector: CodeCollector) {
@@ -94,6 +95,7 @@ export class ConsoleMonitor {
   private touchSplitMembersForTypeCheck(): void {
     void this.MAX_INJECTED_DYNAMIC_SCRIPTS;
     void this.MAX_OBJECT_CACHE_SIZE;
+    void this.inflight;
     void this.clearDynamicScriptBuffer;
     void this.resetDynamicScriptMonitoring;
     void this.usingManagedTargetSession;
@@ -138,12 +140,7 @@ export class ConsoleMonitor {
       };
     }
     const page = await this.collector.getActivePage();
-    const session = await Promise.race([
-      page.createCDPSession() as Promise<CDPSessionLike>,
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('cdp_session_timeout')), CDP_SESSION_TIMEOUT_MS),
-      ),
-    ]);
+    const session = await createCDPSessionWithTimeout(page);
     return {
       session,
       managed: false,

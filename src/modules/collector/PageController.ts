@@ -87,10 +87,25 @@ interface UploadContextLike {
   $(selector: string): Promise<UploadableElementHandle | null>;
 }
 
+/** Auto-dismiss any dialog (dialog may already be closed). */
+async function dismissDialog(dialog: { dismiss: () => Promise<void> }): Promise<void> {
+  try {
+    await dialog.dismiss();
+  } catch {
+    // Dialog may already be closed
+  }
+}
+
 export class PageController {
   private pagePersistentScripts = new WeakMap<
     Page,
     Map<string, { source: string; identifier: string }>
+  >();
+  /** Installed auto-dismiss dialog handlers per page — re-registering the
+   *  same page must not stack listeners (page.on is never auto-removed). */
+  private dialogDismissHandlers = new WeakMap<
+    Page,
+    (dialog: { dismiss: () => Promise<void> }) => Promise<void>
   >();
 
   constructor(private collector: CodeCollector) {}
@@ -638,13 +653,12 @@ export class PageController {
     };
 
     if (dismissAll) {
-      page.on('dialog', async (dialog) => {
-        try {
-          await dialog.dismiss();
-        } catch {
-          // Dialog may already be closed
-        }
-      });
+      const existing = this.dialogDismissHandlers.get(page);
+      if (existing) {
+        page.off('dialog', existing);
+      }
+      this.dialogDismissHandlers.set(page, dismissDialog);
+      page.on('dialog', dismissDialog);
       return {
         handled: true,
         message: 'Persistent dialog handler installed — all future dialogs will be auto-dismissed.',

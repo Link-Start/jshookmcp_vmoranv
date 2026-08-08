@@ -596,12 +596,33 @@ export class CodeCollector {
     }
   }
   async collect(options: CollectCodeOptions): Promise<CollectCodeResult> {
-    // Serialize concurrent collect calls to avoid cdpSession race conditions
+    // Serialize concurrent collect calls to avoid cdpSession race conditions.
+    // Bound the wait with a timeout: a bare `await this.collectLock` loop never
+    // re-checks when the predecessor hangs, so race each wait against a timer.
+    const waitTimeoutError = new PrerequisiteError(
+      `Timed out after ${this.CONNECT_TIMEOUT_MS}ms waiting for a concurrent collect() to finish`,
+    );
+    const lockWaitDeadline = Date.now() + this.CONNECT_TIMEOUT_MS;
     while (this.collectLock) {
+      const remaining = lockWaitDeadline - Date.now();
+      if (remaining <= 0) {
+        throw waitTimeoutError;
+      }
+      let waitTimer: ReturnType<typeof setTimeout> | undefined;
       try {
-        await this.collectLock;
-      } catch {
+        await Promise.race([
+          this.collectLock,
+          new Promise<never>((_, reject) => {
+            waitTimer = setTimeout(() => reject(waitTimeoutError), remaining);
+          }),
+        ]);
+      } catch (error) {
+        if (error === waitTimeoutError) {
+          throw error;
+        }
         /* ignore predecessor failures */
+      } finally {
+        clearTimeout(waitTimer);
       }
     }
     let resolve!: (v: CollectCodeResult) => void;
@@ -616,6 +637,10 @@ export class CodeCollector {
       return result;
     } catch (e) {
       reject(e);
+      // The internal lock promise is only awaited by concurrent collect()
+      // calls — without a waiter its rejection would surface as an unhandled
+      // rejection whenever a standalone collect() fails.
+      void this.collectLock.catch(() => {});
       throw e;
     } finally {
       this.collectLock = null;

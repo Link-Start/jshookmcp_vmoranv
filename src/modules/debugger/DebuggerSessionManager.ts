@@ -125,6 +125,10 @@ export class DebuggerSessionManager {
       filePath = await this.validateFilePath(filePath);
       const dir = path.dirname(filePath);
       await fs.mkdir(dir, { recursive: true });
+      // mkdir may have followed a symlink swapped in since the check above —
+      // re-verify the canonical parent right before writing (closes the
+      // realpath TOCTOU window).
+      filePath = await this.validateFilePath(filePath);
     }
 
     await fs.writeFile(filePath, JSON.stringify(session, null, 2), 'utf-8');

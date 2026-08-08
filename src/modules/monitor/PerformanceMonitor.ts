@@ -2,6 +2,7 @@ import type { CDPSession, Page } from 'rebrowser-puppeteer-core';
 import type { CodeCollector } from '@modules/collector/CodeCollector';
 import { logger } from '@utils/logger';
 import { CDP_SESSION_TIMEOUT_MS } from '@src/constants';
+import { createCDPSessionWithTimeout } from '@modules/monitor/cdp-utils';
 import type {
   PerformanceMetrics,
   PerformanceTimelineEntry,
@@ -18,6 +19,10 @@ import {
 } from './PerformanceMonitor.profiling';
 import { startTracing, stopTracing } from './PerformanceMonitor.tracing';
 import { takeHeapSnapshot } from './PerformanceMonitor.snapshot';
+
+// Per-step cap for close() cleanup so a hung CDP call (e.g. on a zombie
+// session) cannot block shutdown of the remaining collectors or the detach.
+const CLEANUP_STEP_TIMEOUT_MS = 5_000;
 
 async function PING(cdp: CDPSession): Promise<void> {
   await Promise.race([
@@ -42,13 +47,7 @@ export class PerformanceMonitor {
   private async ensureCDPSession(): Promise<CDPSession> {
     if (!this.cdpSession) {
       const page = await this.collector.getActivePage();
-      // Wrap session creation so a hanging createCDPSession() cannot block.
-      this.cdpSession = await Promise.race([
-        page.createCDPSession() as Promise<CDPSession>,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('cdp_session_timeout')), CDP_SESSION_TIMEOUT_MS),
-        ),
-      ]);
+      this.cdpSession = await createCDPSessionWithTimeout(page);
       return this.cdpSession;
     }
 
@@ -69,12 +68,7 @@ export class PerformanceMonitor {
       }
       this.cdpSession = null;
       const page = await this.collector.getActivePage();
-      this.cdpSession = await Promise.race([
-        page.createCDPSession() as Promise<CDPSession>,
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('cdp_session_timeout')), CDP_SESSION_TIMEOUT_MS),
-        ),
-      ]);
+      this.cdpSession = await createCDPSessionWithTimeout(page);
       return this.cdpSession;
     }
   }
@@ -160,19 +154,30 @@ export class PerformanceMonitor {
 
   async close(): Promise<void> {
     if (this.cdpSession) {
-      if (this.coverageEnabled) {
-        await this.stopCoverage().catch(() => {});
+      // LIFO cleanup — stop in reverse acquisition order (detach last, as the
+      // features depend on the session). Each step is capped by a timeout so a
+      // hung CDP call cannot block the remaining steps; failures are logged,
+      // not swallowed.
+      const steps: Array<[boolean, string, () => Promise<unknown>]> = [
+        [this.heapSamplingEnabled, 'Stop heap sampling', () => this.stopHeapSampling()],
+        [this.tracingEnabled, 'Stop tracing', () => this.stopTracing()],
+        [this.profilerEnabled, 'Stop CPU profiling', () => this.stopCPUProfiling()],
+        [this.coverageEnabled, 'Stop coverage', () => this.stopCoverage()],
+      ];
+      for (const [enabled, label, stop] of steps) {
+        if (!enabled) continue;
+        try {
+          await Promise.race([
+            stop(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`${label} timed out`)), CLEANUP_STEP_TIMEOUT_MS),
+            ),
+          ]);
+        } catch (err) {
+          logger.warn(`${label} failed:`, err);
+        }
       }
-      if (this.profilerEnabled) {
-        await this.stopCPUProfiling().catch(() => {});
-      }
-      if (this.tracingEnabled) {
-        await this.stopTracing().catch(() => {});
-      }
-      if (this.heapSamplingEnabled) {
-        await this.stopHeapSampling().catch(() => {});
-      }
-      await this.cdpSession.detach();
+      await this.cdpSession.detach().catch((err) => logger.warn('Detach CDP session failed:', err));
       this.cdpSession = null;
     }
     logger.info('PerformanceMonitor closed');

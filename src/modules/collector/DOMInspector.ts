@@ -57,6 +57,25 @@ type DOMFindClickableEvaluationResult = {
   diagnostics: DOMEvaluationDiagnostics;
 };
 
+/** Cap on caller-supplied selectors / filter text fed into string-built evaluations. */
+const QUERY_INPUT_MAX_CHARS = 4096;
+
+/**
+ * Input gate for the string-built evaluations. The build* helpers already
+ * embed caller input via JSON.stringify (quotes/newlines are escaped), so no
+ * code injection is possible; this adds a length/NUL guard for defense in
+ * depth before the transport Function is constructed (same pattern as
+ * CRIT-01's validateCodeSafety).
+ */
+function assertSafeQueryInput(value: string, field: string): void {
+  if (value.length > QUERY_INPUT_MAX_CHARS) {
+    throw new Error(`${field} exceeds ${QUERY_INPUT_MAX_CHARS} characters`);
+  }
+  if (value.includes('\u0000')) {
+    throw new Error(`${field} contains NUL`);
+  }
+}
+
 export class DOMInspector {
   protected cdpSession: CDPSession | null = null;
 
@@ -122,6 +141,7 @@ export class DOMInspector {
 
   async querySelector(selector: string, _getAttributes = true): Promise<ElementInfo> {
     try {
+      assertSafeQueryInput(selector, 'selector');
       const page = await this.collector.getActivePage();
       const elementInfo = await page.evaluate(
         new Function(buildQuerySelectorEvaluation(selector)) as () => ElementInfo,
@@ -139,6 +159,7 @@ export class DOMInspector {
     limit = DOM_QUERY_DEFAULT_LIMIT,
   ): Promise<DOMQueryAllResult> {
     try {
+      assertSafeQueryInput(selector, 'selector');
       const page = await this.collector.getActivePage();
       const runQuery = async () =>
         page.evaluate(
@@ -191,6 +212,7 @@ export class DOMInspector {
 
   async findClickable(filterText?: string): Promise<DOMFindClickableResult> {
     try {
+      assertSafeQueryInput(filterText ?? '', 'filterText');
       const page = await this.collector.getActivePage();
       const runQuery = async () =>
         page.evaluate(
@@ -270,6 +292,7 @@ export class DOMInspector {
 
   async findByText(text: string, tag?: string): Promise<ElementInfo[]> {
     try {
+      assertSafeQueryInput(text, 'text');
       const page = await this.collector.getActivePage();
       const elements = await page.evaluate(
         new Function(buildFindByTextEvaluation(text, tag)) as () => Array<

@@ -156,7 +156,14 @@ export class JScramberDeobfuscator {
             const body = arg.body;
             if (t.isBlockStatement(body)) {
               if (body.body.some((stmt) => t.isDebuggerStatement(stmt))) {
-                path.remove();
+                if (path.parentPath?.isExpressionStatement()) {
+                  path.remove();
+                } else {
+                  // The timer call is an operand (assignment init, ternary
+                  // branch, ...) — removing the node outright would leave
+                  // invalid syntax behind; replace it with `undefined`.
+                  path.replaceWith(t.identifier('undefined'));
+                }
               }
             }
           }
@@ -449,7 +456,9 @@ export class JScramberDeobfuscator {
         method === 'fromCharCode'
       ) {
         const values = evalArgs();
-        if (values.some((v) => typeof v !== 'number')) {
+        // evalArgs returns [] when any argument is not statically evaluable —
+        // treating that as a real call would decrypt to an empty string.
+        if (values.length !== node.arguments.length || values.some((v) => typeof v !== 'number')) {
           return undefined;
         }
         return String.fromCharCode(...(values as number[]));
@@ -497,7 +506,12 @@ export class JScramberDeobfuscator {
                 : obj.slice(from, to as number | undefined);
           }
           case 'concat': {
-            if (values.some((v) => typeof v !== 'string')) {
+            // Same guard as fromCharCode: unresolvable arguments must not
+            // silently collapse the concatenation to the receiver.
+            if (
+              values.length !== node.arguments.length ||
+              values.some((v) => typeof v !== 'string')
+            ) {
               return undefined;
             }
             return obj.concat(...(values as string[]));

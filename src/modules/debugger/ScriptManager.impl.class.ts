@@ -212,6 +212,9 @@ export class ScriptManager {
       await this.ensureSessionPromise;
       return;
     }
+    // Capture the session under probe — the failure path must not wipe a
+    // replacement a concurrent caller built while this probe was in flight.
+    const probed = this.cdpSession;
 
     this.ensureSessionPromise = (async () => {
       try {
@@ -220,7 +223,7 @@ export class ScriptManager {
         // the 3s timeout fires on an already-healthy session.
         let probeTimer: ReturnType<typeof setTimeout> | undefined;
         await Promise.race([
-          this.cdpSession!.send('Runtime.evaluate', { expression: '1', returnByValue: true }),
+          probed.send('Runtime.evaluate', { expression: '1', returnByValue: true }),
           new Promise<never>((_, reject) => {
             probeTimer = setTimeout(() => reject(new Error('session_unreachable')), 3000);
           }),
@@ -230,8 +233,9 @@ export class ScriptManager {
         this.lastHealthProbeAt = Date.now();
       } catch {
         logger.warn('ScriptManager CDP session unresponsive (zombie), reinitializing...');
-        // Re-check before wiping: another caller may have already rebuilt.
-        if (!this.cdpSession || !this.initialized) {
+        // Re-check before wiping: another caller may have already rebuilt or
+        // replaced the session we probed.
+        if (this.cdpSession !== probed || !this.initialized) {
           return;
         }
         this.cdpSession = null;
