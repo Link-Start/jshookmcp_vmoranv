@@ -16,6 +16,9 @@ export class ConsoleHandlers {
   async handleConsoleMonitor(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => {
       const action = argString(args, 'action') as 'enable' | 'disable';
+      if (action !== 'enable' && action !== 'disable') {
+        throw new Error(`Invalid action: "${String(action)}". Expected "enable" or "disable".`);
+      }
       if (action === 'enable') {
         await this.deps.consoleMonitor.enable();
         return { message: 'Console monitoring enabled' };

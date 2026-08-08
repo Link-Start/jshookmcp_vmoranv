@@ -41,7 +41,7 @@ Primary browser control and DOM interaction domain; the usual entry point for mo
 | `browser_close` | Close the browser and release all resources. |
 | `browser_status` | Report browser status: running, tab count, version. |
 | `page_navigate` | Navigate the page to a URL with wait and network options. |
-| `page_reload` | Reload the page with optional cache bypass. |
+| `page_reload` | Reload the current page. |
 | `page_back` | Navigate back in browser history. |
 | `page_forward` | Navigate forward in browser history. |
 | `page_list_frames` | List page frames for frame targeting. |
@@ -98,6 +98,6 @@ Primary browser control and DOM interaction domain; the usual entry point for mo
 | `widget_challenge_solve` | Solve a widget challenge with hook, manual, or configured external service. |
 | `browser_jsdom_parse` | Parse HTML into an in-memory JSDOM session. No browser needed. |
 | `browser_jsdom_query` | Query a JSDOM session with a CSS selector. |
-| `browser_jsdom_execute` | Evaluate JS inside a JSDOM session. |
+| `browser_jsdom_execute` | Evaluate JS inside a JSDOM session. Requires explicit authorization — arbitrary code execution. |
 | `browser_jsdom_serialize` | Serialize a JSDOM session to HTML. |
 | `browser_jsdom_cookies` | Manage cookies on a JSDOM session. Isolated from the attached browser. |

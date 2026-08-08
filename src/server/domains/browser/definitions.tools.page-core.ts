@@ -26,9 +26,7 @@ export const browserPageCoreTools: Tool[] = [
       .idempotent()
       .openWorld(),
   ),
-  tool('page_reload', (t) =>
-    t.desc('Reload the page with optional cache bypass.').idempotent().openWorld(),
-  ),
+  tool('page_reload', (t) => t.desc('Reload the current page.').idempotent().openWorld()),
   tool('page_back', (t) => t.desc('Navigate back in browser history.').openWorld()),
   tool('page_forward', (t) => t.desc('Navigate forward in browser history.').openWorld()),
   tool('page_list_frames', (t) => t.desc('List page frames for frame targeting.').query()),

@@ -139,13 +139,17 @@ function getSolverBaseUrl(service: string): string {
 function mapProviderTaskKind(service: string, taskKind: SolverTaskKind): string {
   if (service === 'anticaptcha') {
     if (taskKind === 'recaptcha_v2') return 'RecaptchaV2TaskProxyless';
+    if (taskKind === 'recaptcha_v3') return 'RecaptchaV3TaskProxyless';
     if (taskKind === 'hcaptcha') return 'HCaptchaTaskProxyless';
+    if (taskKind === 'funcaptcha') return 'FunCaptchaTaskProxyless';
     if (taskKind === 'turnstile') return 'TurnstileTaskProxyless';
     return 'ImageToTextTask';
   }
   if (service === 'capsolver') {
     if (taskKind === 'recaptcha_v2') return 'ReCaptchaV2TaskProxyLess';
+    if (taskKind === 'recaptcha_v3') return 'ReCaptchaV3TaskProxyLess';
     if (taskKind === 'hcaptcha') return 'HCaptchaTaskProxyLess';
+    if (taskKind === 'funcaptcha') return 'FunCaptchaTaskProxyLess';
     if (taskKind === 'turnstile') return 'AntiTurnstileTaskProxyLess';
     return 'ImageToTextTask';
   }
@@ -204,10 +208,9 @@ async function solveWithJsonTaskApi(
   }
 
   while (true) {
-    const remaining = timeoutMs - (Date.now() - start);
-    if (remaining <= 0) break;
-    await sleep(Math.min(CAPTCHA_POLL_INTERVAL_MS, remaining));
-    if (Date.now() - start >= timeoutMs) break;
+    const elapsed = Date.now() - start;
+    if (elapsed >= timeoutMs) break;
+    await sleep(Math.min(CAPTCHA_POLL_INTERVAL_MS, timeoutMs - elapsed));
 
     const resultRes = await fetch(`${baseUrl}/getTaskResult`, {
       method: 'POST',
@@ -282,6 +285,13 @@ function normalizeBase64Payload(rawValue: unknown): string | undefined {
     return commaIndex >= 0 ? trimmed.slice(commaIndex + 1) : undefined;
   }
   return trimmed;
+}
+
+/** Reject prototype/constructor keys and dotted paths before writing to `window`. */
+function isSafeCallbackName(name: string): boolean {
+  return (
+    /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) && !(name in Object.prototype) && name !== 'prototype'
+  );
 }
 
 function normalizeTokenInjectionConfig(args: Record<string, unknown>): {
@@ -396,12 +406,9 @@ async function solveWith2Captcha(
   // Poll with bounded dynamic sleep to avoid timeout drift while reducing request pressure.
   const pollInterval = CAPTCHA_POLL_INTERVAL_MS;
   while (true) {
-    const remaining = timeoutMs - (Date.now() - start);
-    if (remaining <= 0) break;
-    await sleep(Math.min(pollInterval, remaining));
-
-    // Check again after sleep
-    if (Date.now() - start >= timeoutMs) break;
+    const elapsed = Date.now() - start;
+    if (elapsed >= timeoutMs) break;
+    await sleep(Math.min(pollInterval, timeoutMs - elapsed));
 
     const resultUrl = new URL(`${baseUrl}/res.php`);
     resultUrl.searchParams.set('key', apiKey);
@@ -469,6 +476,13 @@ export async function handleCaptchaVisionSolve(
       instruction: 'Please solve the CAPTCHA manually in the browser, then continue.',
       hint: 'Configure an external solver service and CAPTCHA_API_KEY to automate this flow.',
     });
+  }
+
+  if (challengeType === 'browser_check') {
+    return R.fail(
+      'browser_check challenges are not supported by external solvers — use ' +
+        'widget_challenge_solve with hook or manual mode.',
+    ).build();
   }
 
   // External provider solving
@@ -550,6 +564,11 @@ export async function handleWidgetChallengeSolve(
     CAPTCHA_MAX_TIMEOUT_MS,
   );
   const injectConfig = normalizeTokenInjectionConfig(args);
+  if (injectConfig.callbackName && !isSafeCallbackName(injectConfig.callbackName)) {
+    return R.fail(
+      'callbackName must be a plain JS identifier (no dotted paths or prototype keys).',
+    ).build();
+  }
   const taskKind = resolveTaskKind(args.taskKind, 'widget');
   const siteKey = argString(args, 'siteKey');
   const pageUrl = argString(args, 'pageUrl', '') || page.url();

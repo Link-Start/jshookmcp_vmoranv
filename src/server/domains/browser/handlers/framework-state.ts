@@ -12,6 +12,7 @@ interface EvaluatablePage {
   evaluate(pageFunction: unknown, ...args: unknown[]): Promise<unknown>;
   createCDPSession(): Promise<{
     send(method: string, params?: Record<string, unknown>): Promise<unknown>;
+    detach?(): Promise<unknown>;
   }>;
 }
 
@@ -33,12 +34,17 @@ export class FrameworkStateHandlers {
       // Pre-flight CDP health check: verify the page's CDP target is responsive.
       try {
         const cdp = await page.createCDPSession();
-        await Promise.race([
-          cdp.send('Runtime.evaluate', { expression: '1', returnByValue: true }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('cdp_unreachable')), CDP_HEALTH_CHECK_TIMEOUT_MS),
-          ),
-        ]);
+        try {
+          await Promise.race([
+            cdp.send('Runtime.evaluate', { expression: '1', returnByValue: true }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('cdp_unreachable')), CDP_HEALTH_CHECK_TIMEOUT_MS),
+            ),
+          ]);
+        } finally {
+          // Release the probe session so repeated calls do not leak CDP sessions.
+          await cdp.detach?.().catch(() => {});
+        }
       } catch {
         throw new PrerequisiteError(
           'CDP session unresponsive — the debugger may be blocking page evaluation. ' +

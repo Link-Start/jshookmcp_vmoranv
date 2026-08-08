@@ -93,8 +93,8 @@ export const browserRuntimeTools: Tool[] = [
     t
       .desc('Start, close, or check status of a Camoufox anti-detect server.')
       .enum('action', ['launch', 'close', 'status'], 'Action')
-      .number('port', 'Listen port (launch)')
-      .string('ws_path', 'WebSocket path (launch)')
+      .number('port', 'Listen port (launch)', { minimum: 1, maximum: 65535 })
+      .string('ws_path', 'WebSocket path (launch)', { pattern: '^/[A-Za-z0-9_/-]*$' })
       .enum('os', ['windows', 'macos', 'linux'], 'OS fingerprint (launch)', {
         default: 'windows',
       })

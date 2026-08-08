@@ -145,7 +145,7 @@ export const browserSecurityStateTools: Tool[] = [
       .string('publicKey', 'Base64-encoded public key (optional but recommended)')
       .string('userDisplayName', 'Display name for the credential owner')
       .required('relyingPartyId', 'credentialId', 'userHandle', 'privateKey')
-      .destructive()
-      .idempotent(),
+      // Each call adds a new virtual authenticator — not idempotent.
+      .destructive(),
   ),
 ];
