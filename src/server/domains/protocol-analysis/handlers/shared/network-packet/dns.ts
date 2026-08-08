@@ -319,6 +319,9 @@ function readName(ctx: ParseContext, offset: number): { name: string; nextOffset
         throw new Error('compression pointer truncated');
       }
       const pointer = ctx.buffer.readUInt16BE(cursor) & POINTER_BASE;
+      if (pointer >= ctx.buffer.length) {
+        throw new Error('compression pointer out of bounds');
+      }
       if (nextOffset === null) {
         nextOffset = cursor + 2;
       }
