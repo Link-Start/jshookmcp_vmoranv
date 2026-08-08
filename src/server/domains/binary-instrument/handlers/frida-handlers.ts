@@ -187,7 +187,7 @@ export class FridaHandlers {
     const availability = await frida.getAvailability();
 
     if (!availability.available) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_cli',
@@ -195,11 +195,11 @@ export class FridaHandlers {
         sessionId,
         reason: availability.reason ?? 'Frida CLI is not available',
         execution: { output: '', error: 'Frida unavailable' },
-      };
+      });
     }
 
     if (!frida.useSession(sessionId)) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_session',
@@ -207,7 +207,7 @@ export class FridaHandlers {
         sessionId,
         reason: `Unknown Frida session: ${sessionId}`,
         execution: { output: '', error: 'Unknown session' },
-      };
+      });
     }
 
     const execution = await frida.executeScript(script);
@@ -445,7 +445,7 @@ export class FridaHandlers {
     const availability = await frida.getAvailability();
 
     if (!availability.available) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_cli',
@@ -454,11 +454,11 @@ export class FridaHandlers {
         moduleName,
         reason: availability.reason ?? 'Frida CLI is not available',
         functions: [],
-      };
+      });
     }
 
     if (!frida.useSession(sessionId)) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_session',
@@ -466,7 +466,7 @@ export class FridaHandlers {
         sessionId,
         reason: `Unknown Frida session: ${sessionId}`,
         functions: [],
-      };
+      });
     }
 
     const functions = await frida.enumerateFunctions(moduleName);
@@ -500,7 +500,7 @@ export class FridaHandlers {
     const availability = await frida.getAvailability();
 
     if (!availability.available) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_cli',
@@ -509,11 +509,11 @@ export class FridaHandlers {
         pattern,
         reason: availability.reason ?? 'Frida CLI is not available',
         symbols: [],
-      };
+      });
     }
 
     if (!frida.useSession(sessionId)) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_session',
@@ -521,7 +521,7 @@ export class FridaHandlers {
         sessionId,
         reason: `Unknown Frida session: ${sessionId}`,
         symbols: [],
-      };
+      });
     }
 
     const symbols = await frida.findSymbols(pattern);
@@ -559,7 +559,7 @@ export class FridaHandlers {
     const availability = await frida.getAvailability();
 
     if (!availability.available) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_cli',
@@ -568,11 +568,11 @@ export class FridaHandlers {
         pattern,
         reason: availability.reason ?? 'Frida CLI is not available',
         matches: [],
-      };
+      });
     }
 
     if (!frida.useSession(sessionId)) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_session',
@@ -580,7 +580,7 @@ export class FridaHandlers {
         sessionId,
         reason: `Unknown Frida session: ${sessionId}`,
         matches: [],
-      };
+      });
     }
 
     const matches = await frida.memoryScan(pattern, {
@@ -629,7 +629,7 @@ export class FridaHandlers {
     const availability = await frida.getAvailability();
 
     if (!availability.available) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_cli',
@@ -637,18 +637,18 @@ export class FridaHandlers {
         sessionId,
         address,
         reason: availability.reason ?? 'Frida CLI is not available',
-      };
+      });
     }
 
     if (!frida.useSession(sessionId)) {
-      return {
+      return jsonResponse({
         success: false,
         available: false,
         capability: 'frida_session',
         fix: 'Call frida_attach first and reuse the returned sessionId.',
         sessionId,
         reason: `Unknown Frida session: ${sessionId}`,
-      };
+      });
     }
 
     const read = await frida.memoryRead(address, size);
