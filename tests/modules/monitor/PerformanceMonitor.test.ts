@@ -602,6 +602,123 @@ describe('PerformanceMonitor', () => {
     expect(session.detach).toHaveBeenCalledTimes(1);
   });
 
+  it('detaches an orphaned CDP session when createCDPSession loses the timeout race', async () => {
+    vi.useFakeTimers();
+    try {
+      const orphan = createSession();
+      const { collector, page } = createCollector(orphan.session);
+      let resolveOrphan!: (s: unknown) => void;
+      page.createCDPSession.mockReturnValue(
+        new Promise((resolve) => {
+          resolveOrphan = resolve;
+        }),
+      );
+      const monitor = new PerformanceMonitor(collector as any);
+
+      const startPromise = monitor.startCPUProfiling();
+      // Attach the rejection handler before advancing timers so the
+      // cdp_session_timeout rejection is never flagged as unhandled.
+      const rejection = expect(startPromise).rejects.toThrow('cdp_session_timeout');
+      await vi.advanceTimersByTimeAsync(600); // past the 500ms cdp_session_timeout
+      await rejection;
+
+      // The session only resolves after the timeout — it must be detached,
+      // not silently leaked as an untracked orphan.
+      resolveOrphan(orphan.session);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(orphan.detach).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('close keeps running the remaining cleanup steps when one stop fails', async () => {
+    // HeapProfiler.stopSampling returns a malformed payload so the first
+    // LIFO cleanup step (heap sampling) throws; the rest must still run.
+    const { session } = createSession((method) => {
+      if (method === 'HeapProfiler.stopSampling') {
+        return { profile: { head: 'not a node' } };
+      }
+      if (method === 'Profiler.stop') {
+        return {
+          profile: {
+            nodes: [
+              { id: 1, callFrame: { functionName: 'fn', url: '', lineNumber: 0, columnNumber: 0 } },
+            ],
+            startTime: 1,
+            endTime: 2,
+          },
+        };
+      }
+      return {};
+    });
+    const { collector, page } = createCollector(session);
+    page.tracing.stop.mockResolvedValue(Buffer.from('{"traceEvents":[{"ph":"X"}]}'));
+    const monitor = new PerformanceMonitor(collector as any);
+
+    await monitor.startCoverage();
+    await monitor.startCPUProfiling();
+    await monitor.startTracing();
+    await monitor.startHeapSampling({ samplingInterval: 1024 });
+    await monitor.close();
+
+    expect(session.send).toHaveBeenCalledWith('HeapProfiler.stopSampling');
+    expect(page.tracing.stop).toHaveBeenCalledTimes(1);
+    expect(page.coverage.stopJSCoverage).toHaveBeenCalledTimes(1);
+    expect(session.detach).toHaveBeenCalledTimes(1);
+    expect(loggerState.warn).toHaveBeenCalled();
+  });
+
+  it('close does not block forever when a stop call hangs (per-step timeout)', async () => {
+    vi.useFakeTimers();
+    try {
+      // HeapProfiler.stopSampling never resolves — a hung CDP call on the
+      // first LIFO step; close() must time it out and finish the rest.
+      const { session } = createSession((method) => {
+        if (method === 'HeapProfiler.stopSampling') {
+          return new Promise(() => {});
+        }
+        if (method === 'Profiler.stop') {
+          return {
+            profile: {
+              nodes: [
+                {
+                  id: 1,
+                  callFrame: { functionName: 'fn', url: '', lineNumber: 0, columnNumber: 0 },
+                },
+              ],
+              startTime: 1,
+              endTime: 2,
+            },
+          };
+        }
+        return {};
+      });
+      const { collector, page } = createCollector(session);
+      page.tracing.stop.mockResolvedValue(Buffer.from('{"traceEvents":[{"ph":"X"}]}'));
+      const monitor = new PerformanceMonitor(collector as any);
+
+      await monitor.startCPUProfiling();
+      await monitor.startTracing();
+      await monitor.startHeapSampling({ samplingInterval: 1024 });
+
+      const closePromise = monitor.close();
+      const settled = closePromise.then(
+        () => true,
+        () => true,
+      );
+      await vi.advanceTimersByTimeAsync(6000); // past the 5s per-step timeout
+
+      expect(await settled).toBe(true);
+      expect(page.tracing.stop).toHaveBeenCalledTimes(1);
+      expect(session.detach).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('insertTopAllocation does nothing when topN is zero or negative', async () => {
     const { session } = createSession();
     createCollector(session);

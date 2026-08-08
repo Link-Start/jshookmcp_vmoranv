@@ -23,12 +23,16 @@ describe('DetailedDataManager – v8 ignore branch coverage', () => {
 
   // ── serializeWithMemo ────────────────────────────────────────────────────
 
-  it('serializeWithMemo caches identical object references', () => {
-    const obj = { shared: true };
-    const { json: json1, size: size1 } = (manager as any).serializeWithMemo(obj);
-    const { json: json2, size: size2 } = (manager as any).serializeWithMemo(obj);
-    expect(json1).toBe(json2); // Same reference returns same cached result
-    expect(size1).toBe(size2);
+  it('serializeWithMemo recomputes when the object was mutated since last call', () => {
+    const obj: Record<string, unknown> = { shared: true };
+    const first = (manager as any).serializeWithMemo(obj);
+    // Mutating the object between calls must NOT reuse the stale cached size —
+    // a stale size could bypass the smart threshold and leak large data into
+    // the LLM context window.
+    obj.big = 'x'.repeat(5000);
+    const second = (manager as any).serializeWithMemo(obj);
+    expect(second.size).toBeGreaterThan(first.size);
+    expect(second.json).toContain('x'.repeat(5000));
   });
 
   it('serializeWithMemo does not cache primitives', () => {

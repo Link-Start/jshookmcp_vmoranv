@@ -25,7 +25,11 @@ describe('utils/DetailedDataManager getStats types', () => {
   it('returns numeric metrics as numbers, not formatted strings', () => {
     manager.store({ a: 1 });
     manager.store({ b: 2 });
-    manager.retrieve('does-not-exist').catch(() => undefined);
+    try {
+      manager.retrieve('does-not-exist');
+    } catch {
+      // retrieve throws synchronously for missing ids — exercise the path
+    }
 
     const stats = manager.getStats();
 
