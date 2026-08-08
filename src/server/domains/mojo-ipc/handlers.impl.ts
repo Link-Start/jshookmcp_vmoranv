@@ -269,9 +269,16 @@ export class MojoIPCHandlers {
 
     const interfaceName = argString(args, 'interfaceName')?.trim();
     const messageType = argStringOrNumber(args, 'messageType');
+    // Match the encode path: an empty string is not a message type.
+    const hasMessageType =
+      messageType !== undefined &&
+      !(typeof messageType === 'string' && messageType.trim().length === 0);
     const decoded =
-      interfaceName || messageType !== undefined
-        ? this.getDecoder().decodePayload(hexPayload, { interfaceName, messageType })
+      interfaceName || hasMessageType
+        ? this.getDecoder().decodePayload(hexPayload, {
+            interfaceName,
+            messageType: hasMessageType ? messageType : undefined,
+          })
         : this.getDecoder().decodePayload(hexPayload);
     return {
       success: true,
@@ -441,7 +448,8 @@ export class MojoIPCHandlers {
     const direction = argEnum(args, 'direction', DIRECTION_SET);
 
     const result = (await monitor.getMessages({
-      limit: limit !== undefined ? Math.min(limit, 10000) : 100,
+      limit:
+        limit !== undefined && Number.isFinite(limit) ? Math.max(1, Math.min(limit, 10000)) : 100,
       interfaceName,
       messageType,
       sinceTimestamp,

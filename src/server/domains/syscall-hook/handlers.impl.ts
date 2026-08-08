@@ -318,6 +318,9 @@ function toErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
+  if (typeof error === 'string') {
+    return error;
+  }
   return 'Unknown syscall-hook error';
 }
 
@@ -726,13 +729,15 @@ export class SyscallHookHandlers {
     }
     const pid = rawPid ?? 0;
 
+    // durationSec must be an integer: bpftrace `interval:s:<n>` rejects floats.
     if (
+      !Number.isInteger(durationSec) ||
       durationSec < SYSCALL_TRACE_DURATION_MIN_SEC ||
       durationSec > SYSCALL_TRACE_DURATION_MAX_SEC
     ) {
       return {
         ok: false,
-        error: `durationSec must be between ${SYSCALL_TRACE_DURATION_MIN_SEC} and ${SYSCALL_TRACE_DURATION_MAX_SEC}`,
+        error: `durationSec must be an integer between ${SYSCALL_TRACE_DURATION_MIN_SEC} and ${SYSCALL_TRACE_DURATION_MAX_SEC}`,
       };
     }
 

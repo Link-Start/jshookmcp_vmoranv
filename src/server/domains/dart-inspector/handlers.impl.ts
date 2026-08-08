@@ -70,6 +70,18 @@ const SYMBOLIZER_MODE_SET = new Set(['forward', 'reverse'] as const);
 /** Format a bigint address as a lowercase hex string (`0x`-prefixed). */
 const hex = (n: bigint): string => `0x${n.toString(16)}`;
 
+/** Parse a `0x`-prefixed hex address, surfacing a VALIDATION error instead of a raw SyntaxError. */
+function parseHexAddress(value: string, label: string): bigint {
+  const trimmed = value.trim();
+  if (!/^0x[0-9a-f]+$/i.test(trimmed)) {
+    throw new ToolError(
+      'VALIDATION',
+      `${label} must be a hex address like 0x12345678 (got "${value}")`,
+    );
+  }
+  return BigInt(trimmed);
+}
+
 /**
  * Coerce the raw `customRules` argument into a list of compiled
  * {@link CategoryRule}s, throwing {@link ToolError}(`VALIDATION`) on
@@ -165,7 +177,11 @@ export class DartInspectorHandlers {
         const start =
           typeof scanWindowRaw['start'] === 'number' ? scanWindowRaw['start'] : undefined;
         const end = typeof scanWindowRaw['end'] === 'number' ? scanWindowRaw['end'] : undefined;
-        opts.scanWindow = { start, end };
+        // Only pass a bounded window — { start: undefined, end: undefined } would
+        // silently degrade to a full-file scan downstream.
+        if (start !== undefined || end !== undefined) {
+          opts.scanWindow = { start, end };
+        }
       }
       const scanStride = argNumber(args, 'scanStride');
       if (scanStride !== undefined) opts.scanStride = scanStride;
@@ -206,7 +222,11 @@ export class DartInspectorHandlers {
         const start =
           typeof scanWindowRaw['start'] === 'number' ? scanWindowRaw['start'] : undefined;
         const end = typeof scanWindowRaw['end'] === 'number' ? scanWindowRaw['end'] : undefined;
-        opts.scanWindow = { start, end };
+        // Only pass a bounded window — { start: undefined, end: undefined } would
+        // silently degrade to a full-file scan downstream.
+        if (start !== undefined || end !== undefined) {
+          opts.scanWindow = { start, end };
+        }
       }
 
       const result = await this.smiScanner.scanFile(filePath, opts);
@@ -419,7 +439,7 @@ export class DartInspectorHandlers {
       // Select target functions
       let codes = snapshot.codeObjects;
       if (functionAddress) {
-        const addr = BigInt(functionAddress);
+        const addr = parseHexAddress(functionAddress, 'functionAddress');
         codes = codes.filter((c) => c.entryPoint === addr);
         if (codes.length === 0) {
           throw new ToolError('NOT_FOUND', `No function found at address ${functionAddress}`);
@@ -703,7 +723,7 @@ export class DartInspectorHandlers {
       }
 
       const result = await executor.call({
-        address: functionAddress ? BigInt(functionAddress) : undefined,
+        address: functionAddress ? parseHexAddress(functionAddress, 'functionAddress') : undefined,
         name: functionName,
         args: functionArgs,
         maxSteps,
@@ -726,7 +746,7 @@ export class DartInspectorHandlers {
       const poolAddress = argStringRequired(args, 'poolAddress');
       const snapshot = await this.resolveSnapshot(args);
 
-      const addr = BigInt(poolAddress);
+      const addr = parseHexAddress(poolAddress, 'poolAddress');
       const pool = snapshot.objectPools.find((p) => p.address === addr);
 
       if (!pool) {
@@ -784,7 +804,7 @@ export class DartInspectorHandlers {
       }
 
       const result = await executor.call({
-        address: functionAddress ? BigInt(functionAddress) : undefined,
+        address: functionAddress ? parseHexAddress(functionAddress, 'functionAddress') : undefined,
         name: functionName,
         args: functionArgs,
         maxSteps,

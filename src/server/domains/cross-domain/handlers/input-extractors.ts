@@ -1,6 +1,11 @@
 import type { GhidraFunction, GhidraOutput } from './binary-to-js-pipeline';
 import type { MojoMessage, CDPEvent, NetworkRequest } from './mojo-cdp-correlator';
-import type { JSObjectDescriptor, SkiaSceneTree } from './skia-correlator';
+import type {
+  JSObjectDescriptor,
+  SkiaDrawCommand,
+  SkiaLayer,
+  SkiaSceneTree,
+} from './skia-correlator';
 import type { SyscallEvent, JSStack, JSStackFrame } from './syscall-js-correlator';
 
 type UnknownRecord = Record<string, unknown>;
@@ -55,8 +60,8 @@ export function extractSkiaSceneTree(value: unknown): SkiaSceneTree {
   }
 
   return {
-    layers: Array.isArray(value['layers']) ? value['layers'] : [],
-    drawCommands: Array.isArray(value['drawCommands']) ? value['drawCommands'] : [],
+    layers: readRecordArray(value['layers']) as unknown as SkiaLayer[],
+    drawCommands: readRecordArray(value['drawCommands']) as unknown as SkiaDrawCommand[],
   };
 }
 
@@ -136,7 +141,7 @@ export function extractGhidraOutput(value: unknown): GhidraOutput | null {
   }
 
   const moduleName = readString(value['moduleName']);
-  if (!moduleName) {
+  if (!moduleName.trim()) {
     return null;
   }
 

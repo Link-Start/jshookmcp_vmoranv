@@ -4,7 +4,7 @@
  */
 
 import { readFile, realpath } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import type { CodeCollector } from '@server/domains/shared/modules/collector';
 
@@ -466,7 +466,12 @@ export async function resolveBufferBySource(options: {
         }
       }),
     );
-    if (!allowedRoots.some((root) => real.startsWith(root)))
+    // Separator-aware prefix check: startsWith alone lets a sibling directory
+    // (e.g. `<root>2/x`) pass, since `<root>2` is a string prefix of `<root>`.
+    const isAllowed = allowedRoots.some(
+      (root) => real === root || real.startsWith(root.endsWith(sep) ? root : root + sep),
+    );
+    if (!isAllowed)
       throw new Error(`File access denied: path "${filePath}" is outside allowed directories`);
     const fileBuffer = await readFile(real);
     return typeof maxBytes === 'number' ? fileBuffer.subarray(0, maxBytes) : fileBuffer;

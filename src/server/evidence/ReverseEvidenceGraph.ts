@@ -125,6 +125,13 @@ export class ReverseEvidenceGraph {
     return [...this.edges.values()].filter((e) => e.source === nodeId);
   }
 
+  /** Whether an edge (source → target, type) already exists. */
+  hasEdge(sourceId: string, targetId: string, type: EvidenceEdgeType): boolean {
+    return [...this.edges.values()].some(
+      (e) => e.source === sourceId && e.target === targetId && e.type === type,
+    );
+  }
+
   /** Get all edges pointing to a node. */
   getEdgesTo(nodeId: string): EvidenceEdge[] {
     return [...this.edges.values()].filter((e) => e.target === nodeId);
