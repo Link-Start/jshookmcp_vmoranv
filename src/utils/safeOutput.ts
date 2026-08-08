@@ -147,8 +147,10 @@ async function writeFileAtomically(
   options?: { rejectSymbolicLink?: boolean; allowedRoots?: string[] },
 ): Promise<void> {
   const parentDir = dirname(absolutePath);
-  await mkdir(parentDir, { recursive: true });
 
+  // Containment check runs BEFORE mkdir: creating directories is a write
+  // side-effect, so a parent that escapes the allowed roots must be refused
+  // before anything is created outside them.
   if (options?.allowedRoots?.length) {
     const normalizedAllowedRoots = await Promise.all(
       options.allowedRoots.map(async (rootPath) => {
@@ -161,6 +163,8 @@ async function writeFileAtomically(
       throw new Error('outputPath parent directory escapes the allowed roots.');
     }
   }
+
+  await mkdir(parentDir, { recursive: true });
 
   // The path's final component must be a real file name — "." or ".."
   // basenames would resolve the temp path / rename target to a directory
@@ -220,14 +224,30 @@ async function writeFileAtomically(
     }
 
     // Some platforms (Windows) refuse to rename over an existing target.
-    // Remove it first, but only after confirming it is still a regular file —
-    // a directory or symlink could have been swapped in since the earlier
-    // lstat, and removing either would be destructive.
+    // Clear the target's read-only bit instead of removing it: deleting
+    // first opens a window in which another process can create a fresh file
+    // that the rename would then silently overwrite. The chmod goes through
+    // the target's own handle — a path-based chmod would follow a swapped
+    // symlink — and only when the handle reports the same inode the lstat
+    // saw, so a file replaced in between is never touched.
     const existingTarget = await lstat(absolutePath).catch(() => null);
     if (existingTarget && (existingTarget.isDirectory() || existingTarget.isSymbolicLink())) {
       throw new Error('outputPath must be a file path, not a directory or symbolic link.');
     }
-    await rm(absolutePath, { force: true });
+    if (existingTarget?.isFile()) {
+      const targetHandle = await open(absolutePath, 'r').catch(() => null);
+      if (targetHandle) {
+        try {
+          const handleStat = await targetHandle.stat();
+          if (handleStat.ino !== existingTarget.ino) {
+            throw new Error('outputPath target changed while writing.');
+          }
+          await targetHandle.chmod(0o666);
+        } finally {
+          await closeHandle(targetHandle);
+        }
+      }
+    }
     await rename(tempPath, absolutePath);
   } catch (error) {
     await closeHandle(handle);

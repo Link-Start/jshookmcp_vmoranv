@@ -117,9 +117,6 @@ export class DetailedDataManager {
   private readonly AUTO_EXTEND_ON_ACCESS = true;
   private readonly EXTEND_DURATION = 15 * 60 * 1000;
 
-  /** Memo cache to avoid re-serializing the same object within a single call chain */
-  private serializationMemo = new WeakMap<object, { json: string; size: number }>();
-
   /** Monitoring metrics for observability. */
   private metrics: PersistenceMetrics = {
     diskWriteCount: 0,
@@ -259,23 +256,16 @@ export class DetailedDataManager {
   }
 
   /**
-   * Serialize data with memoization to avoid redundant JSON.stringify calls.
-   * Objects are cached in a WeakMap so the memo is automatically GC'd.
+   * Serialize data. No memoization: a mutable object serialized once and
+   * mutated afterwards would return a stale size, potentially bypassing the
+   * smart threshold and leaking large data into the LLM context window.
+   * (The smartHandle → createDetailedResponseWithSize → storeWithSize chain
+   * already reuses the first serialization's json/size, so there is no
+   * redundant-stringify cost to pay.)
    */
   private serializeWithMemo(data: unknown): { json: string; size: number } {
-    if (data !== null && typeof data === 'object') {
-      const cached = this.serializationMemo.get(data);
-      if (cached) return cached;
-    }
-
     const json = JSON.stringify(data);
-    const result = { json, size: json.length };
-
-    if (data !== null && typeof data === 'object') {
-      this.serializationMemo.set(data, result);
-    }
-
-    return result;
+    return { json, size: json.length };
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {
