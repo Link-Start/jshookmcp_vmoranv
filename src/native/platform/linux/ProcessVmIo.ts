@@ -73,11 +73,16 @@ export function readRemote(pid: number, address: bigint, size: number): Buffer {
   const localIov = buildIovec(koffi.address(local), BigInt(size));
   const remoteIov = buildIovec(address, BigInt(size));
 
-  const ret = readvFn()(pid, koffi.address(localIov), 1n, koffi.address(remoteIov), 1n, 0n);
-  if (ret === -1n || ret === -1) {
+  const ret = Number(readvFn()(pid, koffi.address(localIov), 1n, koffi.address(remoteIov), 1n, 0n));
+  if (ret === -1) {
     throw new Error(
       'process_vm_readv failed (errno unknown); commonly ESRCH=no such pid, EPERM=needs CAP_SYS_PTRACE, EFAULT=bad address',
     );
+  }
+  if (ret < size) {
+    // process_vm_readv stops at the first inaccessible page — a short read
+    // leaves the tail of the buffer as garbage.
+    throw new Error(`process_vm_readv short read: ${ret}/${size} bytes`);
   }
   return local;
 }
@@ -90,11 +95,13 @@ export function writeRemote(pid: number, address: bigint, data: Buffer): number 
   const localIov = buildIovec(koffi.address(data), BigInt(data.length));
   const remoteIov = buildIovec(address, BigInt(data.length));
 
-  const ret = writevFn()(pid, koffi.address(localIov), 1n, koffi.address(remoteIov), 1n, 0n);
-  if (ret === -1n || ret === -1) {
+  const ret = Number(
+    writevFn()(pid, koffi.address(localIov), 1n, koffi.address(remoteIov), 1n, 0n),
+  );
+  if (ret === -1) {
     throw new Error(
       'process_vm_writev failed (errno unknown); commonly ESRCH=no such pid, EPERM=needs CAP_SYS_PTRACE, EFAULT=bad address',
     );
   }
-  return Number(ret);
+  return ret;
 }

@@ -174,6 +174,9 @@ export class LinuxMemoryProviderImpl implements PlatformMemoryAPI {
   }
 
   writeMemory(handle: ProcessHandle, address: bigint, data: Buffer): MemoryWriteResult {
+    if (!handle.writeAccess) {
+      throw new Error('LinuxMemoryProvider: write requires a writeAccess handle');
+    }
     const memPath = `/proc/${handle.pid}/mem`;
     const fileDescriptor = fs.openSync(memPath, 'r+');
 

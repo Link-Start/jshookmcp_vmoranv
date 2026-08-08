@@ -71,9 +71,11 @@ export class HardwareBreakpointEngine {
     // Remove all breakpoints for this pid
     for (const [id, bp] of this.breakpoints) {
       if (bp.pid === pid) {
+        // Delete before clearDR so the DR7 rebuild excludes this breakpoint
+        // (otherwise its DR bit stays enabled with a zeroed address).
+        this.breakpoints.delete(id);
         this.clearDR(pid, bp.drIndex);
         this.drAllocation[bp.drIndex] = false;
-        this.breakpoints.delete(id);
       }
     }
 
@@ -126,9 +128,12 @@ export class HardwareBreakpointEngine {
     const bp = this.breakpoints.get(id);
     if (!bp) return false;
 
+    // Delete before clearDR so the DR7 rebuild in applyDRToAllThreads
+    // excludes this breakpoint — otherwise its DR bit stays enabled with
+    // a zeroed address, leaving a ghost breakpoint at 0.
+    this.breakpoints.delete(id);
     this.clearDR(bp.pid, bp.drIndex);
     this.drAllocation[bp.drIndex] = false;
-    this.breakpoints.delete(id);
     return true;
   }
 
@@ -244,9 +249,10 @@ export class HardwareBreakpointEngine {
           ctxBuf.writeBigUInt64LE(0n, drOffsets[drIndex]!);
         }
 
-        // Build DR7 from all active breakpoints
+        // Build DR7 from all active breakpoints of this pid only — including
+        // other pids' breakpoints would pollute this process's debug state.
         const entries = Array.from(this.breakpoints.values())
-          .filter((bp) => bp.enabled)
+          .filter((bp) => bp.enabled && bp.pid === pid)
           .map((bp) => ({
             drIndex: bp.drIndex,
             enabled: true,

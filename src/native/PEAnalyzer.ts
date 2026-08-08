@@ -253,7 +253,9 @@ export class PEAnalyzer {
 
     // Read IMAGE_EXPORT_DIRECTORY (40 bytes)
     const expData = ReadProcessMemory(hProcess, base + BigInt(exportDir.rva), 40);
-    const numberOfNames = expData.readUInt32LE(24);
+    // Cap before sizing the name/ordinal buffers — a corrupt header could
+    // otherwise drive huge allocations from numberOfNames.
+    const numberOfNames = Math.min(expData.readUInt32LE(24), MAX_EXPORTED_FUNCTIONS);
     const addressOfFunctionsRva = expData.readUInt32LE(28);
     const addressOfNamesRva = expData.readUInt32LE(32);
     const addressOfNameOrdinalsRva = expData.readUInt32LE(36);
@@ -596,8 +598,18 @@ export class PEAnalyzer {
   private async readCoreHeaders(hProcess: bigint, base: bigint) {
     const dosData = ReadProcessMemory(hProcess, base, DOS_HEADER_SIZE);
     const e_lfanew = dosData.readUInt32LE(E_LFANEW_OFFSET);
+    if (e_lfanew < DOS_HEADER_SIZE) {
+      throw new Error(`Invalid e_lfanew: 0x${e_lfanew.toString(16)}`);
+    }
 
     const ntData = ReadProcessMemory(hProcess, base + BigInt(e_lfanew), NT_HEADERS_SIZE);
+    // Validate the full "PE\0\0" signature before trusting numSections /
+    // data-directory offsets parsed from a corrupt header.
+    const ntSignature = ntData.readUInt32LE(0);
+    if (ntSignature !== PE_SIGNATURE) {
+      throw new Error(`Invalid PE signature: expected 0x4550, got 0x${ntSignature.toString(16)}`);
+    }
+
     const numSections = ntData.readUInt16LE(FILE_HEADER_OFFSET + 2);
     const sizeOfOptionalHeader = ntData.readUInt16LE(FILE_HEADER_OFFSET + 16);
     const magic = ntData.readUInt16LE(OPTIONAL_HEADER_OFFSET);
@@ -753,7 +765,10 @@ export class PEAnalyzer {
 
     for (const section of parsed.sections) {
       if (rva >= section.virtualAddress && rva < section.virtualAddress + section.virtualSize) {
-        return section.pointerToRawData + (rva - section.virtualAddress);
+        // An RVA can hit a section's virtual range while its raw data is
+        // smaller (e.g. zero-filled .bss) — don't map past sizeOfRawData.
+        const offset = section.pointerToRawData + (rva - section.virtualAddress);
+        if (offset < section.pointerToRawData + section.sizeOfRawData) return offset;
       }
     }
 
@@ -807,6 +822,9 @@ export class PEAnalyzer {
       );
     }
     const e_lfanew = buffer.readUInt32LE(E_LFANEW_OFFSET);
+    if (e_lfanew < DOS_HEADER_SIZE || e_lfanew + NT_HEADERS_SIZE > buffer.length) {
+      throw new Error(`Invalid e_lfanew in buffer: 0x${e_lfanew.toString(16)}`);
+    }
 
     // Read NT headers
     const ntSignature = buffer.readUInt32LE(e_lfanew);

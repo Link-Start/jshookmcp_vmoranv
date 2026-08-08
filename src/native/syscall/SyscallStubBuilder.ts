@@ -63,10 +63,17 @@ export function buildSyscallStub(ssn: number, gadgetAddr: bigint): SyscallStub {
 
   const self = _Gcp!() as unknown as bigint;
   const wrote = Buffer.alloc(8);
-  _Wpm!(self, base, koffi.address(stub), STUB_SIZE, koffi.address(wrote));
+  const wret = _Wpm!(self, base, koffi.address(stub), STUB_SIZE, koffi.address(wrote));
+  if (!wret) {
+    // Page stays tracked in `_pages` — freeAllStubs() releases it.
+    throw new Error('WriteProcessMemory failed for stub page');
+  }
 
   const old = Buffer.alloc(4);
-  _Vp!(base, STUB_PAGE, PAGE_EXECUTE_READ, koffi.address(old));
+  const pret = _Vp!(base, STUB_PAGE, PAGE_EXECUTE_READ, koffi.address(old));
+  if (!pret) {
+    throw new Error('VirtualProtect failed for stub page');
+  }
 
   return { fn: koffi.decode(base, 'int32 (*)()') as () => number, addr: base };
 }

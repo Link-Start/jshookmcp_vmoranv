@@ -134,9 +134,15 @@ function ptrace(req: number, pid: number, addr: bigint, data: bigint): bigint {
   return ptraceFn()(BigInt(req), pid, addr, data) as bigint;
 }
 
-/** PTRACE_PEEKTEXT: read one 8-byte word at `addr`. */
+/** PTRACE_PEEKTEXT: read one 8-byte word at `addr` (throws on ptrace error). */
 function peekWord(pid: number, addr: bigint): bigint {
   const word = ptrace(PTRACE_PEEKTEXT, pid, addr, 0n);
+  // PEEKTEXT returns -1 both for a valid all-0xFF word and for failure — only
+  // an accompanying errno disambiguates. A failed read must not be treated as
+  // "original bytes" (the saved word would corrupt the tracee on restore).
+  if (word === -1n && koffi.errno() !== 0) {
+    throw new Error(`LinuxInt3: PTRACE_PEEKTEXT failed at ${toHex(addr)} for pid ${pid}`);
+  }
   return word & WORD_MASK; // normalize signed `long` to unsigned 64-bit
 }
 
@@ -287,7 +293,11 @@ export class LinuxInt3AccessBreakpoint implements AccessBreakpointEngine {
     this.guardPlatform();
     if (this.attachedPids.has(pid)) return;
 
-    ptrace(PTRACE_ATTACH, pid, 0n, 0n);
+    // Check the attach result first — a failed attach (EPERM/ESRCH) would
+    // otherwise make the blocking waitpid hang or report a bogus stop state.
+    if (ptrace(PTRACE_ATTACH, pid, 0n, 0n) !== 0n) {
+      throw new Error(`LinuxInt3: PTRACE_ATTACH failed for pid ${pid}`);
+    }
     const status = waitpidBlocking(pid);
     if (!wifStopped(status) || wstopSig(status) !== SIGSTOP) {
       throw new Error(
@@ -331,6 +341,31 @@ export class LinuxInt3AccessBreakpoint implements AccessBreakpointEngine {
     this.guardPlatform();
     if (!this.attachedPids.has(pid)) {
       await this.attach(pid);
+    }
+
+    // Re-arming an address that already has a breakpoint would save the patched
+    // byte as its "original" — restore the previous patch first (dedupe).
+    for (const [id, b] of this.breakpoints) {
+      if (b.pid === pid && b.address === address) {
+        restoreBytes(b);
+        this.breakpoints.delete(id);
+      }
+    }
+
+    // aarch64 BRK spans 4 bytes: a second breakpoint within that span would
+    // save the first BRK's bytes as its "original" and corrupt the tracee on
+    // restore. Reject clearly instead of corrupting. (x86-64 INT3 is 1 byte at
+    // any address — overlapping saves cannot occur.)
+    if (IS_AARCH64) {
+      for (const b of this.breakpoints.values()) {
+        const dist = b.address > address ? b.address - address : address - b.address;
+        if (b.pid === pid && dist < 4n) {
+          throw new Error(
+            `LinuxInt3: address ${toHex(address)} overlaps existing breakpoint ${toHex(b.address)} ` +
+              `(aarch64 BRK spans 4 bytes)`,
+          );
+        }
+      }
     }
 
     // PEEKTEXT the 8-byte word starting at `address`; save the original low
@@ -427,7 +462,13 @@ export class LinuxInt3AccessBreakpoint implements AccessBreakpointEngine {
     }
     // 3. Single-step the original instruction.
     ptrace(PTRACE_SINGLESTEP, bp.pid, 0n, 0n);
-    waitpidBlocking(bp.pid);
+    const status = waitpidBlocking(bp.pid);
+    if (!wifStopped(status) || wstopSig(status) !== SIGTRAP) {
+      // Single-step did not complete (tracee stopped by a signal, or waitpid
+      // failed). Leave the breakpoint disarmed and fail — re-patching over an
+      // unknown stop state would corrupt the tracee.
+      return false;
+    }
     // 4. Re-patch the breakpoint instruction.
     const word = peekWord(bp.pid, bp.address);
     pokeWord(bp.pid, bp.address, (word & ~ARCH.lowMask) | ARCH.insnWord);

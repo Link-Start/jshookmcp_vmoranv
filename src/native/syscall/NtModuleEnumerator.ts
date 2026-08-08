@@ -178,6 +178,12 @@ export function enumerateKernelModules(): KernelModule[] {
   if (required === 0) {
     return [];
   }
+  // Defensive cap: the kernel module list is ~100 KB on real systems; a
+  // corrupted returnLen must not trigger a giant allocation or an unbounded
+  // parse loop (parseModules is bounded by buffer length, but not by count).
+  if (required > 0x10000000) {
+    throw new Error(`NtQuerySystemInformation required length implausible: ${required}`);
+  }
 
   // Second call: allocate the required length and fetch the data.
   const data = Buffer.alloc(required);

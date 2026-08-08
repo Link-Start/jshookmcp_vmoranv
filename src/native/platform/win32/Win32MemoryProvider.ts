@@ -44,17 +44,21 @@ function getWin32Handle(handle: ProcessHandle): bigint {
 // ── Protection mapping ──
 
 function win32ProtToMemoryProtection(prot: number): MemoryProtection {
-  // Map Win32 PAGE_* constants to MemoryProtection flags
+  // Map Win32 PAGE_* constants to MemoryProtection flags. Explicit full-mask
+  // comparisons — a bare `prot & X` truthiness test silently breaks the moment
+  // a constant grows to multiple bits.
   let flags = MemoryProtection.NoAccess;
-  if (prot & PAGE.READONLY) flags |= MemoryProtection.Read;
-  if (prot & PAGE.READWRITE) flags |= MemoryProtection.ReadWrite;
-  if (prot & PAGE.WRITECOPY) flags |= MemoryProtection.Read | MemoryProtection.WriteCopy;
-  if (prot & PAGE.EXECUTE) flags |= MemoryProtection.Execute;
-  if (prot & PAGE.EXECUTE_READ) flags |= MemoryProtection.ReadExecute;
-  if (prot & PAGE.EXECUTE_READWRITE) flags |= MemoryProtection.ReadWriteExecute;
-  if (prot & PAGE.EXECUTE_WRITECOPY)
+  if ((prot & PAGE.READONLY) === PAGE.READONLY) flags |= MemoryProtection.Read;
+  if ((prot & PAGE.READWRITE) === PAGE.READWRITE) flags |= MemoryProtection.ReadWrite;
+  if ((prot & PAGE.WRITECOPY) === PAGE.WRITECOPY)
+    flags |= MemoryProtection.Read | MemoryProtection.WriteCopy;
+  if ((prot & PAGE.EXECUTE) === PAGE.EXECUTE) flags |= MemoryProtection.Execute;
+  if ((prot & PAGE.EXECUTE_READ) === PAGE.EXECUTE_READ) flags |= MemoryProtection.ReadExecute;
+  if ((prot & PAGE.EXECUTE_READWRITE) === PAGE.EXECUTE_READWRITE)
+    flags |= MemoryProtection.ReadWriteExecute;
+  if ((prot & PAGE.EXECUTE_WRITECOPY) === PAGE.EXECUTE_WRITECOPY)
     flags |= MemoryProtection.Execute | MemoryProtection.Read | MemoryProtection.WriteCopy;
-  if (prot & PAGE.GUARD) flags |= MemoryProtection.Guard;
+  if ((prot & PAGE.GUARD) === PAGE.GUARD) flags |= MemoryProtection.Guard;
   return flags;
 }
 
