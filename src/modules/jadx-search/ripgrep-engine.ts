@@ -250,7 +250,17 @@ export class RipgrepEngine {
     };
 
     return new Promise<EngineRunOutcome>((resolve, reject) => {
+      let stopped = false;
+      const stop = (): void => {
+        if (stopped) return;
+        stopped = true;
+        clearTimeout(timer);
+      };
       const timer = setTimeout(() => {
+        // Mark stopped BEFORE killing so any trailing stdout data events
+        // arriving before the SIGKILL takes effect are discarded instead of
+        // re-entering the buffer guard after the promise already rejected.
+        stop();
         child.kill('SIGKILL');
         reject(
           new ToolError('TIMEOUT', `ripgrep timed out after ${JADX_SEARCH_TIMEOUT_MS} ms`, {
@@ -258,13 +268,6 @@ export class RipgrepEngine {
           }),
         );
       }, JADX_SEARCH_TIMEOUT_MS);
-
-      let stopped = false;
-      const stop = (): void => {
-        if (stopped) return;
-        stopped = true;
-        clearTimeout(timer);
-      };
 
       child.stdout?.setEncoding('utf8');
       child.stderr?.setEncoding('utf8');
@@ -342,9 +345,7 @@ export class RipgrepEngine {
           return;
         }
         // Flush trailing partial line (if any) — should be empty when
-        // ripgrep terminated cleanly. We keep the count around purely
-        // for the budget check above.
-        void stdoutSize;
+        // ripgrep terminated cleanly.
         resolve({
           matches,
           filesMatched: filesMatched.size,

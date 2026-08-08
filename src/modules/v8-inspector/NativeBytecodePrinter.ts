@@ -145,6 +145,8 @@ async function runBytecodePrinter(
 
     const timer = setTimeout(() => {
       child.kill();
+      // SIGTERM can be ignored or leave grandchildren; force-kill as fallback.
+      setTimeout(() => child.kill('SIGKILL'), 1000).unref();
       finish(`Timed out after ${timeoutMs}ms while waiting for isolated bytecode output`);
     }, timeoutMs);
 
@@ -162,6 +164,8 @@ async function runBytecodePrinter(
     child.on('close', (code) => {
       finish(code === 0 ? null : `Bytecode printer exited with code ${code}`);
     });
+    // EPIPE when the child exits before consuming stdin — swallow, close already settles.
+    child.stdin?.on?.('error', () => undefined);
     child.stdin.end(bootstrapScript);
   });
 }

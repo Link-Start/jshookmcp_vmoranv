@@ -242,6 +242,10 @@ export async function collectTurboFanIRIsolated(
 
   try {
     for (const filterName of candidateNames) {
+      // Fresh trace dir per candidate — a partially-failed earlier candidate
+      // may have left turbo-*.json files that would mix into the next parse.
+      cleanupTraceDir(traceDir);
+      mkdirSync(traceDir, { recursive: true });
       const bootstrapScript = buildBootstrapScript(context);
 
       const { stdout, stderr, error } = await runTraceTurboProcess(
