@@ -224,7 +224,36 @@ export class WsHandlers {
     this.appendWsFrame(requestId, frame);
   }
 
+  /**
+   * Evict one frame from the shadow accounting (per-request bucket +
+   * connection frame count). Kept in lockstep with the ring-buffer eviction
+   * so the two views never diverge.
+   */
+  private evictWsFrame(entry: WsFrameOrderEntry): void {
+    const bucket = this.s.wsFramesByRequest.get(entry.requestId);
+    if (bucket && bucket.length > 0) {
+      bucket.shift();
+      if (bucket.length === 0) {
+        this.s.wsFramesByRequest.delete(entry.requestId);
+      } else {
+        this.s.wsFramesByRequest.set(entry.requestId, bucket);
+      }
+    }
+    const connection = this.s.wsConnections.get(entry.requestId);
+    if (connection) connection.framesCount = Math.max(0, connection.framesCount - 1);
+  }
+
   private appendWsFrame(requestId: string, frame: WsFrameRecord): void {
+    // The ring buffer OVERWRITES its oldest slot when full (its length never
+    // exceeds maxFrames), so `length > maxFrames` can never trigger. Evict
+    // the displaced frame's shadow accounting BEFORE pushing, or the
+    // per-request buckets would grow unbounded and frame counts accumulate
+    // past the cap.
+    if (this.s.wsFrameOrder.length >= this.s.wsConfig.maxFrames) {
+      const oldest = this.s.wsFrameOrder.shift();
+      if (oldest) this.evictWsFrame(oldest);
+    }
+
     const list = this.s.wsFramesByRequest.get(requestId) ?? [];
     list.push(frame);
     this.s.wsFramesByRequest.set(requestId, list);
@@ -236,25 +265,6 @@ export class WsHandlers {
     }
 
     this.s.wsFrameOrder.push({ requestId, frame });
-    this.enforceWsFrameLimit();
-  }
-
-  private enforceWsFrameLimit(): void {
-    while (this.s.wsFrameOrder.length > this.s.wsConfig.maxFrames) {
-      const oldest = this.s.wsFrameOrder.shift();
-      if (!oldest) break;
-      const bucket = this.s.wsFramesByRequest.get(oldest.requestId);
-      if (bucket && bucket.length > 0) {
-        bucket.shift();
-        if (bucket.length === 0) {
-          this.s.wsFramesByRequest.delete(oldest.requestId);
-        } else {
-          this.s.wsFramesByRequest.set(oldest.requestId, bucket);
-        }
-      }
-      const connection = this.s.wsConnections.get(oldest.requestId);
-      if (connection) connection.framesCount = Math.max(0, connection.framesCount - 1);
-    }
   }
 
   private getWsFrameStats(): { total: number; sent: number; received: number } {

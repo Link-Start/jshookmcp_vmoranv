@@ -66,6 +66,7 @@ export const webgpuTools: Tool[] = [
           type: 'number',
           description: 'Number of timing samples to collect',
           minimum: 1,
+          maximum: 10000,
         },
         detectAnomalies: {
           type: 'boolean',
@@ -97,6 +98,7 @@ export const webgpuTools: Tool[] = [
           type: 'number',
           description: 'Number of command submissions to capture',
           minimum: 1,
+          maximum: 10000,
         },
       },
       required: ['captureCount'],
@@ -114,12 +116,14 @@ export const webgpuTools: Tool[] = [
           type: 'number',
           description: 'Number of shader compilations to capture before returning',
           minimum: 1,
+          maximum: 10000,
         },
         timeoutMs: {
           type: 'number',
           description:
             'Max wait in ms (returns early once captureCount shaders are captured). Default 5000.',
           minimum: 100,
+          maximum: 120000,
         },
       },
       required: ['captureCount'],
@@ -137,12 +141,14 @@ export const webgpuTools: Tool[] = [
           type: 'number',
           description: 'Maximum number of errors to capture before returning',
           minimum: 1,
+          maximum: 10000,
         },
         timeoutMs: {
           type: 'number',
           description:
             'Max wait in ms (returns early once captureCount errors are captured). Default 5000.',
           minimum: 100,
+          maximum: 120000,
         },
         wrapAllocations: {
           type: 'boolean',
@@ -165,12 +171,14 @@ export const webgpuTools: Tool[] = [
           type: 'number',
           description: 'Number of pipeline/layout creations to capture before returning',
           minimum: 1,
+          maximum: 10000,
         },
         timeoutMs: {
           type: 'number',
           description:
             'Max wait in ms (returns early once captureCount pipelines are captured). Default 5000.',
           minimum: 100,
+          maximum: 120000,
         },
       },
       required: ['captureCount'],

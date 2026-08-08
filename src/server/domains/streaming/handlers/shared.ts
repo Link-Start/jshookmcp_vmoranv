@@ -217,7 +217,21 @@ export function parseBooleanArg(value: unknown, defaultValue: boolean): boolean 
   return defaultValue;
 }
 
+/**
+ * Pattern heuristics for catastrophic backtracking (ReDoS): nested quantifiers
+ * on the same token — `(a+)+`, `(a*)*`, `(a|a?)+`, `([ab]+)*` — can blow up
+ * exponentially on crafted input. These are rejected before the regex is ever
+ * compiled/executed. (Best-effort: no static analysis is complete.)
+ */
+const RE_DOS_PATTERNS: RegExp[] = [
+  /\([^()]*[+*][^()]*\)[+*]/,
+  /\((?:[^()]|\\.)*[+*](?:[^()]|\\.)*\)[+*]/,
+];
+
 export function compileRegex(pattern: string): { regex?: RegExp; error?: string } {
+  if (RE_DOS_PATTERNS.some((re) => re.test(pattern))) {
+    return { error: 'catastrophic backtracking (ReDoS) risk: nested quantifiers rejected' };
+  }
   try {
     return { regex: new RegExp(pattern) };
   } catch (error) {

@@ -112,11 +112,16 @@ export class GrpcHandlers {
     this.pending.clear();
   }
 
-  private enforceGrpcCallLimit(): void {
-    while (this.s.grpcCallOrder.length > this.s.grpcConfig.maxCalls) {
+  /**
+   * Evict the oldest captured call when the ring buffer is full. The ring
+   * buffer OVERWRITES its oldest slot on push (length never exceeds the
+   * capacity), so `length > maxCalls` can never trigger after the fact — the
+   * eviction must run BEFORE the push.
+   */
+  private evictGrpcCallIfFull(): void {
+    if (this.s.grpcCallOrder.length >= this.s.grpcConfig.maxCalls) {
       const oldest = this.s.grpcCallOrder.shift();
-      if (!oldest) break;
-      this.s.grpcCalls.delete(oldest);
+      if (oldest !== undefined) this.s.grpcCalls.delete(oldest);
     }
   }
 
@@ -231,8 +236,8 @@ export class GrpcHandlers {
           bodyError: null,
         };
         this.s.grpcCalls.set(requestId, record);
+        this.evictGrpcCallIfFull();
         this.s.grpcCallOrder.push(requestId);
-        this.enforceGrpcCallLimit();
       },
       loadingFinished: (params: unknown) => {
         const requestId = getStringField(params, 'requestId');
