@@ -825,6 +825,27 @@ export class BrowserToolHandlers {
     return this.detailedData.handleGetOffloadedData(args);
   }
 
+  // ── Performance Tools (P0) ──
+  async handleBrowserPerformanceObserver(args: Record<string, unknown>) {
+    const { handleBrowserPerformanceObserver } = await import('./handlers/performance-tools');
+    return handleBrowserPerformanceObserver({ collector: this.collector }, args);
+  }
+
+  async handleBrowserResourceTiming(args: Record<string, unknown>) {
+    const { handleBrowserResourceTiming } = await import('./handlers/performance-tools');
+    return handleBrowserResourceTiming({ collector: this.collector }, args);
+  }
+
+  async handleBrowserCdpPerformanceMetrics(args: Record<string, unknown>) {
+    const { handleBrowserCdpPerformanceMetrics } = await import('./handlers/performance-tools');
+    return handleBrowserCdpPerformanceMetrics({ collector: this.collector }, args);
+  }
+
+  async handleV8TypeProfile(args: Record<string, unknown>) {
+    const { handleV8TypeProfile } = await import('./handlers/performance-tools');
+    return handleV8TypeProfile({ collector: this.collector }, args);
+  }
+
   // ── Coverage & Script Blocking (P2) ──
   async handlePageCoverageStart(args: Record<string, unknown>) {
     const { handlePageCoverageStart } = await import('./handlers/coverage-and-block');

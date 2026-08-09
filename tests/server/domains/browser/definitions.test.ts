@@ -10,6 +10,7 @@ import { browserPageCoreTools } from '@server/domains/browser/definitions.tools.
 import { browserPageSystemTools } from '@server/domains/browser/definitions.tools.page-system';
 import { browserSecurityStateTools } from '@server/domains/browser/definitions.tools.security';
 import { behaviorTools } from '@server/domains/browser/definitions.tools.behavior';
+import { browserPerformanceToolDefinitions } from '@server/domains/browser/definitions.tools.performance';
 
 // Re-export through definitions.ts
 import {
@@ -59,7 +60,8 @@ describe('browser tool definitions', () => {
         browserPageSystemTools.length +
         browserSecurityStateTools.length +
         behaviorTools.length +
-        browserJsdomToolDefinitions.length;
+        browserJsdomToolDefinitions.length +
+        browserPerformanceToolDefinitions.length;
       expect(browserTools).toHaveLength(expected);
     });
 
