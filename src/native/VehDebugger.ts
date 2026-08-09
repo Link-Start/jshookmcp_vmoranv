@@ -559,7 +559,7 @@ export class VehDebuggerEngine {
     );
     const hThreadN = BigInt(hThread as unknown as number | bigint);
     if (hThreadN === 0n) {
-      VirtualFreeEx(hProcess, pRemote, 0n, MEM.RELEASE);
+      VirtualFreeEx(hProcess, pRemote, 0, MEM.RELEASE);
       const unmap = kernel32.func('int UnmapViewOfFile(void *)');
       unmap(pViewN);
       CloseHandle(hMappingN);
@@ -599,7 +599,7 @@ export class VehDebuggerEngine {
 
     const kernel32 = koffi.load('kernel32.dll');
     try {
-      VirtualFreeEx(session.hProcess, session.pCode, 0n, MEM.RELEASE);
+      VirtualFreeEx(session.hProcess, session.pCode, 0, MEM.RELEASE);
     } catch {
       /* best effort */
     }
