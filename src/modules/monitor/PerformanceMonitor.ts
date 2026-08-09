@@ -85,6 +85,9 @@ export class PerformanceMonitor {
     resetOnNavigation?: boolean;
     reportAnonymousScripts?: boolean;
   }): Promise<void> {
+    if (this.coverageEnabled) {
+      throw new Error('Coverage already in progress');
+    }
     const result = await startCoverage(this.collector, options);
     this.coverageEnabled = result.coverageEnabled;
     this.coveragePage = result.coveragePage;
@@ -124,6 +127,9 @@ export class PerformanceMonitor {
   }
 
   async startTracing(options?: { categories?: string[]; screenshots?: boolean }): Promise<void> {
+    if (this.tracingEnabled) {
+      throw new Error('Tracing already in progress');
+    }
     const result = await startTracing(this.collector, this.tracingEnabled, options);
     this.tracingEnabled = result.tracingEnabled;
     this.tracingPage = result.tracingPage;
@@ -148,6 +154,9 @@ export class PerformanceMonitor {
   }
 
   async startHeapSampling(options?: { samplingInterval?: number }): Promise<void> {
+    if (this.heapSamplingEnabled) {
+      throw new Error('Heap sampling already in progress');
+    }
     const cdp = await this.ensureCDPSession();
     const result = await startHeapSampling(cdp, this.heapSamplingEnabled, options);
     this.heapSamplingEnabled = result.heapSamplingEnabled;

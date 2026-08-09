@@ -1062,4 +1062,58 @@ describe('PerformanceMonitor', () => {
     expect(timeline[0]!.name).toBe('evt-950'); // most recent entries retained
     expect(loggerState.warn).toHaveBeenCalled();
   });
+
+  // ---------- Fix: synchronous pre-start guards for startCoverage / startTracing / startHeapSampling ----------
+
+  it('throws when startCoverage is called while coverage is already in progress', async () => {
+    const { session } = createSession();
+    const { collector } = createCollector(session);
+    const monitor = new PerformanceMonitor(collector as any);
+
+    await monitor.startCoverage();
+    await expect(monitor.startCoverage()).rejects.toThrow('Coverage already in progress');
+  });
+
+  it('startCoverage guard throws before any page interaction', async () => {
+    const { session } = createSession();
+    const { collector, page } = createCollector(session);
+    const monitor = new PerformanceMonitor(collector as any);
+
+    await monitor.startCoverage();
+    page.coverage.startJSCoverage.mockClear();
+
+    await expect(monitor.startCoverage()).rejects.toThrow('Coverage already in progress');
+
+    // Synchronous guard must reject before coverage.startJSCoverage is called
+    expect(page.coverage.startJSCoverage).not.toHaveBeenCalled();
+  });
+
+  it('startTracing guard throws before any page interaction', async () => {
+    const { session } = createSession();
+    const { collector, page } = createCollector(session);
+    page.tracing.stop.mockResolvedValue(Buffer.from('{"traceEvents":[]}'));
+    const monitor = new PerformanceMonitor(collector as any);
+
+    await monitor.startTracing();
+    page.tracing.start.mockClear();
+
+    await expect(monitor.startTracing()).rejects.toThrow('Tracing already in progress');
+
+    // Synchronous guard must reject before page.tracing.start() is called
+    expect(page.tracing.start).not.toHaveBeenCalled();
+  });
+
+  it('startHeapSampling guard throws before creating a CDP session', async () => {
+    const { session } = createSession();
+    const { collector, page } = createCollector(session);
+    const monitor = new PerformanceMonitor(collector as any);
+
+    await monitor.startHeapSampling();
+    page.createCDPSession.mockClear();
+
+    await expect(monitor.startHeapSampling()).rejects.toThrow('Heap sampling already in progress');
+
+    // Synchronous guard must reject before ensureCDPSession creates a new session
+    expect(page.createCDPSession).not.toHaveBeenCalled();
+  });
 });
