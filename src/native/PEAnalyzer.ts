@@ -32,12 +32,16 @@ import type {
   PEParsedBuffer,
 } from './PEAnalyzer.types';
 import { IMAGE_SCN, IMAGE_DIRECTORY_ENTRY } from './PEAnalyzer.types';
+import {
+  MZ_MAGIC,
+  PE_SIGNATURE,
+  DOS_HEADER_SIZE,
+  E_LFANEW_OFFSET,
+  IMAGE_NT_OPTIONAL_HDR64_MAGIC as PE32PLUS_MAGIC,
+} from './PEConstants';
 
 // ── Constants ──
 
-const MZ_MAGIC = 0x5a4d;
-const PE_SIGNATURE = 0x00004550;
-const PE32PLUS_MAGIC = 0x20b;
 const SECTION_HEADER_SIZE = 40;
 const IMPORT_DESCRIPTOR_SIZE = 20;
 const COMPARE_BYTES = 16; // Bytes to compare for inline hook detection
@@ -49,9 +53,7 @@ const MAX_EXPORTED_FUNCTIONS = 2000;
 const MAX_DLL_NAME_BYTES = 256;
 const MAX_HINT_NAME_BYTES = 258; // 2-byte hint + 256-byte name
 
-// PE header layout offsets (IMAGE_DOS_HEADER / IMAGE_NT_HEADERS, PE/COFF spec).
-const DOS_HEADER_SIZE = 64;
-const E_LFANEW_OFFSET = 60; // e_lfanew within IMAGE_DOS_HEADER
+// PE header layout offsets (IMAGE_NT_HEADERS size, PE/COFF spec).
 const NT_HEADERS_SIZE = 264; // 4 signature + 20 file header + 240 PE32+ optional header
 const FILE_HEADER_OFFSET = 4; // within NT headers
 const OPTIONAL_HEADER_OFFSET = 24; // within NT headers
