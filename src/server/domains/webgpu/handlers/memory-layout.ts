@@ -57,12 +57,14 @@ export class MemoryLayoutHandler {
 
       const pageId = page.url();
 
-      // Acquire page lock to prevent concurrent GPU context access
-      const base = await this.pageLockManager.withLock(pageId, async () => {
+      // Acquire page lock to prevent concurrent GPU context access.
+      // Snapshot read/write are inside the lock to prevent interleaving
+      // under HTTP/SSE transport (Bug #3 fix).
+      const result = await this.pageLockManager.withLock(pageId, async () => {
         // Use real CDP integration to get GPU memory stats
         const memoryStats = await getGPUMemoryStats(page);
 
-        return {
+        const base = {
           heapSize: memoryStats.heapSize,
           usedHeapSize: memoryStats.usedHeapSize,
           allocations: memoryStats.allocations,
@@ -73,66 +75,73 @@ export class MemoryLayoutHandler {
           memorySource: memoryStats.memorySource,
           trackedBytes: memoryStats.trackedBytes,
         };
-      });
 
-      if (!track) {
-        return base;
-      }
+        if (!track) {
+          return base;
+        }
 
-      // Trend mode: snapshot + compare against the previous reading.
-      const canvasId = page.url();
-      const key = `webgpu_memory_${canvasId}`;
-      const snapshot: MemorySnapshot = {
-        timestamp: Date.now(),
-        heapSize: base.heapSize,
-        usedHeapSize: base.usedHeapSize,
-        trackedBytes: base.trackedBytes,
-        allocationCount: base.allocations.length,
-        memorySource: base.memorySource,
-      };
+        // Trend mode: snapshot + compare against the previous reading.
+        const canvasId = page.url();
+        const key = `webgpu_memory_${canvasId}`;
+        const snapshot: MemorySnapshot = {
+          timestamp: Date.now(),
+          heapSize: base.heapSize,
+          usedHeapSize: base.usedHeapSize,
+          trackedBytes: base.trackedBytes,
+          allocationCount: base.allocations.length,
+          memorySource: base.memorySource,
+        };
 
-      const previous = this.readSnapshot(key);
-      this.writeSnapshot(key, snapshot);
+        const previous = this.readSnapshot(key);
+        this.writeSnapshot(key, snapshot);
 
-      const delta = previous
-        ? {
-            usedHeapSizeDelta: snapshot.usedHeapSize - previous.usedHeapSize,
-            trackedBytesDelta: snapshot.trackedBytes - previous.trackedBytes,
-            allocationCountDelta: snapshot.allocationCount - previous.allocationCount,
-            elapsedMs: snapshot.timestamp - previous.timestamp,
-          }
-        : null;
-
-      // Growth rate uses trackedBytes (the reliable lower bound) — KB/s.
-      const growthRateKbPerSec =
-        delta && delta.elapsedMs > 0
-          ? delta.trackedBytesDelta / (delta.elapsedMs / 1000) / 1024
+        const delta = previous
+          ? {
+              usedHeapSizeDelta: snapshot.usedHeapSize - previous.usedHeapSize,
+              trackedBytesDelta: snapshot.trackedBytes - previous.trackedBytes,
+              allocationCountDelta: snapshot.allocationCount - previous.allocationCount,
+              elapsedMs: snapshot.timestamp - previous.timestamp,
+            }
           : null;
 
-      return {
-        ...base,
-        tracking: {
-          enabled: true,
-          namespace: TRACK_NAMESPACE,
-          key,
-          snapshot,
-          previous: previous ?? null,
-          delta,
-          growthRateKbPerSec,
-        },
-      };
+        // Growth rate uses trackedBytes (the reliable lower bound) — KB/s.
+        const growthRateKbPerSec =
+          delta && delta.elapsedMs > 0
+            ? delta.trackedBytesDelta / (delta.elapsedMs / 1000) / 1024
+            : null;
+
+        return {
+          ...base,
+          tracking: {
+            enabled: true,
+            namespace: TRACK_NAMESPACE,
+            key,
+            snapshot,
+            previous: previous ?? null,
+            delta,
+            growthRateKbPerSec,
+          },
+        };
+      });
+
+      return result;
     });
   }
 
-  private getActivePage(): Promise<any> {
+  // Bug #1 fix: async + await so try/catch traps promise rejections, not
+  // just synchronous throws. Matches the pattern used by all 8 other
+  // webgpu handlers (adapter-info, shader-compile, timing-analysis,
+  // command-capture, frame-timing, error-capture, shader-source-capture,
+  // pipeline-dump).
+  private async getActivePage(): Promise<any> {
     if (!this.deps.pageController) {
-      return Promise.resolve(null);
+      return null;
     }
 
     try {
-      return this.deps.pageController.getActivePage();
+      return await this.deps.pageController.getActivePage();
     } catch {
-      return Promise.resolve(null);
+      return null;
     }
   }
 
@@ -155,19 +164,25 @@ export class MemoryLayoutHandler {
     return fallbackSnapshots.get(key);
   }
 
+  // Bug #2 fix: read existing version and increment, matching the canonical
+  // handleSet pattern (existing?.version ?? 0) + 1. The hardcoded version:1
+  // caused the watch subsystem to never fire change events after the first
+  // write because entry.version never changed.
   private writeSnapshot(key: string, snapshot: MemorySnapshot): void {
     const store = this.getStateStore();
     if (store) {
       const now = Date.now();
+      const fullKey = `${TRACK_NAMESPACE}:${key}`;
+      const existing = store.state.get(fullKey);
       const entry: StateEntry = {
         key,
         namespace: TRACK_NAMESPACE,
         value: snapshot,
-        createdAt: now,
+        createdAt: existing?.createdAt ?? now,
         updatedAt: now,
-        version: 1,
+        version: (existing?.version ?? 0) + 1,
       };
-      store.state.set(`${TRACK_NAMESPACE}:${key}`, entry);
+      store.state.set(fullKey, entry);
       return;
     }
     fallbackSnapshots.set(key, snapshot);

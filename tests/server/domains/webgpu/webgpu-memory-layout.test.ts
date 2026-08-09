@@ -54,6 +54,28 @@ describe('webgpu_memory_layout', () => {
     });
   });
 
+  it('should handle rejected promise from getActivePage (async catch)', async () => {
+    // Bug #1: getActivePage must be async with await so the try/catch
+    // can trap promise rejections, not just synchronous throws.
+    const ctx = {
+      eventBus: { emit: () => {} },
+      pageController: {
+        // Returns a rejected promise directly (not via async throw) —
+        // only an async getActivePage with await can catch this.
+        getActivePage: () => Promise.reject(new Error('page gone')),
+      },
+    } as unknown as MCPServerContext;
+    const handlers = new WebGPUHandlers(ctx);
+
+    const response = await handlers.webgpu_memory_layout({});
+    const result = ResponseBuilder.parse(response);
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringMatching(/page/i),
+    });
+  });
+
   it('should return live GPU memory allocations with memorySource and trackedBytes', async () => {
     const allocations = [
       { size: 1024, usage: 'VERTEX | COPY_DST', label: 'vbuf', type: 'buffer', alive: true },
@@ -232,6 +254,67 @@ describe('webgpu_memory_layout', () => {
       const value = entry!.value as any;
       expect(value.trackedBytes).toBe(512);
       expect(entry!.namespace).toBe('webgpu');
+    });
+
+    it('increments state board version on each write (Bug #2 fix)', async () => {
+      // Bug #2: writeSnapshot hardcoded version:1 — second write produced
+      // no change event because version didn't increment. Verify monotonic
+      // version progression matches handleSet semantics.
+      const { SharedStateBoardHandlers } =
+        await import('@server/domains/coordination/state-board/handlers.impl.core');
+      const stateBoard = new SharedStateBoardHandlers();
+
+      const allocations1 = [{ size: 100, usage: 'VERTEX', type: 'buffer', alive: true }];
+      const page1 = makeMockPage(allocations1, []);
+      const ctx1 = {
+        eventBus: { emit: () => {} },
+        pageController: { getActivePage: async () => page1 },
+        sharedStateBoardHandlers: stateBoard,
+      } as unknown as MCPServerContext;
+      const handlers1 = new WebGPUHandlers(ctx1);
+
+      // First write → version 1.
+      const r1 = ResponseBuilder.parse(await handlers1.webgpu_memory_layout({ track: true }));
+      expect(r1.success).toBe(true);
+      const e1 = stateBoard.getStore().state.get('webgpu:webgpu_memory_https://example.com/');
+      expect(e1).toBeDefined();
+      expect(e1!.version).toBe(1);
+
+      // Second write → version 2 (was stuck at 1 before Bug #2 fix).
+      const allocations2 = [{ size: 200, usage: 'VERTEX', type: 'buffer', alive: true }];
+      const page2 = makeMockPage(allocations2, []);
+      const ctx2 = {
+        eventBus: { emit: () => {} },
+        pageController: { getActivePage: async () => page2 },
+        sharedStateBoardHandlers: stateBoard,
+      } as unknown as MCPServerContext;
+      const handlers2 = new WebGPUHandlers(ctx2);
+
+      const r2 = ResponseBuilder.parse(await handlers2.webgpu_memory_layout({ track: true }));
+      expect(r2.success).toBe(true);
+      const e2 = stateBoard.getStore().state.get('webgpu:webgpu_memory_https://example.com/');
+      expect(e2).toBeDefined();
+      expect(e2!.version).toBe(2);
+
+      // Third write → version 3.
+      const allocations3 = [{ size: 300, usage: 'VERTEX', type: 'buffer', alive: true }];
+      const page3 = makeMockPage(allocations3, []);
+      const ctx3 = {
+        eventBus: { emit: () => {} },
+        pageController: { getActivePage: async () => page3 },
+        sharedStateBoardHandlers: stateBoard,
+      } as unknown as MCPServerContext;
+      const handlers3 = new WebGPUHandlers(ctx3);
+
+      const r3 = ResponseBuilder.parse(await handlers3.webgpu_memory_layout({ track: true }));
+      expect(r3.success).toBe(true);
+      const e3 = stateBoard.getStore().state.get('webgpu:webgpu_memory_https://example.com/');
+      expect(e3).toBeDefined();
+      expect(e3!.version).toBe(3);
+
+      // createdAt must not change across writes (preserved from first write).
+      expect(e2!.createdAt).toBe(e1!.createdAt);
+      expect(e3!.createdAt).toBe(e1!.createdAt);
     });
   });
 });
