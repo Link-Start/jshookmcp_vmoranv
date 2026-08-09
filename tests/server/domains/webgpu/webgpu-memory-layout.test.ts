@@ -126,4 +126,112 @@ describe('webgpu_memory_layout', () => {
     expect(result.success).toBe(true);
     expect(result.allocations.some((a: any) => a.usage.includes('VERTEX'))).toBe(true);
   });
+
+  describe('track mode (trending)', () => {
+    it('returns the snapshot with no previous data on first tracked call', async () => {
+      const allocations = [{ size: 1024, usage: 'VERTEX', type: 'buffer', alive: true }];
+      const handlers = makeHandlers(makeMockPage(allocations, []));
+
+      const response = await handlers.webgpu_memory_layout({ track: true });
+      const result = ResponseBuilder.parse(response);
+
+      expect(result.success).toBe(true);
+      expect(result.tracking).toMatchObject({
+        enabled: true,
+        namespace: 'webgpu',
+        key: 'webgpu_memory_https://example.com/',
+      });
+      expect(result.tracking.previous).toBeNull();
+      expect(result.tracking.delta).toBeNull();
+      expect(result.tracking.growthRateKbPerSec).toBeNull();
+      expect(result.tracking.snapshot.trackedBytes).toBe(1024);
+      expect(typeof result.tracking.snapshot.timestamp).toBe('number');
+    });
+
+    it('computes delta and growth rate against the previous snapshot on second call', async () => {
+      // Two snapshots: trackedBytes grows from 1024 → 3072 over 1000ms.
+      const page1 = makeMockPage([{ size: 1024, usage: 'VERTEX', type: 'buffer', alive: true }]);
+      const handlers1 = makeHandlers(page1);
+      const first = ResponseBuilder.parse(await handlers1.webgpu_memory_layout({ track: true }));
+      expect(first.success).toBe(true);
+
+      const page2 = makeMockPage([
+        { size: 1024, usage: 'VERTEX', type: 'buffer', alive: true },
+        { size: 2048, usage: 'UNIFORM', type: 'buffer', alive: true },
+      ]);
+      const handlers2 = makeHandlers(page2);
+      const second = ResponseBuilder.parse(await handlers2.webgpu_memory_layout({ track: true }));
+      expect(second.success).toBe(true);
+
+      expect(second.tracking.previous).toMatchObject({ trackedBytes: 1024 });
+      expect(second.tracking.delta.trackedBytesDelta).toBe(2048);
+      expect(second.tracking.delta.allocationCountDelta).toBe(1);
+      expect(second.tracking.snapshot.trackedBytes).toBe(3072);
+    });
+
+    it('keeps behavior unchanged when track is false or omitted', async () => {
+      const allocations = [{ size: 1024, usage: 'VERTEX', type: 'buffer', alive: true }];
+      const handlers = makeHandlers(makeMockPage(allocations, []));
+
+      const response = await handlers.webgpu_memory_layout({});
+      const result = ResponseBuilder.parse(response);
+
+      expect(result.success).toBe(true);
+      expect(result.tracking).toBeUndefined();
+      expect(result).toHaveProperty('usedHeapSize');
+    });
+
+    it('keeps per-page snapshots isolated by canvas id (page url)', async () => {
+      const pageA = {
+        ...makeMockPage([{ size: 64, usage: 'VERTEX', type: 'buffer', alive: true }]),
+        url: () => 'https://a.example/',
+      };
+      const pageB = {
+        ...makeMockPage([{ size: 128, usage: 'VERTEX', type: 'buffer', alive: true }]),
+        url: () => 'https://b.example/',
+      };
+
+      const firstA = ResponseBuilder.parse(
+        await makeHandlers(pageA).webgpu_memory_layout({ track: true }),
+      );
+      expect(firstA.tracking.previous).toBeNull();
+
+      const firstB = ResponseBuilder.parse(
+        await makeHandlers(pageB).webgpu_memory_layout({ track: true }),
+      );
+      expect(firstB.tracking.previous).toBeNull();
+
+      const secondA = ResponseBuilder.parse(
+        await makeHandlers(pageA).webgpu_memory_layout({ track: true }),
+      );
+      expect(secondA.tracking.previous).toMatchObject({ trackedBytes: 64 });
+    });
+
+    it('stores snapshots on the shared state board when coordination is present', async () => {
+      // Real StateBoardStore from the coordination domain.
+      const { SharedStateBoardHandlers } =
+        await import('@server/domains/coordination/state-board/handlers.impl.core');
+      const stateBoard = new SharedStateBoardHandlers();
+
+      const allocations = [{ size: 512, usage: 'VERTEX', type: 'buffer', alive: true }];
+      const page = makeMockPage(allocations, []);
+      const ctx = {
+        eventBus: { emit: () => {} },
+        pageController: { getActivePage: async () => page },
+        sharedStateBoardHandlers: stateBoard,
+      } as unknown as MCPServerContext;
+      const handlers = new WebGPUHandlers(ctx);
+
+      const response = await handlers.webgpu_memory_layout({ track: true });
+      const result = ResponseBuilder.parse(response);
+
+      expect(result.success).toBe(true);
+      const entry = stateBoard.getStore().state.get('webgpu:webgpu_memory_https://example.com/');
+      expect(entry).toBeDefined();
+      expect(entry).not.toBeUndefined();
+      const value = entry!.value as any;
+      expect(value.trackedBytes).toBe(512);
+      expect(entry!.namespace).toBe('webgpu');
+    });
+  });
 });

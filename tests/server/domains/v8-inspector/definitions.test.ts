@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { v8InspectorTools } from '../../../../src/server/domains/v8-inspector/definitions';
 
@@ -21,6 +22,21 @@ describe('v8-inspector definitions', () => {
     expect(turbofanTool?.inputSchema.properties).toHaveProperty('scriptId');
     expect(turbofanTool?.inputSchema.required).toContain('scriptId');
     expect(turbofanTool?.inputSchema.properties).not.toHaveProperty('functionId');
+  });
+
+  it('documents the v8_allocation_track tracking pipeline in CLAUDE.md', () => {
+    const claudeMd = readFileSync(
+      new URL('../../../../src/server/domains/v8-inspector/CLAUDE.md', import.meta.url),
+      'utf8',
+    );
+    const line = claudeMd.split('\n').find((l) => l.includes('`v8_allocation_track`'));
+    expect(line).toBeDefined();
+    // allocation_track was rewritten to the stopTrackingHeapObjects + snapshot
+    // pipeline (2026-08-09). The doc must describe that dual path (with the
+    // explicit takeHeapSnapshot fallback), not the old tracking wording.
+    expect(line).toContain('startTrackingHeapObjects');
+    expect(line).toContain('stopTrackingHeapObjects');
+    expect(line).toContain('takeHeapSnapshot');
   });
 
   it('exposes a clamped samplingInterval on v8_heap_sampling', () => {

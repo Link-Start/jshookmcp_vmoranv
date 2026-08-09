@@ -117,17 +117,73 @@ function payload(res: {
 let tmpDir: string;
 let soPath: string;
 let nullCallSoPath: string;
+let callerSoPath: string;
+let loopSoPath: string;
 // add_two: add x0, x0, x1 ; ret
 const ADD_TWO = [0x00, 0x00, 0x01, 0x8b, 0xc0, 0x03, 0x5f, 0xd6];
 // call_null: movz x8,#0 ; blr x8
 const CALL_NULL = [0x08, 0x00, 0x80, 0xd2, 0x00, 0x01, 0x3f, 0xd6];
+// caller (saves LR across the call; bl helper; restores; ret) + helper (add x0, x0, x1; ret)
+// The LR save is required: the emulator halts when PC reaches the sentinel LR, so a
+// caller that BLs must preserve x30 across the call like real prologues do.
+const CALLER_HELPER = [
+  0x00,
+  0x00,
+  0x01,
+  0x8b, // helper +0x00: add x0, x0, x1
+  0xc0,
+  0x03,
+  0x5f,
+  0xd6, // helper +0x04: ret
+  0xe9,
+  0x03,
+  0x1e,
+  0xaa, // caller +0x08: mov x9, x30
+  0xfd,
+  0xff,
+  0xff,
+  0x97, // caller +0x0c: bl helper (0x97fffffd, offset -3)
+  0xfe,
+  0x03,
+  0x09,
+  0xaa, // caller +0x10: mov x30, x9
+  0xc0,
+  0x03,
+  0x5f,
+  0xd6, // caller +0x14: ret
+];
+// count_loop: subs x2, x2, #1 ; b.ne <subs> ; ret — runs 2N+1 instructions for x2=N
+const COUNT_LOOP = [
+  0x42,
+  0x04,
+  0x00,
+  0xf1, // +0x00: subs x2, x2, #1
+  0xe1,
+  0xff,
+  0xff,
+  0x54, // +0x04: b.ne +0x00 (backward)
+  0xc0,
+  0x03,
+  0x5f,
+  0xd6, // +0x08: ret
+];
 
 beforeAll(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), 'nemu-handlers-'));
   soPath = join(tmpDir, 'libadd.so');
   nullCallSoPath = join(tmpDir, 'lib-null-call.so');
+  callerSoPath = join(tmpDir, 'libcaller.so');
+  loopSoPath = join(tmpDir, 'libloop.so');
   await writeFile(soPath, buildSo(ADD_TWO, [{ name: 'add_two', codeOffset: 0 }]));
   await writeFile(nullCallSoPath, buildSo(CALL_NULL, [{ name: 'call_null', codeOffset: 0 }]));
+  await writeFile(
+    callerSoPath,
+    buildSo(CALLER_HELPER, [
+      { name: 'helper', codeOffset: 0 },
+      { name: 'caller', codeOffset: 8 },
+    ]),
+  );
+  await writeFile(loopSoPath, buildSo(COUNT_LOOP, [{ name: 'count_loop', codeOffset: 0 }]));
 });
 
 afterAll(async () => {
@@ -584,5 +640,86 @@ describe('NativeEmulatorHandlers — isolation & errors', () => {
     const res = payload(await handlers.handleDestroySession({ sessionId: 'ghost' }));
     expect(res.success).toBe(true);
     expect(res.destroyed).toBe(false);
+  });
+});
+
+describe('NativeEmulatorHandlers — nemu_trace profile mode', () => {
+  let handlers: NativeEmulatorHandlers;
+  afterEach(() => handlers.dispose());
+
+  async function traceWith(
+    so: string,
+    symbol: string,
+    args: number[],
+    extra: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
+    handlers = new NativeEmulatorHandlers(
+      new SessionManager({ emulatorOptions: { syscalls: false } }),
+    );
+    const sessionId = payload(await handlers.handleCreateSession({ installSyscalls: false }))
+      .sessionId as string;
+    await handlers.handleLoadLibrary({ sessionId, soPath: so });
+    return payload(await handlers.handleTrace({ sessionId, symbol, args, ...extra }));
+  }
+
+  it('aggregates per-pc instruction frequency without per-step rows', async () => {
+    const res = await traceWith(soPath, 'add_two', [5, 6], { mode: 'profile' });
+    expect(res.success).toBe(true);
+    expect(res.result).toBe(11);
+    expect(res.trace).toBeUndefined();
+    expect(res.totalInstructions).toBe(2);
+    expect(res.uniqueInstructions).toBe(2);
+    const hot = res.hotInstructions as Array<Record<string, unknown>>;
+    expect(hot).toHaveLength(2);
+    // Both instructions execute once: 50% each. Tie broken by pc (add first).
+    expect(hot[0]).toMatchObject({ count: 1, percentage: 50 });
+    expect(String(hot[0]!.asm)).toContain('add');
+    expect(hot[1]).toMatchObject({ count: 1, percentage: 50 });
+    expect(res.summary).toMatchObject({ totalInstructions: 2, uniqueInstructions: 2 });
+    expect(String(res.summary.topHotPc)).toBe('0x1000');
+    expect(String(res.summary.topHotAsm)).toContain('add');
+  });
+
+  it('builds a call tree from BL targets with best-effort symbol names', async () => {
+    const res = await traceWith(callerSoPath, 'caller', [3, 4], { mode: 'profile' });
+    expect(res.success).toBe(true);
+    expect(res.result).toBe(7);
+    // mov x9,x30; bl; add; ret; mov x30,x9; ret = 6 instructions
+    expect(res.totalInstructions).toBe(6);
+    const callTree = res.callTree as Array<Record<string, unknown>>;
+    expect(callTree).toHaveLength(1);
+    expect(callTree[0]).toMatchObject({ count: 1, symbolName: 'caller' });
+    const callees = callTree[0]!.callees as Array<Record<string, unknown>>;
+    expect(callees).toHaveLength(1);
+    expect(callees[0]).toMatchObject({ count: 1, symbolName: 'helper' });
+    expect(callees[0]!.callees).toEqual([]);
+  });
+
+  it('computes exact 3-decimal percentages and honors topN', async () => {
+    // x2=3 → 3×(subs,b.ne) + ret = 7 instructions
+    const res = await traceWith(loopSoPath, 'count_loop', [0, 0, 3], { mode: 'profile', topN: 2 });
+    expect(res.success).toBe(true);
+    expect(res.totalInstructions).toBe(7);
+    expect(res.uniqueInstructions).toBe(3);
+    const hot = res.hotInstructions as Array<Record<string, unknown>>;
+    expect(hot).toHaveLength(2);
+    expect(hot[0]).toMatchObject({ count: 3, percentage: 42.857 });
+    expect(String(hot[0]!.asm)).toContain('subs');
+    expect(hot[1]).toMatchObject({ count: 3, percentage: 42.857 });
+    expect(String(hot[1]!.asm)).toContain('b.ne');
+    expect(res.summary).toMatchObject({ totalInstructions: 7, uniqueInstructions: 3 });
+    expect(res.trace).toBeUndefined();
+  });
+
+  it('applies the profile instruction budget and reports truncation', async () => {
+    // x2=9 → 19 instructions, but the 5-instruction budget stops the trace early
+    const res = await traceWith(loopSoPath, 'count_loop', [0, 0, 9], {
+      mode: 'profile',
+      maxSteps: 5,
+    });
+    expect(res.success).toBe(true);
+    expect(res.totalInstructions).toBe(5);
+    expect(res.truncated).toBe(true);
+    expect((res.hotInstructions as unknown[]).length).toBeGreaterThan(0);
   });
 });

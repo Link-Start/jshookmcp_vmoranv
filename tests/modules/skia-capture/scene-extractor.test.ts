@@ -277,6 +277,40 @@ describe('SkiaSceneExtractor', () => {
       expect(result.isSkiaBacked).toBe(true);
       expect(mockPC.evaluate).toHaveBeenCalled();
     });
+
+    it('should send a real WebGL probe script instead of the placeholder', async () => {
+      const mockPC = createMockPageController({});
+
+      await detectSkiaRenderer(mockPC);
+
+      const evaluateMock = mockPC.evaluate as unknown as { mock: { calls: unknown[][] } };
+      const scripts = evaluateMock.mock.calls.map((call) => String(call[0]));
+      const webglScript = scripts.find((script) => script.includes('UNMASKED_RENDERER_WEBGL'));
+      expect(webglScript).toBeDefined();
+      // Real detection: acquire a WebGL context, read RENDERER parameters and
+      // classify — not the old `return []` placeholder that always reported
+      // confidence 0.1 on real browsers.
+      expect(webglScript).toContain("canvas.getContext('webgl')");
+      expect(webglScript).toContain('getParameter');
+      expect(webglScript).toContain('hasSkiaBackend');
+      // The old placeholder unconditionally returned [] right after its comment;
+      // the real probe only returns [] when no WebGL context is available.
+      expect(webglScript).not.toContain('*/ return [];');
+      expect(webglScript).toContain('if (!gl)');
+    });
+
+    it('should embed canvasId into the probe script when provided', async () => {
+      const mockPC = createMockPageController({});
+
+      await detectSkiaRenderer(mockPC, '#game-canvas');
+
+      const evaluateMock = mockPC.evaluate as unknown as { mock: { calls: unknown[][] } };
+      const scripts = evaluateMock.mock.calls.map((call) => String(call[0]));
+      const webglScript = scripts.find((script) => script.includes('UNMASKED_RENDERER_WEBGL'));
+      expect(webglScript).toBeDefined();
+      expect(webglScript).toContain('querySelector');
+      expect(webglScript).toContain('#game-canvas');
+    });
   });
 
   describe('extractSceneTree', () => {
