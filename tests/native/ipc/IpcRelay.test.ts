@@ -6,7 +6,7 @@
  * (no real sockets).
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   IpcRelay,
   getOrCreateRelay,
@@ -137,6 +137,115 @@ describe('IpcRelay', () => {
       relay.disconnect();
       expect(relay.status.connected).toBe(false);
       expect(emitted).toBe(true);
+    });
+  });
+
+  describe('security', () => {
+    describe('path traversal (sessionId validation)', () => {
+      it('rejects sessionId with path traversal (../)', () => {
+        const relay = new IpcRelay({ sessionId: '../../etc/cron.d/evil' });
+        expect(() => relay.status.path).toThrow(/Invalid sessionId/);
+      });
+
+      it('rejects sessionId with null bytes', () => {
+        const relay = new IpcRelay({ sessionId: 'abc\x00def' });
+        expect(() => relay.status.path).toThrow(/Invalid sessionId/);
+      });
+
+      it('accepts valid alphanumeric sessionIds with dots/dashes/underscores', () => {
+        const relay = new IpcRelay({ sessionId: 'abc-123.test_ok' });
+        expect(() => relay.status.path).not.toThrow();
+      });
+
+      it('rejects empty sessionId', () => {
+        const relay = new IpcRelay({ sessionId: '' });
+        expect(() => relay.status.path).toThrow(/Invalid sessionId/);
+      });
+
+      it('rejects sessionId starting with non-alphanumeric', () => {
+        const relay = new IpcRelay({ sessionId: '-bad-start' });
+        expect(() => relay.status.path).toThrow(/Invalid sessionId/);
+      });
+    });
+
+    describe('buffer ceiling (DoS protection)', () => {
+      it('destroys socket when receive buffer would exceed 2x maxMessageBytes', () => {
+        const relay = new IpcRelay({ sessionId: 'buffer-test', maxMessageBytes: 1024 });
+        // The MAX_BUFFER is 2 * maxMessageBytes = 2048.
+        // Seed receiveBuffer with 2000 bytes, then send a 100-byte chunk → exceeds 2048.
+        (relay as any).receiveBuffer = Buffer.alloc(2000);
+        let destroyed = false;
+        (relay as any).socket = {
+          destroy: () => {
+            destroyed = true;
+          },
+        };
+        (relay as any).handleData(Buffer.alloc(100));
+        expect(destroyed).toBe(true);
+        expect((relay as any).lastError).toContain('Receive buffer exceeded');
+      });
+
+      it('does not destroy socket when buffer is within limit', () => {
+        const relay = new IpcRelay({ sessionId: 'buffer-test-ok', maxMessageBytes: 1024 });
+        (relay as any).receiveBuffer = Buffer.alloc(100);
+        let destroyed = false;
+        (relay as any).socket = {
+          destroy: () => {
+            destroyed = true;
+          },
+        };
+        (relay as any).handleData(Buffer.alloc(100));
+        expect(destroyed).toBe(false);
+      });
+    });
+
+    describe('auth token plaintext warning', () => {
+      it('warns when authToken is used with a remote host', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          const relay = new IpcRelay({
+            sessionId: 'auth-test',
+            authToken: 'secret',
+            host: '192.168.1.100',
+          });
+          // Access private buildFrame to trigger the check.
+          (relay as any).buildFrame(1, 'test', {});
+          expect(warnSpy).toHaveBeenCalledWith(
+            expect.stringContaining('[IpcRelay] authToken sent in plaintext'),
+          );
+        } finally {
+          warnSpy.mockRestore();
+        }
+      });
+
+      it('does not warn for localhost (127.0.0.1)', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          const relay = new IpcRelay({
+            sessionId: 'auth-local',
+            authToken: 'secret',
+            host: '127.0.0.1',
+          });
+          (relay as any).buildFrame(1, 'test', {});
+          expect(warnSpy).not.toHaveBeenCalled();
+        } finally {
+          warnSpy.mockRestore();
+        }
+      });
+
+      it('does not warn when no authToken is set', () => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          const relay = new IpcRelay({
+            sessionId: 'no-auth',
+            host: '10.0.0.1',
+          });
+          (relay as any).buildFrame(1, 'test', {});
+          expect(warnSpy).not.toHaveBeenCalled();
+        } finally {
+          warnSpy.mockRestore();
+        }
+      });
     });
   });
 });

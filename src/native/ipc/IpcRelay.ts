@@ -225,6 +225,13 @@ export class IpcRelay extends EventEmitter {
   // ── private ─────────────────────────────────────────────────────────────
 
   private resolvePath(): string {
+    const SAFE_SESSION_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
+    if (!SAFE_SESSION_ID.test(this.config.sessionId)) {
+      throw new Error(
+        `Invalid sessionId: "${this.config.sessionId}". Must match ${SAFE_SESSION_ID}`,
+      );
+    }
+
     if (this.config.path) return this.config.path;
 
     if (process.platform === 'win32') {
@@ -242,6 +249,15 @@ export class IpcRelay extends EventEmitter {
     };
     if (this.config.authToken) {
       (msg as Record<string, unknown>).auth = this.config.authToken;
+      if (
+        this.config.host &&
+        this.config.host !== '127.0.0.1' &&
+        this.config.host !== 'localhost'
+      ) {
+        console.warn(
+          `[IpcRelay] authToken sent in plaintext to ${this.config.host}. Use TLS tunnel.`,
+        );
+      }
     }
     const json = JSON.stringify(msg);
     const payload = Buffer.from(json, 'utf8');
@@ -253,6 +269,14 @@ export class IpcRelay extends EventEmitter {
 
   private handleData(chunk: Buffer): void {
     this.bytesReceived += chunk.length;
+
+    const MAX_BUFFER = (this.config.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES) * 2;
+    if (this.receiveBuffer.length + chunk.length > MAX_BUFFER) {
+      this.lastError = `Receive buffer exceeded ${MAX_BUFFER} bytes`;
+      this.socket?.destroy();
+      return;
+    }
+
     this.receiveBuffer = Buffer.concat([this.receiveBuffer, chunk]);
 
     while (this.receiveBuffer.length >= 4) {
