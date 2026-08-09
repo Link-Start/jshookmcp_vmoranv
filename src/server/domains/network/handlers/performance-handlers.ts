@@ -10,8 +10,10 @@ import { PerformanceMonitor } from '@server/domains/shared/modules';
 import type { CodeCollector } from '@server/domains/shared/modules/collector';
 import {
   asOptionalBoolean,
+  asOptionalNumber,
   asOptionalString,
   asOptionalStringArray,
+  buildHotFunctions,
   toCpuProfilePayload,
 } from '../handlers.base.types';
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
@@ -62,15 +64,24 @@ export class PerformanceHandlers {
         eventCount: result.eventCount,
         sizeBytes: result.sizeBytes,
         sizeKB: (result.sizeBytes / 1024).toFixed(1),
-        hint: 'Open the trace file in Chrome DevTools -> Performance tab -> Load profile',
+        ...(result.truncated
+          ? {
+              truncated: true,
+              originalSizeBytes: result.originalSizeBytes,
+              hint: '⚠️ Trace was truncated (exceeded size limit). Open in Chrome DevTools may fail.',
+            }
+          : {
+              hint: 'Open the trace file in Chrome DevTools -> Performance tab -> Load profile',
+            }),
       };
     });
   }
 
-  async handleProfilerCpuStart(_args: Record<string, unknown>): Promise<ToolResponse> {
+  async handleProfilerCpuStart(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => {
       const monitor = this.deps.getPerformanceMonitor();
-      await monitor.startCPUProfiling();
+      const samplingInterval = asOptionalNumber(args.samplingInterval);
+      await monitor.startCPUProfiling({ samplingInterval });
       return {
         message: 'CPU profiling started. Call profiler_cpu with action="stop" to save the profile.',
       };
@@ -111,16 +122,7 @@ export class PerformanceHandlers {
         savedPath = displayPath;
       }
 
-      const hotFunctions = profile.nodes
-        .filter((n) => (n.hitCount || 0) > 0)
-        .toSorted((a, b) => (b.hitCount || 0) - (a.hitCount || 0))
-        .slice(0, 20)
-        .map((n) => ({
-          functionName: n.callFrame?.functionName || '(anonymous)',
-          url: n.callFrame?.url,
-          line: n.callFrame?.lineNumber,
-          hitCount: n.hitCount,
-        }));
+      const { hotFunctions, message } = buildHotFunctions(profile);
 
       return {
         artifactPath: savedPath,
@@ -128,6 +130,7 @@ export class PerformanceHandlers {
         totalSamples: profile.samples?.length || 0,
         durationMs: profile.endTime - profile.startTime,
         hotFunctions,
+        ...(message ? { message } : {}),
         hint: 'Open the .cpuprofile file in Chrome DevTools -> Performance tab',
       };
     });

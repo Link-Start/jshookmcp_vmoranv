@@ -77,8 +77,8 @@ export class PerformanceMonitor {
     return getPerformanceMetrics(this.collector);
   }
 
-  async getPerformanceTimeline(): Promise<PerformanceTimelineEntry[]> {
-    return getPerformanceTimeline(this.collector);
+  async getPerformanceTimeline(maxEntries = 500): Promise<PerformanceTimelineEntry[]> {
+    return getPerformanceTimeline(this.collector, maxEntries);
   }
 
   async startCoverage(options?: {
@@ -97,17 +97,25 @@ export class PerformanceMonitor {
     return result;
   }
 
-  async startCPUProfiling(): Promise<void> {
+  async startCPUProfiling(options?: { samplingInterval?: number }): Promise<void> {
+    if (this.profilerEnabled) {
+      throw new Error('CPU profiling already in progress');
+    }
     const cdp = await this.ensureCDPSession();
-    const result = await startCPUProfiling(cdp);
+    const result = await startCPUProfiling(cdp, options);
     this.profilerEnabled = result.profilerEnabled;
   }
 
   async stopCPUProfiling(): Promise<CPUProfile> {
-    const cdp = await this.ensureCDPSession();
-    const result = await stopCPUProfiling(cdp, this.profilerEnabled);
-    this.profilerEnabled = false;
-    return result;
+    try {
+      const cdp = await this.ensureCDPSession();
+      return await stopCPUProfiling(cdp, this.profilerEnabled);
+    } finally {
+      // Always reset state — a failed Profiler.stop must not leave
+      // profilerEnabled=true forever, which would leak state and reject all
+      // future startCPUProfiling calls.
+      this.profilerEnabled = false;
+    }
   }
 
   async takeHeapSnapshot(): Promise<number> {
@@ -123,16 +131,23 @@ export class PerformanceMonitor {
 
   async stopTracing(options?: {
     artifactPath?: string;
-  }): Promise<{ artifactPath?: string; eventCount: number; sizeBytes: number }> {
-    const result = await stopTracing(
-      this.collector,
-      this.tracingPage,
-      this.tracingEnabled,
-      options,
-    );
-    this.tracingEnabled = false;
-    this.tracingPage = null;
-    return result;
+    maxSizeMB?: number;
+  }): Promise<{
+    artifactPath?: string;
+    eventCount: number;
+    sizeBytes: number;
+    truncated?: boolean;
+    originalSizeBytes?: number;
+  }> {
+    try {
+      return await stopTracing(this.collector, this.tracingPage, this.tracingEnabled, options);
+    } finally {
+      // Always reset state — a failed stop (e.g. page.tracing.stop() rejecting)
+      // must not leave tracingEnabled=true forever, which would deadlock all
+      // future startTracing calls with "already in progress".
+      this.tracingEnabled = false;
+      this.tracingPage = null;
+    }
   }
 
   async startHeapSampling(options?: { samplingInterval?: number }): Promise<void> {
@@ -147,9 +162,12 @@ export class PerformanceMonitor {
     topAllocations: Array<{ functionName: string; url: string; selfSize: number }>;
   }> {
     const cdp = await this.ensureCDPSession();
-    const result = await stopHeapSampling(cdp, this.heapSamplingEnabled, options);
-    this.heapSamplingEnabled = false;
-    return result;
+    try {
+      const result = await stopHeapSampling(cdp, this.heapSamplingEnabled, options);
+      return result;
+    } finally {
+      this.heapSamplingEnabled = false;
+    }
   }
 
   async close(): Promise<void> {

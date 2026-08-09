@@ -107,6 +107,12 @@ describe('network tool definitions', () => {
     expect(names.has('profiler_heap_sampling')).toBe(false);
   });
 
+  it('profiler_cpu exposes optional samplingInterval', async () => {
+    const props = getProperties(findTool('profiler_cpu'));
+    expect(props.samplingInterval?.type).toBe('number');
+    expect(props.samplingInterval?.description).toContain('microseconds');
+  });
+
   it('contains expected console tools', async () => {
     const names = new Set(advancedTools.map((t) => t.name));
     expect(names.has('console_get_exceptions')).toBe(true);

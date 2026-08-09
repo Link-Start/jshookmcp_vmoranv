@@ -116,6 +116,11 @@ export const captureTools: Tool[] = [
     t
       .desc('Start or stop CPU profiling.')
       .enum('action', ['start', 'stop'], 'Profiler action')
+      .number(
+        'samplingInterval',
+        'Sampling interval in microseconds. Default: 1000 (1ms). 30-100 for high-res profiles. Range: 30-10000',
+        { minimum: 30, maximum: 10000 },
+      )
       .string('artifactPath', 'Custom output path')
       .required('action'),
   ),
