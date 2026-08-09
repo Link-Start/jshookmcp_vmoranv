@@ -86,8 +86,8 @@ import {
   MEM,
 } from './Win32API';
 import koffi from 'koffi';
-
-const toHex = (v: bigint) => `0x${v.toString(16).toUpperCase()}`;
+import { formatAddress } from './formatAddress';
+import { allocateDR as allocateDebugRegister } from './platform/utils';
 
 // ── Shared memory layout ──
 // +0x000: CONTEXT (1232 bytes) — full x64 thread context at hit
@@ -579,7 +579,7 @@ export class VehDebuggerEngine {
       hMapping: hMappingN,
       pView: pViewN,
       hEvent: hEventN,
-      hThread: hThreadN,
+      hThread: 0n, // handle already closed above; keep field for type compatibility
       pCode: pRemote,
     });
   }
@@ -742,13 +742,7 @@ export class VehDebuggerEngine {
   // ── Private ──
 
   private allocateDR(): number {
-    for (let i = 0; i < 4; i++) {
-      if (!this.drAllocation[i]) {
-        this.drAllocation[i] = true;
-        return i;
-      }
-    }
-    throw new ToolError('PREREQUISITE', 'All 4 hardware breakpoint registers (DR0-DR3) are in use');
+    return allocateDebugRegister(this.drAllocation);
   }
 
   /** Read a hit from shared memory after event signal. */
@@ -780,28 +774,28 @@ export class VehDebuggerEngine {
             breakpointId: id,
             address: bp.address,
             accessAddress: bp.address,
-            instructionAddress: toHex(ctx.rip),
+            instructionAddress: formatAddress(ctx.rip),
             threadId: 0, // VEH EXCEPTION_POINTERS does not include thread ID
             accessType: bp.access,
             timestamp: Date.now(),
             registers: {
-              rax: toHex(ctx.rax),
-              rbx: toHex(ctx.rbx),
-              rcx: toHex(ctx.rcx),
-              rdx: toHex(ctx.rdx),
-              rsi: toHex(ctx.rsi),
-              rdi: toHex(ctx.rdi),
-              rsp: toHex(ctx.rsp),
-              rbp: toHex(ctx.rbp),
-              r8: toHex(ctx.r8),
-              r9: toHex(ctx.r9),
-              r10: toHex(ctx.r10),
-              r11: toHex(ctx.r11),
-              r12: toHex(ctx.r12),
-              r13: toHex(ctx.r13),
-              r14: toHex(ctx.r14),
-              r15: toHex(ctx.r15),
-              rip: toHex(ctx.rip),
+              rax: formatAddress(ctx.rax),
+              rbx: formatAddress(ctx.rbx),
+              rcx: formatAddress(ctx.rcx),
+              rdx: formatAddress(ctx.rdx),
+              rsi: formatAddress(ctx.rsi),
+              rdi: formatAddress(ctx.rdi),
+              rsp: formatAddress(ctx.rsp),
+              rbp: formatAddress(ctx.rbp),
+              r8: formatAddress(ctx.r8),
+              r9: formatAddress(ctx.r9),
+              r10: formatAddress(ctx.r10),
+              r11: formatAddress(ctx.r11),
+              r12: formatAddress(ctx.r12),
+              r13: formatAddress(ctx.r13),
+              r14: formatAddress(ctx.r14),
+              r15: formatAddress(ctx.r15),
+              rip: formatAddress(ctx.rip),
               rflags: `0x${ctx.eflags.toString(16).toUpperCase()}`,
             },
           };

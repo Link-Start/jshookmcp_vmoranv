@@ -17,7 +17,6 @@
 import { randomUUID } from 'node:crypto';
 import koffi from 'koffi';
 import { BREAKPOINT_HIT_TIMEOUT_MS, BREAKPOINT_TRACE_MAX_HITS } from '@src/constants';
-import { ToolError } from '@errors/ToolError';
 import type {
   BreakpointAccess,
   BreakpointConfig,
@@ -25,6 +24,9 @@ import type {
   BreakpointListEntry,
   BreakpointSize,
 } from '@native/HardwareBreakpoint.types';
+import { formatAddress } from '../formatAddress';
+import { encodeDR7 } from '../Win32Debug';
+import { sleep, allocateDR as allocateDebugRegister } from './utils';
 
 // ── ptrace constants ────────────────────────────────────────────────────
 
@@ -79,8 +81,6 @@ const REGS_SIZE = 216;
 const WNOHANG = 1;
 const SIGSTOP = 19;
 const SIGTRAP = 5;
-
-const toHex = (v: bigint) => `0x${v.toString(16).toUpperCase()}`;
 
 interface ActiveBreakpoint extends BreakpointConfig {
   drIndex: number;
@@ -160,67 +160,6 @@ function wifStopped(status: number): boolean {
 
 function wstopSig(status: number): number {
   return (status >>> 8) & 0xff;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// ── DR7 encoding (same logic as Win32 DebugRegister encodeDR7) ──────────
-
-function encodeDR7(
-  entries: Array<{
-    drIndex: number;
-    enabled: boolean;
-    access: 'execute' | 'write' | 'readwrite' | 'read';
-    size: 1 | 2 | 4 | 8;
-  }>,
-): bigint {
-  let dr7 = 0n;
-
-  for (const entry of entries) {
-    if (!entry.enabled) continue;
-    const { drIndex, access, size } = entry;
-
-    // Local enable bit
-    dr7 |= 1n << BigInt(drIndex * 2);
-
-    // Condition: 00=exec, 01=write, 11=readwrite
-    let condition = 0;
-    switch (access) {
-      case 'execute':
-        condition = 0b00;
-        break;
-      case 'write':
-        condition = 0b01;
-        break;
-      case 'readwrite':
-      case 'read':
-        condition = 0b11;
-        break;
-    }
-    dr7 |= BigInt(condition) << BigInt(16 + drIndex * 4);
-
-    // Size: 00=1byte, 01=2byte, 11=4byte, 10=8byte
-    let sizeCode = 0;
-    switch (size) {
-      case 1:
-        sizeCode = 0b00;
-        break;
-      case 2:
-        sizeCode = 0b01;
-        break;
-      case 4:
-        sizeCode = 0b11;
-        break;
-      case 8:
-        sizeCode = 0b10;
-        break;
-    }
-    dr7 |= BigInt(sizeCode) << BigInt(18 + drIndex * 4);
-  }
-
-  return dr7;
 }
 
 // ── engine ──────────────────────────────────────────────────────────────
@@ -392,13 +331,7 @@ export class LinuxBreakpointEngine {
   }
 
   private allocateDR(): number {
-    for (let i = 0; i < 4; i++) {
-      if (!this.drAllocation[i]) {
-        this.drAllocation[i] = true;
-        return i;
-      }
-    }
-    throw new ToolError('PREREQUISITE', 'All 4 hardware breakpoint registers (DR0-DR3) are in use');
+    return allocateDebugRegister(this.drAllocation);
   }
 
   /**
@@ -474,29 +407,29 @@ export class LinuxBreakpointEngine {
           breakpointId: id,
           address: bp.address,
           accessAddress: bp.address,
-          instructionAddress: toHex(regs.readBigUInt64LE(OFF_RIP)),
+          instructionAddress: formatAddress(regs.readBigUInt64LE(OFF_RIP)),
           threadId: pid,
           accessType: bp.access,
           timestamp: Date.now(),
           registers: {
-            rax: toHex(regs.readBigUInt64LE(OFF_RAX)),
-            rbx: toHex(regs.readBigUInt64LE(OFF_RBX)),
-            rcx: toHex(regs.readBigUInt64LE(OFF_RCX)),
-            rdx: toHex(regs.readBigUInt64LE(OFF_RDX)),
-            rsi: toHex(regs.readBigUInt64LE(OFF_RSI)),
-            rdi: toHex(regs.readBigUInt64LE(OFF_RDI)),
-            rsp: toHex(regs.readBigUInt64LE(OFF_RSP)),
-            rbp: toHex(regs.readBigUInt64LE(OFF_RBP)),
-            r8: toHex(regs.readBigUInt64LE(OFF_R8)),
-            r9: toHex(regs.readBigUInt64LE(OFF_R9)),
-            r10: toHex(regs.readBigUInt64LE(OFF_R10)),
-            r11: toHex(regs.readBigUInt64LE(OFF_R11)),
-            r12: toHex(regs.readBigUInt64LE(OFF_R12)),
-            r13: toHex(regs.readBigUInt64LE(OFF_R13)),
-            r14: toHex(regs.readBigUInt64LE(OFF_R14)),
-            r15: toHex(regs.readBigUInt64LE(OFF_R15)),
-            rip: toHex(regs.readBigUInt64LE(OFF_RIP)),
-            rflags: toHex(regs.readBigUInt64LE(OFF_EFLAGS)),
+            rax: formatAddress(regs.readBigUInt64LE(OFF_RAX)),
+            rbx: formatAddress(regs.readBigUInt64LE(OFF_RBX)),
+            rcx: formatAddress(regs.readBigUInt64LE(OFF_RCX)),
+            rdx: formatAddress(regs.readBigUInt64LE(OFF_RDX)),
+            rsi: formatAddress(regs.readBigUInt64LE(OFF_RSI)),
+            rdi: formatAddress(regs.readBigUInt64LE(OFF_RDI)),
+            rsp: formatAddress(regs.readBigUInt64LE(OFF_RSP)),
+            rbp: formatAddress(regs.readBigUInt64LE(OFF_RBP)),
+            r8: formatAddress(regs.readBigUInt64LE(OFF_R8)),
+            r9: formatAddress(regs.readBigUInt64LE(OFF_R9)),
+            r10: formatAddress(regs.readBigUInt64LE(OFF_R10)),
+            r11: formatAddress(regs.readBigUInt64LE(OFF_R11)),
+            r12: formatAddress(regs.readBigUInt64LE(OFF_R12)),
+            r13: formatAddress(regs.readBigUInt64LE(OFF_R13)),
+            r14: formatAddress(regs.readBigUInt64LE(OFF_R14)),
+            r15: formatAddress(regs.readBigUInt64LE(OFF_R15)),
+            rip: formatAddress(regs.readBigUInt64LE(OFF_RIP)),
+            rflags: formatAddress(regs.readBigUInt64LE(OFF_EFLAGS)),
           },
         };
       }

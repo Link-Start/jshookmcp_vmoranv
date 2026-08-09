@@ -28,6 +28,8 @@ import type {
   BreakpointSize,
 } from '@native/HardwareBreakpoint.types';
 import { KERN, machTaskSelf, taskForPid } from '@src/native/platform/darwin/DarwinAPI';
+import { formatAddress } from '../formatAddress';
+import { sleep } from './utils';
 
 // ── koffi libSystem bindings (inline — mirrors DarwinAPI pattern) ───────
 
@@ -184,8 +186,6 @@ const DBGWCR_LSC_BOTH = 3 << 3;
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
-const toHex = (v: bigint) => `0x${v.toString(16).toUpperCase()}`;
-
 interface ActiveBreakpoint extends BreakpointConfig {
   slotIndex: number;
   slotType: 'bvr' | 'wvr';
@@ -339,10 +339,22 @@ export class DarwinBreakpointEngine {
 
     const task = this.taskPorts.get(bp.pid);
     if (task !== undefined) {
-      const dbg = Buffer.alloc(DEBUG_STATE_SIZE); // zeroed = clears the slot
       const { threads } = darwinTaskThreads(task);
       for (const th of threads) {
         try {
+          // Read current debug state, then zero only the target slot so other
+          // active breakpoints/watchpoints are left intact.
+          const dbg = Buffer.alloc(DEBUG_STATE_SIZE);
+          if (darwinThreadGetState(th, ARM_DEBUG_STATE64_FLAVOR, dbg) !== KERN.SUCCESS) continue;
+
+          if (bp.slotType === 'bvr') {
+            dbg.writeBigUInt64LE(0n, BVR_BASE + bp.slotIndex * 8);
+            dbg.writeUInt32LE(0, BCR_BASE + bp.slotIndex * 4);
+          } else {
+            dbg.writeBigUInt64LE(0n, WVR_BASE + bp.slotIndex * 8);
+            dbg.writeUInt32LE(0, WCR_BASE + bp.slotIndex * 4);
+          }
+
           darwinThreadSetState(th, ARM_DEBUG_STATE64_FLAVOR, dbg);
         } catch {
           /* best-effort */
@@ -406,29 +418,29 @@ export class DarwinBreakpointEngine {
               breakpointId: bp.id,
               address: bp.address,
               accessAddress: bp.address,
-              instructionAddress: toHex(pc),
+              instructionAddress: formatAddress(pc),
               threadId: th,
               accessType: bp.access,
               timestamp: Date.now(),
               registers: {
-                rax: toHex(gpState.readBigUInt64LE(0)),
-                rbx: toHex(gpState.readBigUInt64LE(8)),
-                rcx: toHex(gpState.readBigUInt64LE(16)),
-                rdx: toHex(gpState.readBigUInt64LE(24)),
-                rsi: toHex(gpState.readBigUInt64LE(32)),
-                rdi: toHex(gpState.readBigUInt64LE(40)),
-                rsp: toHex(gpState.readBigUInt64LE(A64_SP)),
-                rbp: toHex(gpState.readBigUInt64LE(232)),
-                r8: toHex(gpState.readBigUInt64LE(48)),
-                r9: toHex(gpState.readBigUInt64LE(56)),
-                r10: toHex(gpState.readBigUInt64LE(64)),
-                r11: toHex(gpState.readBigUInt64LE(72)),
-                r12: toHex(gpState.readBigUInt64LE(80)),
-                r13: toHex(gpState.readBigUInt64LE(88)),
-                r14: toHex(gpState.readBigUInt64LE(96)),
-                r15: toHex(gpState.readBigUInt64LE(104)),
-                rip: toHex(pc),
-                rflags: toHex(gpState.readBigUInt64LE(A64_CPSR)),
+                rax: formatAddress(gpState.readBigUInt64LE(0)),
+                rbx: formatAddress(gpState.readBigUInt64LE(8)),
+                rcx: formatAddress(gpState.readBigUInt64LE(16)),
+                rdx: formatAddress(gpState.readBigUInt64LE(24)),
+                rsi: formatAddress(gpState.readBigUInt64LE(32)),
+                rdi: formatAddress(gpState.readBigUInt64LE(40)),
+                rsp: formatAddress(gpState.readBigUInt64LE(A64_SP)),
+                rbp: formatAddress(gpState.readBigUInt64LE(232)),
+                r8: formatAddress(gpState.readBigUInt64LE(48)),
+                r9: formatAddress(gpState.readBigUInt64LE(56)),
+                r10: formatAddress(gpState.readBigUInt64LE(64)),
+                r11: formatAddress(gpState.readBigUInt64LE(72)),
+                r12: formatAddress(gpState.readBigUInt64LE(80)),
+                r13: formatAddress(gpState.readBigUInt64LE(88)),
+                r14: formatAddress(gpState.readBigUInt64LE(96)),
+                r15: formatAddress(gpState.readBigUInt64LE(104)),
+                rip: formatAddress(pc),
+                rflags: formatAddress(gpState.readBigUInt64LE(A64_CPSR)),
               },
             };
           }
@@ -468,10 +480,6 @@ export class DarwinBreakpointEngine {
       );
     }
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function adjustWcrBas(size: BreakpointSize): number {
