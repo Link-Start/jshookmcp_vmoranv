@@ -387,32 +387,3 @@ export async function handleHeapSnapshotCapture(
   });
   return await finalize(stored, true, pageTarget);
 }
-
-export async function handleHeapSearch(
-  args: Record<string, unknown>,
-  options: HeapSnapshotHandlerOptions,
-): Promise<{ success: boolean; snapshotId: string; query: string; matches: string[] }> {
-  const query = typeof args.query === 'string' && args.query.length > 0 ? args.query : '.*';
-  const snapshotId =
-    typeof args.snapshotId === 'string' && args.snapshotId.length > 0
-      ? args.snapshotId
-      : options.getSnapshot();
-
-  await options.getPage();
-
-  if (!snapshotId) {
-    throw new Error('snapshotId is required');
-  }
-
-  const snapshot = getSnapshot(snapshotId);
-  if (!snapshot) {
-    throw new Error(`Snapshot ${snapshotId} not found`);
-  }
-
-  return {
-    success: true,
-    snapshotId,
-    query,
-    matches: snapshot.chunks.filter((chunk) => chunk.includes(query)),
-  };
-}

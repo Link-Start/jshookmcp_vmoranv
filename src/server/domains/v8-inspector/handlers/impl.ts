@@ -15,7 +15,6 @@ import {
   type TargetSessionResolver,
 } from './cdp-session';
 import { handleBytecodeExtract } from './bytecode-extract';
-import { handleJitInspect } from './jit-inspect';
 import { getSnapshot } from './heap-snapshot';
 import {
   deleteAllPersistedSnapshots,
@@ -109,7 +108,6 @@ export class V8InspectorHandlers {
       v8_heap_stats: (toolArgs) => this.v8_heap_stats(toolArgs),
       v8_bytecode_extract: (toolArgs) => this.v8_bytecode_extract(toolArgs),
       v8_version_detect: (toolArgs) => this.v8_version_detect(toolArgs),
-      v8_jit_inspect: (toolArgs) => this.v8_jit_inspect(toolArgs),
       v8_heap_find_leaks: (toolArgs) => this.v8_heap_find_leaks(toolArgs),
       v8_heap_retainers: (toolArgs) => this.v8_heap_retainers(toolArgs),
       v8_object_compare: (toolArgs) => this.v8_object_compare(toolArgs),
@@ -642,13 +640,6 @@ export class V8InspectorHandlers {
       const version = await detector.detectV8Version();
       const supportsNativesSyntax = await detector.supportsNativesSyntax();
       return { version, features: { nativesSyntax: supportsNativesSyntax } };
-    });
-  }
-
-  async v8_jit_inspect(args: ToolArgs): Promise<unknown> {
-    const getPage = this.deps.ctx.pageController ? createPageGetter(this.deps.ctx) : undefined;
-    return handleJitInspect(args, {
-      getPage,
     });
   }
 
