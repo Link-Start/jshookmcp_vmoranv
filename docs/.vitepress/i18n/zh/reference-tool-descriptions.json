@@ -667,5 +667,10 @@
   "ws_get_connections": "获取已跟踪的 WebSocket 连接、帧统计、握手状态和连接时序。",
   "ws_get_frames": "获取已捕获的 WebSocket 帧，支持分页、载荷过滤，并可按需返回完整载荷。",
   "ws_monitor": "通过 CDP Network 事件启用或禁用 WebSocket 帧捕获。",
-  "ws_send_frame": "通过 ws_monitor(exposeInstances=true) 保留的页内 WebSocket 实例发送帧，支持编辑后重发的流量回放。仅能触达 exposeInstances 启用后创建的 WebSocket（已存在的连接无法回溯触达）。"
+  "ws_send_frame": "通过 ws_monitor(exposeInstances=true) 保留的页内 WebSocket 实例发送帧，支持编辑后重发的流量回放。仅能触达 exposeInstances 启用后创建的 WebSocket（已存在的连接无法回溯触达）。",
+  "memory_search_string": "待补充中文：Search process memory for strings matching a pattern. Wraps memory_first_scan with valueType=string for convenience and adds substring/regex post-filtering. Optionally also searches for UTF-16LE (wide) strings.",
+  "memory_cheat_table": "待补充中文：Import or export a Cheat Engine .CT file. Export: converts a JSON array of {description, address, valueType, moduleName?, offset?} entries to a valid .CT XML file. Import: parses a .CT XML string and returns entries as JSON. Addresses can be hex (\"0x7FF612340000\") or module+offset (\"game.exe\"+00123456). Auto Assembler scripts are skipped with a warning.",
+  "memory_generate_signature": "待补充中文：Generate an update-resistant AOB (Array-of-Bytes) signature from bytes at a memory address. Detects relative offsets in CALL/JMP/LEA/Jcc instructions and replaces the displacement bytes with wildcards (??), making the signature survive minor code changes between updates. Uses byte-pattern heuristics — no Capstone dependency required.",
+  "memory_rtti_info": "待补充中文：Parse MSVC RTTI (Run-Time Type Information) at an object address. Reads vtable pointer, follows the Complete Object Locator chain, extracts class name, base classes, and class hierarchy descriptor. Equivalent to CE's \"Find out what addresses this code accesses\" for type discovery — quickly answer \"what type is this object?\" without a full structure analysis. Only works on MSVC x64 binaries with RTTI enabled.",
+  "nemu_relay": "待补充中文：Connect to a remote native-emulator session via IPC relay. Proxies nemu operations through a named pipe (Windows) or Unix domain socket (Linux/macOS) with JSON-RPC over length-prefixed frames. Use to drive ARM64 nemu sessions on a Linux host from a Windows MCP server (or vice versa)."
 }

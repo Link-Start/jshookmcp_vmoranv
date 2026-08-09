@@ -48,6 +48,15 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
           writable: { type: 'boolean', description: 'Only scan writable regions' },
           executable: { type: 'boolean', description: 'Only scan executable regions' },
           moduleOnly: { type: 'boolean', description: 'Only scan module-backed regions' },
+          skipSystemModules: {
+            type: 'boolean',
+            description: 'Skip system modules (ntdll/kernel32/kernelbase/etc)',
+          },
+          modulePattern: {
+            type: 'string',
+            description: 'Only scan matching module names (case-insensitive substring)',
+          },
+          minSize: { type: 'number', description: 'Skip regions smaller than N bytes' },
         },
         description: 'Filter which memory regions to scan',
       })
@@ -75,6 +84,12 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
           writable: { type: 'boolean' },
           executable: { type: 'boolean' },
           moduleOnly: { type: 'boolean' },
+          skipSystemModules: { type: 'boolean', description: 'Skip system modules' },
+          modulePattern: {
+            type: 'string',
+            description: 'Only scan matching module names (case-insensitive substring)',
+          },
+          minSize: { type: 'number', description: 'Skip regions smaller than N bytes' },
         },
       })
       .requiredOpenWorld('valueType'),
@@ -86,6 +101,21 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .string('targetAddress', 'Target address to find pointers to (hex, e.g. "0x7FF612340000")')
       .number('maxResults', 'Maximum results (default: 10,000)')
       .boolean('moduleOnly', 'Only scan module-backed regions')
+      .prop('regionFilter', {
+        type: 'object',
+        properties: {
+          writable: { type: 'boolean', description: 'Only scan writable regions' },
+          executable: { type: 'boolean', description: 'Only scan executable regions' },
+          moduleOnly: { type: 'boolean', description: 'Only scan module-backed regions' },
+          skipSystemModules: { type: 'boolean', description: 'Skip system modules' },
+          modulePattern: {
+            type: 'string',
+            description: 'Only scan matching module names (case-insensitive substring)',
+          },
+          minSize: { type: 'number', description: 'Skip regions smaller than N bytes' },
+        },
+        description: 'Filter which memory regions to scan',
+      })
       .required('targetAddress')
       .query()
       .openWorld(),
@@ -130,16 +160,22 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   tool('memory_pointer_chain', (t) =>
     t
       .desc(
-        `Pointer chain operations: scan (find chains to target), validate, resolve, or export as JSON.`,
+        `Pointer chain operations: scan (multi-level BFS), autoscan (auto-discover pointer chains ` +
+          `by recursively scanning for pointers that point to or near the target address), ` +
+          `validate, resolve, or export as JSON. ` +
+          `autoscan is Cheat Engine's "pointer scan" equivalent — no manual base/offsets needed.`,
       )
-      .enum('action', ['scan', 'validate', 'resolve', 'export'], 'Chain operation')
+      .enum('action', ['scan', 'autoscan', 'validate', 'resolve', 'export'], 'Chain operation')
       .number('pid', 'Target process ID (optional when a browser session is attached)')
-      .string('targetAddress', 'Target address hex (action=scan)')
-      .number('maxDepth', 'Max chain depth 1-6 (action=scan, default: 4)')
-      .number('maxOffset', 'Max offset per level in bytes (action=scan, default: 4096)')
-      .boolean('staticOnly', 'Only module-relative chains (action=scan, default: false)')
-      .array('modules', { type: 'string' }, 'Only scan specific modules (action=scan)')
-      .number('maxResults', 'Max chains to return (action=scan, default: 1000)')
+      .string(
+        'targetAddress',
+        'Target address hex (action=scan/autoscan). For autoscan this is the address to find pointer chains to.',
+      )
+      .number('maxDepth', 'Max chain depth 1-6 (action=scan/autoscan, default: 4)')
+      .number('maxOffset', 'Max offset per level in bytes (action=scan/autoscan, default: 4096)')
+      .boolean('staticOnly', 'Only module-relative chains (action=scan/autoscan, default: false)')
+      .array('modules', { type: 'string' }, 'Only scan specific modules (action=scan/autoscan)')
+      .number('maxResults', 'Max chains to return (action=scan/autoscan, default: 1000)')
       .string('chains', 'JSON PointerChain[] (action=validate/export)')
       .string('chain', 'JSON single PointerChain (action=resolve)')
       .required('action'),
@@ -200,7 +236,10 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   tool('memory_breakpoint', (t) =>
     t
       .desc(
-        `Hardware breakpoint via x64 debug registers (DR0-DR3). Actions: set, remove, list, trace.`,
+        `Hardware breakpoint via x64 debug registers (DR0-DR3). Actions: set, remove, list, trace. ` +
+          `Two debugger modes: "win32" (default, uses DebugActiveProcess — freezes entire process) ` +
+          `and "veh" (Vectored Exception Handler — injects shellcode, only faulting thread pauses). ` +
+          `VEH mode is less intrusive but requires code injection which may be detected by anti-cheat systems.`,
       )
       .enum('action', ['set', 'remove', 'list', 'trace'], 'Breakpoint operation')
       .number(
@@ -213,6 +252,11 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .string('breakpointId', 'Breakpoint ID (action=remove)')
       .number('maxHits', 'Max hits to collect (action=trace, default: 50)')
       .number('timeoutMs', 'Timeout ms (action=trace, default: 10000)')
+      .enum(
+        'debuggerMode',
+        ['win32', 'veh'],
+        'Debugger backend: win32 (DebugActiveProcess, default) or veh (Vectored Exception Handler — requires code injection)',
+      )
       .required('action')
       .destructive(),
   ),
@@ -235,6 +279,21 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .number('maxHits', 'Maximum hits before auto-stop (default: 20)')
       .number('timeoutMs', 'Timeout in ms before auto-stop (default: 15000)')
       .boolean('disassemble', 'Whether to disassemble the faulting instruction (default: true)')
+      .prop('regionFilter', {
+        type: 'object',
+        properties: {
+          moduleOnly: {
+            type: 'boolean',
+            description: 'Hint: the breakpoint only fires in code that runs; used for tracking',
+          },
+          skipSystemModules: {
+            type: 'boolean',
+            description: 'Exclude system module hits from results',
+          },
+          modulePattern: { type: 'string', description: 'Only report hits from matching modules' },
+        },
+        description: 'Filter which instruction hits to report',
+      })
       .required('address', 'mode')
       .query(),
   ),
@@ -508,7 +567,8 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .desc(
         'Array-of-Bytes scan with wildcard support. Search for byte patterns like ' +
           '"48 8B ?? ?? 00 00" across readable memory. Accepts hex bytes (00-FF, optional 0x prefix) ' +
-          'and "??" wildcards. Case insensitive.',
+          'and "??" wildcards. Case insensitive. Use regionFilter to restrict to specific modules or ' +
+          'skip system modules.',
       )
       .number('pid', 'Target process ID (optional when a browser session is attached)')
       .string(
@@ -517,7 +577,122 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
           'Example: "48 8B ?? ?? 00 00".',
       )
       .string('moduleName', 'Restrict scan to a specific module (optional, case-insensitive)')
+      .boolean(
+        'executableOnly',
+        'Only scan executable regions (legacy param, use regionFilter.executable instead)',
+      )
       .number('maxResults', 'Maximum results to return (default: 10000)')
+      .prop('regionFilter', {
+        type: 'object',
+        properties: {
+          writable: { type: 'boolean', description: 'Only scan writable regions' },
+          executable: { type: 'boolean', description: 'Only scan executable regions' },
+          moduleOnly: { type: 'boolean', description: 'Only scan module-backed regions' },
+          skipSystemModules: { type: 'boolean', description: 'Skip system modules' },
+          modulePattern: { type: 'string', description: 'Only scan matching module names' },
+          minSize: { type: 'number', description: 'Skip regions smaller than N bytes' },
+        },
+        description: 'Filter which memory regions to scan',
+      })
+      .required('pattern')
+      .query(),
+  ),
+
+  // Cheat Table (.CT) Import/Export
+  tool('memory_cheat_table', (t) =>
+    t
+      .desc(
+        'Import or export a Cheat Engine .CT file. Export: converts a JSON array of {description, address, ' +
+          'valueType, moduleName?, offset?} entries to a valid .CT XML file. Import: parses a .CT XML string ' +
+          'and returns entries as JSON. Addresses can be hex ("0x7FF612340000") or module+offset ' +
+          '("game.exe"+00123456). Auto Assembler scripts are skipped with a warning.',
+      )
+      .enum('action', ['export', 'import'], 'Operation mode')
+      .string('xml', 'CT XML string content (action=import)')
+      .array(
+        'entries',
+        {
+          type: 'object',
+          properties: {
+            description: { type: 'string', description: 'Human-readable label (e.g. "Health")' },
+            address: {
+              type: 'string',
+              description:
+                'Hex address or module+offset (e.g. "0x7FF612340000" or \\"game.exe\\"+00123456)',
+            },
+            valueType: {
+              type: 'string',
+              description: 'jshookmcp value type: int32, float, double, int64, pointer, etc.',
+            },
+            moduleName: {
+              type: 'string',
+              description: 'Module name if address is module-relative',
+            },
+            offset: { type: 'string', description: 'Module offset as hex (e.g. "0x00123456")' },
+          },
+          required: ['description', 'address', 'valueType'],
+        },
+        'Array of CheatEntry objects (action=export)',
+      )
+      .number('version', 'CE table version (action=export, default: 45)')
+      .required('action')
+      .query(),
+  ),
+
+  // AOB Signature Generation
+  tool('memory_generate_signature', (t) =>
+    t
+      .desc(
+        'Generate an update-resistant AOB (Array-of-Bytes) signature from bytes at a memory address. ' +
+          'Detects relative offsets in CALL/JMP/LEA/Jcc instructions and replaces the displacement bytes ' +
+          'with wildcards (??), making the signature survive minor code changes between updates. ' +
+          'Uses byte-pattern heuristics — no Capstone dependency required.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('address', 'Starting address to read from (hex)')
+      .number('size', 'Number of bytes to read (default: 64)')
+      .number('wildcardRelOffsets', 'Bytes to wildcard after relative instructions (default: 4)')
+      .required('address')
+      .query(),
+  ),
+
+  // RTTI Standalone Tool
+  tool('memory_rtti_info', (t) =>
+    t
+      .desc(
+        'Parse MSVC RTTI (Run-Time Type Information) at an object address. Reads vtable pointer, ' +
+          'follows the Complete Object Locator chain, extracts class name, base classes, and class ' +
+          'hierarchy descriptor. Equivalent to CE\'s "Find out what addresses this code accesses" ' +
+          'for type discovery — quickly answer "what type is this object?" without a full structure ' +
+          'analysis. Only works on MSVC x64 binaries with RTTI enabled.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string(
+        'address',
+        'Object address (hex) — the first 8 bytes are read as the vtable pointer, then RTTI is ' +
+          'resolved from vtable[-1]',
+      )
+      .required('address')
+      .query(),
+  ),
+
+  // String Search Tool
+  tool('memory_search_string', (t) =>
+    t
+      .desc(
+        'Search process memory for strings matching a pattern. Wraps memory_first_scan with ' +
+          'valueType=string for convenience and adds substring/regex post-filtering. Optionally ' +
+          'also searches for UTF-16LE (wide) strings.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('pattern', 'String to search for (case-insensitive substring match)')
+      .boolean('regex', 'Treat pattern as regex (default: false)')
+      .boolean(
+        'wide',
+        'Search for UTF-16LE (wide) strings too (default: true). Each wide char = 2 bytes.',
+      )
+      .number('minLength', 'Minimum string length to include in results (default: 3)')
+      .number('maxResults', 'Maximum results (default: 500)')
       .required('pattern')
       .query(),
   ),

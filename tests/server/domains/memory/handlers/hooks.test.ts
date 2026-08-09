@@ -19,17 +19,20 @@ describe('HookHandlers', () => {
   };
 
   const mockbpEngine = {/* mock */} as any;
+  const mockVehEngine = {/* mock */} as any;
   const mockinjector = {/* mock */} as any;
   let auditTrail: MemoryAuditTrail;
 
   beforeEach(() => {
     vi.clearAllMocks();
     Object.keys(mockbpEngine).forEach((key) => delete mockbpEngine[key]);
+    Object.keys(mockVehEngine).forEach((key) => delete mockVehEngine[key]);
     Object.keys(mockinjector).forEach((key) => delete mockinjector[key]);
     // Default: no active breakpoints — DR-exhaustion guard passes.
     mockbpEngine.listBreakpoints = vi.fn().mockReturnValue([]);
+    mockVehEngine.listBreakpoints = vi.fn().mockReturnValue([]);
     auditTrail = new MemoryAuditTrail();
-    handlers = new HookHandlers(mockbpEngine, mockinjector, undefined, undefined, auditTrail);
+    handlers = new HookHandlers(mockbpEngine, null, mockinjector, undefined, undefined, auditTrail);
   });
 
   it('instantiates correctly', async () => {
@@ -47,7 +50,7 @@ describe('HookHandlers', () => {
     });
 
     it('throws when bpEngine is null (unsupported platform)', async () => {
-      handlers = new HookHandlers(null, mockinjector, undefined, undefined, auditTrail);
+      handlers = new HookHandlers(null, null, mockinjector, undefined, undefined, auditTrail);
       mockbpEngine.setBreakpoint = vi.fn();
       const response = await handlers.handleBreakpointSet(dummyArgs);
       const parsed = JSON.parse((response.content[0] as any).text);
@@ -349,6 +352,119 @@ describe('HookHandlers', () => {
       expect(parsed.success).toBe(false);
       expect(parsed.error).toContain('"minSize" must be a positive number');
       expect(mockinjector.findCodeCaves).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('VEH debugger mode', () => {
+    const vehArgs = { ...dummyArgs, debuggerMode: 'veh' };
+
+    it('routes set breakpoint to vehEngine when debuggerMode=veh', async () => {
+      mockVehEngine.listBreakpoints = vi.fn().mockReturnValue([]);
+      mockVehEngine.setBreakpoint = vi.fn().mockReturnValue({ id: 'veh-bp1', address: '0x1' });
+      handlers = new HookHandlers(
+        mockbpEngine,
+        mockVehEngine,
+        mockinjector,
+        undefined,
+        undefined,
+        auditTrail,
+      );
+
+      const response = await handlers.handleBreakpointSet(vehArgs);
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(mockVehEngine.setBreakpoint).toHaveBeenCalledWith(1234, '0x7FF612340000', 'read', 4);
+      expect(parsed.mode).toBe('veh');
+    });
+
+    it('routes remove to vehEngine when debuggerMode=veh', async () => {
+      mockVehEngine.removeBreakpoint = vi.fn().mockReturnValue(true);
+      handlers = new HookHandlers(
+        mockbpEngine,
+        mockVehEngine,
+        mockinjector,
+        undefined,
+        undefined,
+        auditTrail,
+      );
+
+      const response = await handlers.handleBreakpointRemove({
+        ...vehArgs,
+        breakpointId: 'veh-bp1',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(mockVehEngine.removeBreakpoint).toHaveBeenCalledWith('veh-bp1');
+    });
+
+    it('routes list to vehEngine when debuggerMode=veh', async () => {
+      mockVehEngine.listBreakpoints = vi.fn().mockReturnValue([{ id: 'veh-bp1' }]);
+      handlers = new HookHandlers(
+        mockbpEngine,
+        mockVehEngine,
+        mockinjector,
+        undefined,
+        undefined,
+        auditTrail,
+      );
+
+      const response = await handlers.handleBreakpointList(vehArgs);
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.mode).toBe('veh');
+      expect(mockVehEngine.listBreakpoints).toHaveBeenCalled();
+    });
+
+    it('routes trace to vehEngine when debuggerMode=veh', async () => {
+      mockVehEngine.listBreakpoints = vi.fn().mockReturnValue([]);
+      mockVehEngine.traceAccess = vi.fn().mockReturnValue([{ instructionAddress: '0x2' }]);
+      handlers = new HookHandlers(
+        mockbpEngine,
+        mockVehEngine,
+        mockinjector,
+        undefined,
+        undefined,
+        auditTrail,
+      );
+
+      const response = await handlers.handleBreakpointTrace({ ...vehArgs, access: 'write' });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.mode).toBe('veh');
+      expect(mockVehEngine.traceAccess).toHaveBeenCalled();
+    });
+
+    it('throws when vehEngine is null but debuggerMode=veh requested', async () => {
+      handlers = new HookHandlers(null, null, mockinjector, undefined, undefined, auditTrail);
+      const response = await handlers.handleBreakpointSet({
+        pid: 1234,
+        address: '0x1',
+        access: 'read',
+        debuggerMode: 'veh',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error).toContain('VEH debugger mode');
+    });
+
+    it('defaults to win32 mode when no debuggerMode specified', async () => {
+      mockbpEngine.setBreakpoint = vi.fn().mockReturnValue({ id: 'bp1', address: '0x1' });
+      mockVehEngine.setBreakpoint = vi.fn();
+      mockbpEngine.listBreakpoints = vi.fn().mockReturnValue([]);
+      handlers = new HookHandlers(
+        mockbpEngine,
+        mockVehEngine,
+        mockinjector,
+        undefined,
+        undefined,
+        auditTrail,
+      );
+
+      const response = await handlers.handleBreakpointSet(dummyArgs);
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(mockbpEngine.setBreakpoint).toHaveBeenCalled();
+      expect(mockVehEngine.setBreakpoint).not.toHaveBeenCalled();
     });
   });
 });

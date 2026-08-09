@@ -846,4 +846,25 @@ export const nativeEmulatorTools: Tool[] = [
       )
       .required('sessionId', 'address', 'key', 'length'),
   ),
+  // ── IPC Relay ──────────────────────────────────────────────────
+  tool('nemu_relay', (t) =>
+    t
+      .desc(
+        'Connect to a remote native-emulator session via IPC relay. ' +
+          'Proxies nemu operations through a named pipe (Windows) or Unix domain socket (Linux/macOS) ' +
+          'with JSON-RPC over length-prefixed frames. ' +
+          'Use to drive ARM64 nemu sessions on a Linux host from a Windows MCP server (or vice versa).',
+      )
+      .enum(
+        'action',
+        ['connect', 'disconnect', 'status'],
+        'connect=establish IPC link, disconnect=tear down, status=query connection state',
+      )
+      .string('sessionId', 'Remote session ID to connect/disconnect/query')
+      .string('host', 'Remote host for TCP fallback (default: localhost)')
+      .number('port', 'TCP port for fallback (default: 17171)')
+      .number('connectTimeoutMs', 'Connection timeout in ms (default: 5000)')
+      .number('maxMessageBytes', 'Max inbound message bytes (default: 1 MiB)')
+      .required('action'),
+  ),
 ];

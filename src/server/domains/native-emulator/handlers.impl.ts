@@ -2395,6 +2395,51 @@ export class NativeEmulatorHandlers {
     });
   }
 
+  async handleRelay(args: ToolArgs): Promise<ToolResponse> {
+    return handleSafe(async () => {
+      const action = argStringRequired(args, 'action');
+      const sessionId = argString(args, 'sessionId', '');
+      const host = argString(args, 'host', '127.0.0.1');
+      const port = argNumber(args, 'port', 17171);
+      const connectTimeoutMs = argNumber(args, 'connectTimeoutMs');
+      const maxMessageBytes = argNumber(args, 'maxMessageBytes');
+
+      const { getOrCreateRelay, removeRelay, getRelayStatus, listRelays } =
+        await import('@src/native/ipc/IpcRelay');
+
+      switch (action) {
+        case 'connect': {
+          if (!sessionId) throw new Error('sessionId is required for connect');
+          const relay = getOrCreateRelay({
+            sessionId,
+            host,
+            port,
+            connectTimeoutMs,
+            maxMessageBytes,
+          });
+          await relay.connect();
+          return { connected: true, ...relay.status };
+        }
+        case 'disconnect': {
+          if (!sessionId) throw new Error('sessionId is required for disconnect');
+          const removed = removeRelay(sessionId);
+          return { disconnected: removed, sessionId };
+        }
+        case 'status': {
+          if (sessionId) {
+            const status = getRelayStatus(sessionId);
+            return status ?? { sessionId, connected: false, reason: 'not found' };
+          }
+          return { relays: listRelays() };
+        }
+        default:
+          throw new Error(
+            `nemu_relay: invalid action "${action}" — expected connect, disconnect, or status`,
+          );
+      }
+    });
+  }
+
   private requireSession(args: ToolArgs): EmulatorSession {
     return this.sessions.requireSession(argStringRequired(args, 'sessionId'));
   }

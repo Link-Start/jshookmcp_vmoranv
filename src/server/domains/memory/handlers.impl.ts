@@ -65,6 +65,7 @@ export class MemoryScanHandlers {
     ptrEngine: PointerChainEngine,
     structAnalyzer: import('@native/StructureAnalyzer').StructureAnalyzer,
     bpEngine: HardwareBreakpointEngine | null,
+    vehEngine: import('@native/VehDebugger').VehDebuggerEngine | null,
     injector: CodeInjector,
     memCtrl: MemoryController,
     speedhackEngine: Speedhack | null,
@@ -79,7 +80,14 @@ export class MemoryScanHandlers {
     this.scans = new ScanHandlers(scanner, eventBus, processManager, ctx, this.auditTrail);
     this.ptrChains = new PointerChainHandlers(ptrEngine, processManager, ctx, this.auditTrail);
     this.structures = new StructureHandlers(structAnalyzer, processManager, ctx, this.auditTrail);
-    this.hooks = new HookHandlers(bpEngine, injector, processManager, ctx, this.auditTrail);
+    this.hooks = new HookHandlers(
+      bpEngine,
+      vehEngine,
+      injector,
+      processManager,
+      ctx,
+      this.auditTrail,
+    );
     this.readwrite = new ReadWriteHandlers(memCtrl, processManager, ctx, this.auditTrail);
     this.integrity = new IntegrityHandlers(
       speedhackEngine,
@@ -126,12 +134,17 @@ export class MemoryScanHandlers {
   handlePointerScan = (args: Record<string, unknown>) => this.scans.handlePointerScan(args);
   handleGroupScan = (args: Record<string, unknown>) => this.scans.handleGroupScan(args);
   handleAobScan = (args: Record<string, unknown>) => this.scans.handleAobScan(args);
+  handleGenerateSignature = (args: Record<string, unknown>) =>
+    this.scans.handleGenerateSignature(args);
+  handleSearchString = (args: Record<string, unknown>) => this.scans.handleSearchString(args);
 
   // ── Pointer Chain ──
 
   handlePointerChainDispatch(args: Record<string, unknown>) {
     const action = String(args['action'] ?? '');
     switch (action) {
+      case 'autoscan':
+        return this.ptrChains.handlePointerChainAutoscan(args);
       case 'validate':
         return this.ptrChains.handlePointerChainValidate(args);
       case 'resolve':
@@ -144,6 +157,8 @@ export class MemoryScanHandlers {
   }
   handlePointerChainScan = (args: Record<string, unknown>) =>
     this.ptrChains.handlePointerChainScan(args);
+  handlePointerChainAutoscan = (args: Record<string, unknown>) =>
+    this.ptrChains.handlePointerChainAutoscan(args);
   handlePointerChainValidate = (args: Record<string, unknown>) =>
     this.ptrChains.handlePointerChainValidate(args);
   handlePointerChainResolve = (args: Record<string, unknown>) =>
@@ -160,6 +175,15 @@ export class MemoryScanHandlers {
     this.structures.handleStructureExportC(args);
   handleStructureCompare = (args: Record<string, unknown>) =>
     this.structures.handleStructureCompare(args);
+  handleRttiInfo = (args: Record<string, unknown>) => this.structures.handleRttiInfo(args);
+
+  // ── Cheat Table ──
+
+  handleCheatTableDispatch(args: Record<string, unknown>) {
+    const action = String(args['action'] ?? '');
+    if (action === 'import') return this.structures.handleCheatTableImport(args);
+    return this.structures.handleCheatTableExport(args);
+  }
 
   // ── Hook (breakpoint + injection) ──
 

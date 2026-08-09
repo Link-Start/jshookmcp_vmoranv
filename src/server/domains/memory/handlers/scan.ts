@@ -56,6 +56,7 @@ const TOOL_FIRST_SCAN = 'memory_first_scan';
 const TOOL_NEXT_SCAN = 'memory_next_scan';
 const TOOL_UNKNOWN_SCAN = 'memory_unknown_scan';
 const TOOL_GROUP_SCAN = 'memory_group_scan';
+const TOOL_SEARCH_STRING = 'memory_search_string';
 
 /** Upper bound on group-scan pattern entries — more is almost always a mistake
  * and makes the scan extremely slow. */
@@ -201,9 +202,13 @@ export class ScanHandlers {
       const pid = await this.resolvePid(args.pid);
       const targetAddress = validateHexAddress(args.targetAddress, 'targetAddress');
       const moduleOnly = argBool(args, 'moduleOnly', false);
+      const regionFilter = argObject(args, 'regionFilter');
       const result = await this.scanner.pointerScan(pid, targetAddress, {
         maxResults: capMaxResults(argNumber(args, 'maxResults')),
         moduleOnly,
+        regionFilter: regionFilter as
+          | import('@native/NativeMemoryManager.types').RegionFilter
+          | undefined,
       });
       return { ...result };
     });
@@ -265,6 +270,122 @@ export class ScanHandlers {
     });
   }
 
+  async handleSearchString(args: Record<string, unknown>) {
+    return handleSafe(async () => {
+      const pid = await this.resolvePid(args.pid);
+      const pattern = requireStringArg(args.pattern, 'pattern', TOOL_SEARCH_STRING);
+      const useRegex = argBool(args, 'regex', false);
+      const searchWide = argBool(args, 'wide', true);
+      const minLength = Math.max(1, argNumber(args, 'minLength', 3));
+      const maxResults = Math.min(capMaxResults(argNumber(args, 'maxResults', 500)), 500);
+      const onProgress = args.onProgress as ((p: number, t?: number) => void) | undefined;
+      const start = Date.now();
+
+      // Compile regex once if requested, so we fail early on bad patterns
+      let regex: RegExp | null = null;
+      if (useRegex) {
+        try {
+          regex = new RegExp(pattern, 'i');
+        } catch (e) {
+          throw new Error(
+            `${TOOL_SEARCH_STRING}: invalid regex pattern "${pattern}": ${e instanceof Error ? e.message : String(e)}`,
+            { cause: e },
+          );
+        }
+      }
+
+      const allResults: Array<{
+        address: string;
+        value: string;
+        encoding: 'utf8' | 'utf16le';
+        length: number;
+      }> = [];
+
+      // ── ASCII / UTF-8 scan via MemoryScanner valueType='string' ──
+      try {
+        const asciiResult = await this.scanner.firstScan(pid, pattern, {
+          valueType: 'string',
+          alignment: 1,
+          maxResults,
+          onProgress,
+        });
+        if (asciiResult.results) {
+          for (const r of asciiResult.results) {
+            const val = typeof r.value === 'string' ? r.value : String(r.value ?? '');
+            if (val.length < minLength) continue;
+            if (regex && !regex.test(val)) continue;
+            if (!regex && !useRegex && !val.toLowerCase().includes(pattern.toLowerCase())) continue;
+            allResults.push({
+              address: r.address,
+              value: val,
+              encoding: 'utf8',
+              length: val.length,
+            });
+          }
+        }
+      } catch {
+        // String scan can fail if the scanner doesn't support valueType='string'
+        // on this platform — fall through to hex-based search.
+      }
+
+      // ── UTF-16LE (wide) scan via hex pattern ──
+      if (searchWide && allResults.length < maxResults) {
+        try {
+          // Build UTF-16LE bytes: each char → 2 bytes (LSB first)
+          const wideBytes: number[] = [];
+          for (let i = 0; i < pattern.length; i++) {
+            const code = pattern.charCodeAt(i);
+            wideBytes.push(code & 0xff, (code >> 8) & 0xff);
+          }
+          const wideHex = wideBytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
+          const remaining = maxResults - allResults.length;
+
+          const wideResult = await this.scanner.firstScan(pid, wideHex, {
+            valueType: 'hex',
+            alignment: 1,
+            maxResults: Math.min(remaining, maxResults),
+            onProgress,
+          });
+          if (wideResult.results) {
+            for (const r of wideResult.results) {
+              const val = typeof r.value === 'string' ? r.value : String(r.value ?? '');
+              // Decode UTF-16LE from the found region
+              const decoded = decodeUTF16LEFromHex(val, pattern.length * 2);
+              if (decoded.length < minLength) continue;
+              if (regex && !regex.test(decoded)) continue;
+              if (!regex && !useRegex && !decoded.toLowerCase().includes(pattern.toLowerCase()))
+                continue;
+              allResults.push({
+                address: r.address,
+                value: decoded,
+                encoding: 'utf16le',
+                length: decoded.length,
+              });
+            }
+          }
+        } catch {
+          // Wide scan best-effort — hex scan may not be supported on all platforms
+        }
+      }
+
+      const elapsed = `${Date.now() - start}ms`;
+
+      return {
+        success: true,
+        pattern,
+        isRegex: useRegex,
+        results: allResults.slice(0, maxResults),
+        totalFound: allResults.length,
+        truncated: allResults.length > maxResults,
+        elapsed,
+        hint:
+          allResults.length > 0
+            ? `Found ${allResults.length} string matches (${allResults.filter((r) => r.encoding === 'utf8').length} ASCII, ${allResults.filter((r) => r.encoding === 'utf16le').length} wide).`
+            : `No strings matching "${pattern}" found. Try a shorter pattern or wider search scope.`,
+      };
+    });
+  }
+
   async handleAobScan(args: Record<string, unknown>) {
     return handleSafe(async () => {
       const pid = await this.resolvePid(args.pid);
@@ -298,7 +419,16 @@ export class ScanHandlers {
         throw new Error('Invalid AOB pattern: pattern must contain at least one byte or wildcard');
       }
 
-      const result = await this.scanner.aobScan(pid, trimmed, { maxResults, moduleName });
+      const executableOnly = argBool(args, 'executableOnly');
+      const regionFilter = argObject(args, 'regionFilter');
+      const result = await this.scanner.aobScan(pid, trimmed, {
+        maxResults,
+        moduleName,
+        executableOnly,
+        regionFilter: regionFilter as
+          | import('@native/NativeMemoryManager.types').RegionFilter
+          | undefined,
+      });
       return {
         ...result,
         hint:
@@ -308,4 +438,66 @@ export class ScanHandlers {
       };
     });
   }
+
+  /**
+   * Generate an AOB signature from bytes at a memory address.
+   */
+  async handleGenerateSignature(args: Record<string, unknown>) {
+    return handleSafe(async () => {
+      const pid = await this.resolvePid(args.pid);
+      const addressRaw = argString(args, 'address');
+      if (!addressRaw) {
+        throw new Error(
+          'memory_generate_signature: missing or invalid required argument "address" (expected hex address, e.g. "0x7FF612340000")',
+        );
+      }
+      const address = validateHexAddress(addressRaw, 'address');
+      const size = argNumber(args, 'size', 64);
+      if (size <= 0 || size > 4096) {
+        throw new Error(
+          `memory_generate_signature: "size" must be between 1 and 4096 bytes, got: ${size}`,
+        );
+      }
+      const wildcardRelOffsets = argNumber(args, 'wildcardRelOffsets', 4);
+
+      // Read memory from process
+      const { generateSignature } = await import('@native/SignatureGenerator');
+      const { createPlatformProvider } = await import('@native/platform/factory.js');
+
+      const provider = createPlatformProvider();
+      const handle = provider.openProcess(pid, false);
+      try {
+        const addrBig = BigInt(address.replace(/^0x/i, '0x'));
+        const buf = provider.readMemory(handle, addrBig, size).data;
+
+        const result = generateSignature(buf, { wildcardRelOffsets });
+        return {
+          success: true,
+          ...result,
+        };
+      } finally {
+        provider.closeProcess(handle);
+      }
+    });
+  }
+}
+
+/**
+ * Decode a hex string (from a memory scan result) as UTF-16LE.
+ * Reads pairs of bytes as little-endian 16-bit code units.
+ * Stops at the first null terminator (0x0000).
+ */
+function decodeUTF16LEFromHex(hex: string, maxPairs: number): string {
+  const parts = hex.trim().split(/\s+/);
+  const result: string[] = [];
+  const limit = Math.min(parts.length - 1, maxPairs * 2 - 1);
+  for (let i = 0; i < limit; i += 2) {
+    const lo = parseInt(parts[i] ?? '0', 16);
+    const hi = parseInt(parts[i + 1] ?? '0', 16);
+    if (Number.isNaN(lo) || Number.isNaN(hi)) break;
+    const code = lo | (hi << 8);
+    if (code === 0) break;
+    result.push(String.fromCharCode(code));
+  }
+  return result.join('');
 }

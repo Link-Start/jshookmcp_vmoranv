@@ -20,7 +20,7 @@ Memory analysis domain for native scans, pointer-chain discovery, structure infe
 - memory + debugger
 - memory + workflow
 
-## Full tool list (34)
+## Full tool list (38)
 
 | Tool | Description |
 | --- | --- |
@@ -30,12 +30,13 @@ Memory analysis domain for native scans, pointer-chain discovery, structure infe
 | `memory_pointer_scan` | Find pointers to a target address. |
 | `memory_group_scan` | Search for multiple values at known offsets simultaneously. |
 | `memory_scan_session` | Manage scan sessions. Actions: list (all sessions), delete (by sessionId), export (as JSON). |
-| `memory_pointer_chain` | Pointer chain operations: scan (find chains to target), validate, resolve, or export as JSON. |
+| `memory_search_string` | Search process memory for strings matching a pattern. Wraps memory_first_scan with valueType=string for convenience and adds substring/regex post-filtering. Optionally also searches for UTF-16LE (wide) strings. |
+| `memory_pointer_chain` | Pointer chain operations: scan (multi-level BFS), autoscan (auto-discover pointer chains by recursively scanning for pointers that point to or near the target address), validate, resolve, or export as JSON. autoscan is Cheat Engine's "pointer scan" equivalent — no manual base/offsets needed. |
 | `memory_structure_analyze` | Analyze memory at an address to infer data structure layout. |
 | `memory_vtable_parse` | Parse a vtable to enumerate virtual function pointers and resolve them to module+offset. Also attempts RTTI parsing for class name and inheritance hierarchy. |
 | `memory_structure_export_c` | Export an inferred structure as a C-style struct definition with offset comments and type annotations. |
 | `memory_structure_compare` | Compare two structure instances to identify which fields differ (dynamic values like health/position) vs which are constant (vtable, type flags). Useful for finding important fields. |
-| `memory_breakpoint` | Hardware breakpoint via x64 debug registers (DR0-DR3). Actions: set, remove, list, trace. |
+| `memory_breakpoint` | Hardware breakpoint via x64 debug registers (DR0-DR3). Actions: set, remove, list, trace. Two debugger modes: "win32" (default, uses DebugActiveProcess — freezes entire process) and "veh" (Vectored Exception Handler — injects shellcode, only faulting thread pauses). VEH mode is less intrusive but requires code injection which may be detected by anti-cheat systems. |
 | `memory_patch_bytes` | Write bytes to target process at address. Saves original bytes for undo. Use for runtime code patching. |
 | `memory_patch_nop` | NOP out instructions at address (replace with 0x90). Useful for disabling checks or jumps. |
 | `memory_patch_undo` | Undo a previous patch by restoring the original bytes. |
@@ -55,6 +56,9 @@ Memory analysis domain for native scans, pointer-chain discovery, structure infe
 | `memory_guard_pages` | Find all memory regions with PAGE_GUARD protection in a process. Guard pages are often used as anti-tampering mechanisms or stack overflow detection. |
 | `memory_integrity_check` | Check executable memory regions against their corresponding on-disk PE files (.text sections) to detect modifications like inline hooks or code patches. |
 | `memory_region_enumerate` | Enumerate memory regions in a target process. Cross-platform: Windows (VirtualQueryEx), macOS (mach_vm_region), Linux (/proc/pid/maps). Returns base address, size, protection (r/w/x/rw/rx/rwx), state, type (image/mapped/private), and module name (if module-backed). |
-| `memory_aob_scan` | Array-of-Bytes scan with wildcard support. Search for byte patterns like "48 8B ?? ?? 00 00" across readable memory. Accepts hex bytes (00-FF, optional 0x prefix) and "??" wildcards. Case insensitive. |
+| `memory_aob_scan` | Array-of-Bytes scan with wildcard support. Search for byte patterns like "48 8B ?? ?? 00 00" across readable memory. Accepts hex bytes (00-FF, optional 0x prefix) and "??" wildcards. Case insensitive. Use regionFilter to restrict to specific modules or skip system modules. |
 | `memory_find_accesses` | Find what writes to or accesses a memory address (Cheat Engine MWT workflow). Sets a hardware breakpoint on the target address, auto-rearms after each hit, captures the faulting instruction address + context + timestamp, and optionally disassembles the instruction. Returns aggregated hits with per-hit instruction details. |
+| `memory_cheat_table` | Import or export a Cheat Engine .CT file. Export: converts a JSON array of {description, address, valueType, moduleName?, offset?} entries to a valid .CT XML file. Import: parses a .CT XML string and returns entries as JSON. Addresses can be hex ("0x7FF612340000") or module+offset ("game.exe"+00123456). Auto Assembler scripts are skipped with a warning. |
+| `memory_generate_signature` | Generate an update-resistant AOB (Array-of-Bytes) signature from bytes at a memory address. Detects relative offsets in CALL/JMP/LEA/Jcc instructions and replaces the displacement bytes with wildcards (??), making the signature survive minor code changes between updates. Uses byte-pattern heuristics — no Capstone dependency required. |
+| `memory_rtti_info` | Parse MSVC RTTI (Run-Time Type Information) at an object address. Reads vtable pointer, follows the Complete Object Locator chain, extracts class name, base classes, and class hierarchy descriptor. Equivalent to CE's "Find out what addresses this code accesses" for type discovery — quickly answer "what type is this object?" without a full structure analysis. Only works on MSVC x64 binaries with RTTI enabled. |
 | `memory_parse_dump` | Parse a Windows Minidump (.dmp) file and extract forensic information: loaded modules (base/size/name/timestamp), threads (ID/stack/context), memory ranges (64-bit or 32-bit), system info (OS/CPU), and exception records. Optionally resolve a list of addresses against the dump contents. Pure TS — cross-platform (can analyze Windows dumps on Linux/macOS). |

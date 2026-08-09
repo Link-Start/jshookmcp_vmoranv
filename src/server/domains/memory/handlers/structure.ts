@@ -248,4 +248,112 @@ export class StructureHandlers {
       };
     });
   }
+
+  // ── Cheat Table Import/Export ──
+
+  async handleCheatTableExport(args: Record<string, unknown>) {
+    return handleSafe(async () => {
+      const rawEntries = args.entries;
+      if (!Array.isArray(rawEntries)) {
+        throw new Error(
+          'memory_cheat_table export: missing or invalid argument "entries" (expected array of {description, address, valueType})',
+        );
+      }
+      const { exportCheatTable, mapValueTypeToCE, formatModuleAddress } =
+        await import('@native/CheatTableIO');
+
+      const entries = rawEntries.map((entry: unknown, i: number) => {
+        const e = entry as Record<string, unknown>;
+        const description = typeof e.description === 'string' ? e.description : `Entry ${i}`;
+        const address = typeof e.address === 'string' ? e.address : '0x0';
+        const valueType = typeof e.valueType === 'string' ? e.valueType : 'int32';
+        const moduleName = typeof e.moduleName === 'string' ? e.moduleName : undefined;
+        const offset = typeof e.offset === 'string' ? e.offset : undefined;
+
+        // If module-relative, build CE-style address
+        const ceType = mapValueTypeToCE(valueType);
+        const ceAddress = moduleName && offset ? formatModuleAddress(moduleName, offset) : address;
+
+        return { description, address: ceAddress, variableType: ceType };
+      });
+
+      const version = typeof args.version === 'number' && args.version > 0 ? args.version : 45;
+      const xml = exportCheatTable(entries, version);
+
+      return {
+        success: true,
+        xml,
+        entryCount: entries.length,
+        version,
+      };
+    });
+  }
+
+  async handleCheatTableImport(args: Record<string, unknown>) {
+    return handleSafe(async () => {
+      const xml = argString(args, 'xml');
+      if (!xml) {
+        throw new Error(
+          'memory_cheat_table import: missing or invalid argument "xml" (expected CT XML string)',
+        );
+      }
+      const { importCheatTable, mapCEToValueType } = await import('@native/CheatTableIO');
+
+      const result = importCheatTable(xml);
+
+      // Map CE VariableType back to jshookmcp types
+      const mappedEntries = result.entries.map((entry) => ({
+        ...entry,
+        valueType: mapCEToValueType(entry.variableType),
+      }));
+
+      return {
+        success: true,
+        entries: mappedEntries,
+        entryCount: mappedEntries.length,
+        warnings: result.warnings,
+      };
+    });
+  }
+
+  // ── RTTI Standalone ──
+
+  async handleRttiInfo(args: Record<string, unknown>) {
+    return handleSafe(async () => {
+      const pid = await this.resolvePid(args.pid);
+      const addressRaw = argString(args, 'address');
+      if (!addressRaw) {
+        throw new Error(
+          'memory_rtti_info: missing or invalid required argument "address" (expected hex address, e.g. "0x7FF612340000")',
+        );
+      }
+      const formula = parseAddressFormula(addressRaw);
+      if (!formula.address) {
+        throw new Error(`memory_rtti_info: ${formula.error}`);
+      }
+      const address = formula.address;
+
+      const start = Date.now();
+      const result = await this.structAnalyzer.parseRtti(pid, address);
+      const elapsed = `${(performance.now() - start).toFixed(1)}ms`;
+
+      if (!result) {
+        return {
+          success: true,
+          found: false,
+          hint: 'No valid RTTI found at this address. The object may not have RTTI enabled, or the address may not point to a vtable-backed MSVC object.',
+          elapsed,
+        };
+      }
+
+      return {
+        success: true,
+        found: true,
+        className: result.className,
+        baseClasses: result.baseClasses,
+        elapsed,
+        hint: `Class: ${result.className}${result.baseClasses.length > 0 ? ` (inherits: ${result.baseClasses.join(' → ')})` : ''}`,
+      };
+    });
+  }
 }

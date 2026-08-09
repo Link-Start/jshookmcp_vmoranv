@@ -258,4 +258,167 @@ describe('ScanHandlers', () => {
       expect(mockscanner.groupScan).not.toHaveBeenCalled();
     });
   });
+
+  describe('handleSearchString', () => {
+    it('returns success response with substring match results', async () => {
+      mockscanner.firstScan = vi.fn().mockReturnValue({
+        totalMatches: 2,
+        results: [
+          { address: '0x1000', value: 'hello_world' },
+          { address: '0x2000', value: 'hello_test' },
+        ],
+      });
+
+      const response = await handlers.handleSearchString({
+        pid: 1234,
+        pattern: 'hello',
+        wide: false,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.totalFound).toBe(2);
+      expect(parsed.results[0].encoding).toBe('utf8');
+      expect(parsed.results[0].value).toBe('hello_world');
+      expect(mockscanner.firstScan).toHaveBeenCalledWith(
+        1234,
+        'hello',
+        expect.objectContaining({ valueType: 'string', alignment: 1 }),
+      );
+    });
+
+    it('post-filters results by substring match', async () => {
+      mockscanner.firstScan = vi.fn().mockReturnValue({
+        totalMatches: 3,
+        results: [
+          { address: '0x1000', value: 'TargetValue' },
+          { address: '0x2000', value: 'OtherStuff' },
+          { address: '0x3000', value: 'target_again' },
+        ],
+      });
+
+      const response = await handlers.handleSearchString({
+        pid: 1234,
+        pattern: 'target',
+        wide: false,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.totalFound).toBe(2);
+      expect(parsed.results.map((r: any) => r.value)).toEqual(['TargetValue', 'target_again']);
+    });
+
+    it('supports regex mode', async () => {
+      mockscanner.firstScan = vi.fn().mockReturnValue({
+        totalMatches: 3,
+        results: [
+          { address: '0x1000', value: 'foo123' },
+          { address: '0x2000', value: 'bar456' },
+          { address: '0x3000', value: 'baz789' },
+        ],
+      });
+
+      const response = await handlers.handleSearchString({
+        pid: 1234,
+        pattern: '^[a-z]+\\d+$',
+        regex: true,
+        wide: false,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.totalFound).toBe(3);
+      expect(parsed.isRegex).toBe(true);
+    });
+
+    it('rejects invalid regex pattern', async () => {
+      mockscanner.firstScan = vi.fn();
+      const response = await handlers.handleSearchString({
+        pid: 1234,
+        pattern: '[invalid(regex',
+        regex: true,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error).toContain('invalid regex pattern');
+      expect(mockscanner.firstScan).not.toHaveBeenCalled();
+    });
+
+    it('rejects missing pattern', async () => {
+      mockscanner.firstScan = vi.fn();
+      const response = await handlers.handleSearchString({ pid: 1234 });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error).toContain('"pattern"');
+      expect(mockscanner.firstScan).not.toHaveBeenCalled();
+    });
+
+    it('enforces minLength filter', async () => {
+      mockscanner.firstScan = vi.fn().mockReturnValue({
+        totalMatches: 3,
+        results: [
+          { address: '0x1000', value: 'ab' },
+          { address: '0x2000', value: 'abc' },
+          { address: '0x3000', value: 'abcd' },
+        ],
+      });
+
+      const response = await handlers.handleSearchString({
+        pid: 1234,
+        pattern: 'ab',
+        minLength: 3,
+        wide: false,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.totalFound).toBe(2);
+    });
+
+    it('scans wide strings when wide=true', async () => {
+      // First call: ASCII scan
+      mockscanner.firstScan = vi
+        .fn()
+        .mockReturnValueOnce({
+          totalMatches: 0,
+          results: [],
+        })
+        // Second call: UTF-16LE hex scan
+        .mockReturnValueOnce({
+          totalMatches: 1,
+          results: [{ address: '0x4000', value: '48 00 65 00 6C 00 6C 00 6F 00' }],
+        });
+
+      const response = await handlers.handleSearchString({
+        pid: 1234,
+        pattern: 'Hello',
+        wide: true,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      // The decoded UTF-16LE value should contain "Hello"
+      expect(parsed.totalFound).toBe(1);
+      expect(parsed.results[0].encoding).toBe('utf16le');
+    });
+
+    it('caps results to maxResults', async () => {
+      const manyResults = Array.from({ length: 100 }, (_, i) => ({
+        address: `0x${(0x1000 + i * 8).toString(16)}`,
+        value: `pattern_match_${i}`,
+      }));
+      mockscanner.firstScan = vi.fn().mockReturnValue({
+        totalMatches: 100,
+        results: manyResults,
+      });
+
+      const response = await handlers.handleSearchString({
+        pid: 1234,
+        pattern: 'pattern',
+        maxResults: 10,
+        wide: false,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.results.length).toBe(10);
+      expect(parsed.truncated).toBe(true);
+      expect(parsed.totalFound).toBe(100);
+    });
+  });
 });

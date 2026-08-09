@@ -56,12 +56,14 @@ async function ensure(ctx: MCPServerContext): Promise<H> {
 
   if (IS_WIN32) {
     // Lazy-load Win32-only engines — only load on Windows
-    const [hardwareBreakpointEngine, speedhack, peAnalyzer, antiCheatDetector] = await Promise.all([
-      import('@native/HardwareBreakpoint'),
-      import('@native/Speedhack'),
-      import('@native/PEAnalyzer'),
-      import('@native/AntiCheatDetector'),
-    ]);
+    const [hardwareBreakpointEngine, vehDebuggerEngine, speedhack, peAnalyzer, antiCheatDetector] =
+      await Promise.all([
+        import('@native/HardwareBreakpoint'),
+        import('@native/VehDebugger'),
+        import('@native/Speedhack'),
+        import('@native/PEAnalyzer'),
+        import('@native/AntiCheatDetector'),
+      ]);
 
     ctxAny[DEP_KEY] = new MemoryScanHandlers(
       memoryScanner.memoryScanner,
@@ -69,6 +71,7 @@ async function ensure(ctx: MCPServerContext): Promise<H> {
       pointerChainEngine.pointerChainEngine,
       structureAnalyzer.structureAnalyzer,
       hardwareBreakpointEngine.hardwareBreakpointEngine,
+      vehDebuggerEngine.vehDebuggerEngine,
       codeInjector.codeInjector,
       memoryController.memoryController,
       speedhack.speedhack,
@@ -80,14 +83,17 @@ async function ensure(ctx: MCPServerContext): Promise<H> {
       ctx,
     );
   } else {
-    // macOS/Linux: Win32-only engines not available — pass null.
-    // heapAnalyzer is always wired (cross-platform region-based fallback).
+    // macOS/Linux: cross-platform modules always wired.
+    // Hardware breakpoints now cross-platform via CrossPlatformBreakpointEngine
+    // (ptrace PTRACE_POKEUSER on Linux, Mach thread_set_state on macOS).
+    const crossPlatformBp = await import('@native/CrossPlatformBreakpointEngine');
     ctxAny[DEP_KEY] = new MemoryScanHandlers(
       memoryScanner.memoryScanner,
       scanSessionManager.scanSessionManager,
       pointerChainEngine.pointerChainEngine,
       structureAnalyzer.structureAnalyzer,
-      null, // hardwareBreakpointEngine — Win32 DR0-DR3 only; cross-platform ptrace/mach_vm_protect parity pending (research/memory.md #3)
+      crossPlatformBp.crossPlatformBreakpointEngine,
+      null, // vehDebuggerEngine — Win32 VEH only; requires code injection
       codeInjector.codeInjector,
       memoryController.memoryController,
       null, // speedhack
@@ -129,11 +135,11 @@ function toolByName(name: string) {
 const WIN32_ONLY_TOOLS = new Set([
   // Heap analysis now cross-platform: HeapAnalyzer has a region-based fallback
   // (readProcMapsRegions / /proc/pid/maps) and is always wired (E5-D-heap).
-  // Hardware breakpoints (debug registers) — Win32 DR0-DR3 only. Cross-platform parity
-  // (Linux ptrace INT3 + SIGTRAP; macOS mach_vm_protect + EXC_BAD_ACCESS) pending —
-  // see research/memory.md #3. find_accesses also needs process_vm_readv/mach_vm_read.
-  'memory_breakpoint',
-  'memory_find_accesses',
+  // Hardware breakpoints are now cross-platform via CrossPlatformBreakpointEngine:
+  //   Win32  → DR0-DR3 via Win32 debug API
+  //   Linux  → DR0-DR3 via ptrace PTRACE_POKEUSER
+  //   macOS  → ARM64 DBGBVR/DBGWVR via Mach thread_set_state
+  // memory_breakpoint and memory_find_accesses are registered on all platforms.
   // Speedhack (Win32 timer hooking — LD_PRELOAD parity pending — E5-D)
   'memory_speedhack',
 ]);
@@ -171,6 +177,11 @@ const allRegistrations = [
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleScanSessionDispatch(a)),
   },
+  {
+    tool: toolByName('memory_search_string'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleSearchString(a)),
+  },
   // ── Pointer Chain Tools ──
   {
     tool: toolByName('memory_pointer_chain'),
@@ -198,7 +209,7 @@ const allRegistrations = [
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleStructureCompare(a)),
   },
-  // ── Breakpoint Tools (Win32-only) ──
+  // ── Breakpoint Tools (cross-platform via CrossPlatformBreakpointEngine) ──
   {
     tool: toolByName('memory_breakpoint'),
     domain: DOMAIN,
@@ -309,11 +320,29 @@ const allRegistrations = [
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleAobScan(a)),
   },
-  // ── Find Accesses (Win32-only, uses hardware breakpoints) ──
+  // ── Find Accesses (cross-platform — uses hardware breakpoint engine) ──
   {
     tool: toolByName('memory_find_accesses'),
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleFindAccesses(a)),
+  },
+  // ── Cheat Table (.CT) Import/Export ──
+  {
+    tool: toolByName('memory_cheat_table'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleCheatTableDispatch(a)),
+  },
+  // ── AOB Signature Generation ──
+  {
+    tool: toolByName('memory_generate_signature'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleGenerateSignature(a)),
+  },
+  // ── RTTI Standalone Tool ──
+  {
+    tool: toolByName('memory_rtti_info'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleRttiInfo(a)),
   },
   // ── Minidump Parser (cross-platform, pure TS) ──
   {
@@ -373,7 +402,9 @@ const manifest: DomainManifest<typeof DEP_KEY, H, typeof DOMAIN> = {
       'memory_structure_analyze',
       'memory_vtable_parse',
       'memory_scan_session',
-      ...(IS_WIN32 ? ['memory_breakpoint', 'memory_find_accesses', 'memory_speedhack'] : []),
+      'memory_breakpoint',
+      'memory_find_accesses',
+      ...(IS_WIN32 ? ['memory_speedhack'] : []),
       'memory_patch_bytes',
       'memory_freeze',
       'memory_dump',
@@ -390,7 +421,7 @@ const manifest: DomainManifest<typeof DEP_KEY, H, typeof DOMAIN> = {
     hint: IS_WIN32
       ? 'Memory domain: scan → narrow → pointer chain → structure | breakpoint trace → patch/NOP → freeze ' +
         ' speedhack | heap analysis | PE introspection | anti-cheat detection'
-      : 'Memory domain: scan → narrow → pointer chain → structure | patch/NOP → freeze | dump',
+      : 'Memory domain: scan → narrow → pointer chain → structure | breakpoint trace → patch/NOP → freeze | dump',
   },
 };
 

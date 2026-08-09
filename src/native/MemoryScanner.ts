@@ -333,6 +333,7 @@ export class MemoryScanner {
       maxDepth?: number;
       maxResults?: number;
       moduleOnly?: boolean;
+      regionFilter?: import('./NativeMemoryManager.types').RegionFilter;
     } = {},
   ): Promise<{
     sessionId: string;
@@ -347,7 +348,7 @@ export class MemoryScanner {
     const scanOptions: ScanOptions = {
       valueType: 'pointer',
       alignment: 8,
-      regionFilter: { moduleOnly: options.moduleOnly },
+      regionFilter: options.regionFilter ?? { moduleOnly: options.moduleOnly },
     };
     const sessionId = scanSessionManager.createSession(pid, scanOptions);
     const pointers: Array<{ address: string; value: string; offsetFromTarget: number }> = [];
@@ -530,12 +531,18 @@ export class MemoryScanner {
    * AOB (Array of Bytes) scan with wildcard support.
    *
    * Searches for byte patterns like "48 8B ?? ?? 00 00" across readable memory
-   * regions. Wildcards (??) match any byte. Optionally restricts to a module.
+   * regions. Wildcards (??) match any byte. Optionally restricts to a module
+   * via regionFilter.modulePattern or the legacy moduleName shorthand.
    */
   async aobScan(
     pid: number,
     pattern: string,
-    options: { maxResults?: number; moduleName?: string } = {},
+    options: {
+      maxResults?: number;
+      moduleName?: string;
+      executableOnly?: boolean;
+      regionFilter?: import('./NativeMemoryManager.types').RegionFilter;
+    } = {},
   ): Promise<{
     matches: string[];
     totalMatches: number;
@@ -571,33 +578,25 @@ export class MemoryScanner {
     const matches: bigint[] = [];
     const handle = this.provider.openProcess(pid, false);
     try {
-      let regions = this.getFilteredRegions(handle, { valueType: 'byte' });
+      // Build regionFilter for getFilteredRegions
+      const scanFilter: import('./NativeMemoryManager.types').RegionFilter = {
+        ...options.regionFilter,
+      };
 
-      // If moduleName filter is provided, restrict to that module's memory range
-      if (options.moduleName) {
-        const filterLower = options.moduleName.toLowerCase();
-        const modules = this.provider.enumerateModules(handle);
-        const moduleRanges = modules
-          .filter((m) => m.name.toLowerCase().includes(filterLower))
-          .map((m) => ({
-            baseAddress: m.baseAddress,
-            size: m.size,
-          }));
-
-        if (moduleRanges.length === 0) {
-          const elapsed = `${(performance.now() - start).toFixed(1)}ms`;
-          return { matches: [], totalMatches: 0, elapsed };
-        }
-
-        // Filter regions to only those within matching modules
-        regions = regions.filter((r) =>
-          moduleRanges.some(
-            (mod) =>
-              r.baseAddress >= mod.baseAddress &&
-              r.baseAddress < mod.baseAddress + BigInt(mod.size),
-          ),
-        );
+      // Legacy moduleName: translate to modulePattern for backward compat
+      if (options.moduleName && !scanFilter.modulePattern) {
+        scanFilter.modulePattern = options.moduleName;
       }
+
+      // Legacy executableOnly: translate to regionFilter
+      if (options.executableOnly && scanFilter.executable === undefined) {
+        scanFilter.executable = true;
+      }
+
+      const regions = this.getFilteredRegions(handle, {
+        valueType: 'byte',
+        regionFilter: Object.keys(scanFilter).length > 0 ? scanFilter : undefined,
+      });
 
       const patternLen = parsed.length;
       for (const region of regions) {
@@ -701,6 +700,50 @@ export class MemoryScanner {
     };
   }
 
+  // System module name prefixes to skip (case-insensitive)
+  private static readonly SYSTEM_MODULES = new Set([
+    'ntdll.dll',
+    'ntdll',
+    'kernel32.dll',
+    'kernel32',
+    'kernelbase.dll',
+    'kernelbase',
+    'user32.dll',
+    'user32',
+    'gdi32.dll',
+    'gdi32',
+    'advapi32.dll',
+    'advapi32',
+    'msvcrt.dll',
+    'msvcrt',
+    'combase.dll',
+    'combase',
+    'ole32.dll',
+    'ole32',
+    'shell32.dll',
+    'shell32',
+    'ws2_32.dll',
+    'ws2_32',
+    'bcrypt.dll',
+    'bcrypt',
+    'ucrtbase.dll',
+    'ucrtbase',
+    'vcruntime',
+    'msvcp',
+    'libc.so',
+    'libc-',
+    'libpthread',
+    'ld-linux',
+    'libm.so',
+    'libdl.so',
+    'librt.so',
+    'libc++.so',
+    'libc++abi.so',
+    'libSystem.B.dylib',
+    'libobjc.A.dylib',
+    'libc++.1.dylib',
+  ]);
+
   /**
    * Get readable memory regions, applying region filters.
    * Uses PlatformMemoryAPI.queryRegion() for cross-platform support.
@@ -714,6 +757,18 @@ export class MemoryScanner {
     const maxAddress = USERSPACE_MAX_ADDRESS;
     const filter = options.regionFilter;
 
+    // Cache module list if we need module-aware filters
+    let moduleList: Array<{ baseAddress: bigint; size: number; name: string }> | null = null;
+    const needsModules = filter?.skipSystemModules || filter?.moduleOnly || filter?.modulePattern;
+    if (needsModules) {
+      const mods = this.provider.enumerateModules(handle);
+      moduleList = mods.map((m) => ({
+        baseAddress: m.baseAddress,
+        size: m.size,
+        name: m.name,
+      }));
+    }
+
     while (address < maxAddress) {
       const regionInfo = this.provider.queryRegion(handle, address);
       if (!regionInfo) break;
@@ -726,6 +781,38 @@ export class MemoryScanner {
         if (filter?.writable && !regionInfo.isWritable) include = false;
         if (filter?.executable && !regionInfo.isExecutable) include = false;
         if (filter?.moduleOnly && regionInfo.type !== 'image') include = false;
+        if (include && filter?.minSize && regionSize < filter.minSize) include = false;
+
+        // skipSystemModules: filter out system DLL regions
+        if (include && filter?.skipSystemModules && moduleList) {
+          const ownerMod = moduleList.find(
+            (m) =>
+              regionInfo.baseAddress >= m.baseAddress &&
+              regionInfo.baseAddress < m.baseAddress + BigInt(m.size),
+          );
+          if (ownerMod) {
+            const nameLower = ownerMod.name.toLowerCase();
+            for (const sysMod of MemoryScanner.SYSTEM_MODULES) {
+              if (nameLower.includes(sysMod)) {
+                include = false;
+                break;
+              }
+            }
+          }
+        }
+
+        // modulePattern: only include regions whose module name matches
+        if (include && filter?.modulePattern && moduleList) {
+          const patternLower = filter.modulePattern.toLowerCase();
+          const ownerMod = moduleList.find(
+            (m) =>
+              regionInfo.baseAddress >= m.baseAddress &&
+              regionInfo.baseAddress < m.baseAddress + BigInt(m.size),
+          );
+          if (!ownerMod || !ownerMod.name.toLowerCase().includes(patternLower)) {
+            include = false;
+          }
+        }
 
         if (include) {
           regions.push({

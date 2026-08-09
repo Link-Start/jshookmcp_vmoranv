@@ -1,11 +1,12 @@
 import type { HardwareBreakpointEngine } from '@native/HardwareBreakpoint';
+import type { VehDebuggerEngine } from '@native/VehDebugger';
 import type { BreakpointAccess, BreakpointSize } from '@native/HardwareBreakpoint.types';
 import type { CodeInjector } from '@native/CodeInjector';
 import type { UnifiedProcessManager } from '@server/domains/shared/modules/native';
 import type { MCPServerContext } from '@server/MCPServer.context';
 import { resolveMemoryDomainPid } from '@server/domains/memory/pid-resolver';
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
-import { argEnum, argNumber } from '@server/domains/shared/parse-args';
+import { argEnum, argNumber, argString } from '@server/domains/shared/parse-args';
 import { logger } from '@utils/logger';
 import { MemoryAuditTrail } from '@modules/process/memory/AuditTrail';
 import {
@@ -33,17 +34,35 @@ const WIN32_UNSUPPORTED_MSG =
   'Hardware breakpoint tools (memory_breakpoint) are only supported on Windows. ' +
   'This tool requires Win32 debug register APIs.';
 
+const VEH_UNSUPPORTED_MSG =
+  'VEH debugger mode is only supported on Windows and requires the VEH debugger engine. ' +
+  'Use debuggerMode="win32" or ensure the VEH engine is available.';
+
+type DebuggerBackend = 'win32' | 'veh';
+
 export class HookHandlers {
   private readonly auditTrail: MemoryAuditTrail | null;
 
   constructor(
     private readonly bpEngine: HardwareBreakpointEngine | null,
+    private readonly vehEngine: VehDebuggerEngine | null,
     private readonly injector: CodeInjector,
     private readonly processManager?: UnifiedProcessManager,
     private readonly ctx?: MCPServerContext,
     auditTrail?: MemoryAuditTrail | null,
   ) {
     this.auditTrail = auditTrail ?? null;
+  }
+
+  /** Resolve which debugger backend to use based on the debuggerMode parameter. */
+  private resolveEngine(mode: string | undefined): HardwareBreakpointEngine | VehDebuggerEngine {
+    const modeLower = (mode ?? 'win32').toLowerCase() as DebuggerBackend;
+    if (modeLower === 'veh') {
+      if (!this.vehEngine) throw new Error(VEH_UNSUPPORTED_MSG);
+      return this.vehEngine;
+    }
+    if (!this.bpEngine) throw new Error(WIN32_UNSUPPORTED_MSG);
+    return this.bpEngine;
   }
 
   private async resolvePid(value: unknown): Promise<number> {
@@ -69,13 +88,12 @@ export class HookHandlers {
 
   async handleBreakpointSet(args: Record<string, unknown>) {
     return handleSafe(async () => {
-      if (!this.bpEngine) {
-        throw new Error(WIN32_UNSUPPORTED_MSG);
-      }
+      const debuggerMode = argString(args, 'debuggerMode');
+      const engine = this.resolveEngine(debuggerMode);
       // DR exhaustion guard: x64 has only 4 hardware debug registers (DR0-DR3).
       // Surface this as a clear error instead of letting the native layer fail
       // cryptically when no DR slot is available.
-      const active = this.bpEngine.listBreakpoints();
+      const active = engine.listBreakpoints();
       if (active.length >= HW_BREAKPOINT_MAX) {
         throw new Error(
           `${TOOL_BREAKPOINT}: all ${HW_BREAKPOINT_MAX} hardware debug registers (DR0-DR3) are in use. ` +
@@ -94,41 +112,39 @@ export class HookHandlers {
       const size = (
         BREAKPOINT_SIZES.has(sizeArg as unknown as BreakpointSize) ? sizeArg : 4
       ) as BreakpointSize;
-      const config = await this.bpEngine.setBreakpoint(pid, address, access, size);
+      const config = await engine.setBreakpoint(pid, address, access, size);
       return {
         ...config,
-        hint: "Hardware breakpoint set on DR register. Use memory_breakpoint with action='trace' to collect hits.",
+        mode: debuggerMode ?? 'win32',
+        hint: `Hardware breakpoint set on DR register (${debuggerMode ?? 'win32'} mode). Use memory_breakpoint with action='trace' to collect hits.`,
       };
     });
   }
 
   async handleBreakpointRemove(args: Record<string, unknown>) {
     return handleSafe(async () => {
-      if (!this.bpEngine) {
-        throw new Error(WIN32_UNSUPPORTED_MSG);
-      }
+      const debuggerMode = argString(args, 'debuggerMode');
+      const engine = this.resolveEngine(debuggerMode);
       const breakpointId = requireStringArg(args.breakpointId, 'breakpointId', TOOL_BREAKPOINT);
-      return { removed: await this.bpEngine.removeBreakpoint(breakpointId) };
+      return { removed: await engine.removeBreakpoint(breakpointId) };
     });
   }
 
-  async handleBreakpointList(_args: Record<string, unknown>) {
+  async handleBreakpointList(args: Record<string, unknown>) {
     return handleSafe(async () => {
-      if (!this.bpEngine) {
-        throw new Error(WIN32_UNSUPPORTED_MSG);
-      }
-      const bps = this.bpEngine.listBreakpoints();
-      return { breakpoints: bps, count: bps.length };
+      const debuggerMode = argString(args, 'debuggerMode');
+      const engine = this.resolveEngine(debuggerMode);
+      const bps = engine.listBreakpoints();
+      return { breakpoints: bps, count: bps.length, mode: debuggerMode ?? 'win32' };
     });
   }
 
   async handleBreakpointTrace(args: Record<string, unknown>) {
     return handleSafe(async () => {
-      if (!this.bpEngine) {
-        throw new Error(WIN32_UNSUPPORTED_MSG);
-      }
+      const debuggerMode = argString(args, 'debuggerMode');
+      const engine = this.resolveEngine(debuggerMode);
       // Trace sets a breakpoint internally — same DR exhaustion constraint.
-      const active = this.bpEngine.listBreakpoints();
+      const active = engine.listBreakpoints();
       if (active.length >= HW_BREAKPOINT_MAX) {
         throw new Error(
           `${TOOL_BREAKPOINT}: all ${HW_BREAKPOINT_MAX} hardware debug registers (DR0-DR3) are in use. ` +
@@ -145,10 +161,11 @@ export class HookHandlers {
       }
       const maxHits = argNumber(args, 'maxHits');
       const timeoutMs = argNumber(args, 'timeoutMs');
-      const hits = await this.bpEngine.traceAccess(pid, address, access, maxHits, timeoutMs);
+      const hits = await engine.traceAccess(pid, address, access, maxHits, timeoutMs);
       return {
         hits,
         hitCount: hits.length,
+        mode: debuggerMode ?? 'win32',
         hint:
           hits.length > 0
             ? `${hits.length} accesses captured. Check instructionAddress to find the code accessing this address.`

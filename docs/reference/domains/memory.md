@@ -20,7 +20,7 @@
 - memory + debugger
 - memory + workflow
 
-## 工具清单（34）
+## 工具清单（38）
 
 | 工具 | 说明 |
 | --- | --- |
@@ -30,6 +30,7 @@
 | `memory_pointer_scan` | 查找指向目标地址的指针。扫描进程内存中的指针大小值，定位那些直接指向目标地址或落在目标地址附近（±4096 字节，适用于结构体成员访问）的指针。 |
 | `memory_group_scan` | 同时搜索多个已知偏移上的值。适合在你已知结构体相对布局时使用，例如生命值在 +0、法力值在 +4、等级在 +8。 |
 | `memory_scan_session` | 管理扫描会话。操作：list（列出全部）、delete（删除指定会话）、export（导出为 JSON）。 |
+| `memory_search_string` | 待补充中文：Search process memory for strings matching a pattern. Wraps memory_first_scan with valueType=string for convenience and adds substring/regex post-filtering. Optionally also searches for UTF-16LE (wide) strings. |
 | `memory_pointer_chain` | 多级指针链操作：扫描、验证、解析和导出指针链。 |
 | `memory_structure_analyze` | 分析某个地址处的内存内容，以推断数据结构布局。使用启发式规则将字段识别为 vtable 指针、普通指针、字符串指针、浮点数、整数、布尔值或填充区。可选解析 RTTI，以获取类名和继承链（MSVC x64）。 |
 | `memory_vtable_parse` | 解析 vtable，枚举其中的虚函数指针并解析为模块名 + 偏移。同时尝试解析 RTTI，以恢复类名和继承层级。 |
@@ -57,4 +58,7 @@
 | `memory_region_enumerate` | 枚举目标进程的内存区域。跨平台：Windows（VirtualQueryEx）、macOS（mach_vm_region）、Linux（/proc/pid/maps）。返回基址、大小、保护属性（r/w/x/rw/rx/rwx）、状态、类型（image/mapped/private）和模块名（如有模块背书）。 |
 | `memory_aob_scan` | 支持通配符的字节阵列扫描（AOB scan）。在可读内存中搜索如 "48 8B ?? ?? 00 00" 的字节模式。接受十六进制字节（00-FF，可选 0x 前缀）和 "??" 通配符，大小写不敏感。可选 executableOnly=true 仅扫描可执行内存页面（CE 7.6 AOBSCANEX）。 |
 | `memory_find_accesses` | 查找写入或访问某内存地址的指令（Cheat Engine MWT 工作流）。在目标地址设置硬件断点，每次命中后自动重装，捕获触发故障的指令地址、上下文和时间戳，可选择反汇编该指令。返回聚合的命中记录及每条命中的指令详情。 |
+| `memory_cheat_table` | 待补充中文：Import or export a Cheat Engine .CT file. Export: converts a JSON array of {description, address, valueType, moduleName?, offset?} entries to a valid .CT XML file. Import: parses a .CT XML string and returns entries as JSON. Addresses can be hex ("0x7FF612340000") or module+offset ("game.exe"+00123456). Auto Assembler scripts are skipped with a warning. |
+| `memory_generate_signature` | 待补充中文：Generate an update-resistant AOB (Array-of-Bytes) signature from bytes at a memory address. Detects relative offsets in CALL/JMP/LEA/Jcc instructions and replaces the displacement bytes with wildcards (??), making the signature survive minor code changes between updates. Uses byte-pattern heuristics — no Capstone dependency required. |
+| `memory_rtti_info` | 待补充中文：Parse MSVC RTTI (Run-Time Type Information) at an object address. Reads vtable pointer, follows the Complete Object Locator chain, extracts class name, base classes, and class hierarchy descriptor. Equivalent to CE's "Find out what addresses this code accesses" for type discovery — quickly answer "what type is this object?" without a full structure analysis. Only works on MSVC x64 binaries with RTTI enabled. |
 | `memory_parse_dump` | 解析 Windows Minidump（.dmp）文件并提取取证信息：已加载模块（基址/大小/名称/时间戳）、线程（ID/栈/上下文）、内存范围（64 位或 32 位）、系统信息（OS/CPU）和异常记录。可选解析地址列表对照 dump 内容。纯 TS 实现——跨平台（可在 Linux/macOS 上分析 Windows dump）。 |

@@ -21,7 +21,7 @@ In-process, dependency-free self-built ARM64 interpreter for emulating Android `
 - native-emulator + binary-instrument
 - native-emulator + dart-inspector
 
-## Full tool list (54)
+## Full tool list (55)
 
 | Tool | Description |
 | --- | --- |
@@ -79,3 +79,4 @@ In-process, dependency-free self-built ARM64 interpreter for emulating Android `
 | `nemu_regs_restore` | Restore GPR registers from a previously-saved snapshot (created by nemu_regs_save). Partially restores: only registers that were saved are written back. Use after an obfuscated function call to recover decode/context registers. |
 | `nemu_scan_memory` | Scan emulated memory for a byte pattern (like Volatility). Searches a guest address range for an exact byte match using Boyer-Moore-Horspool. Returns a list of matched addresses. Skips unmapped regions silently — use nemu_mem_map to extend the scan range if needed. |
 | `nemu_xor_region` | XOR a region of emulated memory with a single-byte key. Returns the XOR result as base64. Use for quick decryption testing — XOR a buffer with a candidate key byte and inspect the preview without modifying guest state. Set dryRun=false to write the XOR result back into guest memory. |
+| `nemu_relay` | Connect to a remote native-emulator session via IPC relay. Proxies nemu operations through a named pipe (Windows) or Unix domain socket (Linux/macOS) with JSON-RPC over length-prefixed frames. Use to drive ARM64 nemu sessions on a Linux host from a Windows MCP server (or vice versa). |
