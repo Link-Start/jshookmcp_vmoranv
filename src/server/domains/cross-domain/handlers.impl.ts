@@ -200,7 +200,7 @@ export class CrossDomainWorkflowClassifier {
       return ['analysis'];
     }
     if (toolName.startsWith('adb_')) return ['adb-bridge'];
-    if (toolName.startsWith('js_heap') || toolName.startsWith('performance_take_heap_snapshot')) {
+    if (toolName.startsWith('js_heap')) {
       return ['v8-inspector'];
     }
     if (toolName.startsWith('v8_')) return ['v8-inspector'];

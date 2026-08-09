@@ -58,7 +58,7 @@ export const WORKFLOWS: Record<string, CrossDomainWorkflowDefinition> = {
       { tool: 'canvas_engine_fingerprint', args: { canvasId: '${input.canvasId}' } },
       { tool: 'canvas_scene_dump', args: { canvasId: '${input.canvasId}' } },
       { tool: 'skia_correlate_objects', args: { skiaNodeIds: '${previous.nodeIds}' } },
-      { tool: 'performance_take_heap_snapshot', args: {} },
+      { tool: 'v8_heap_snapshot_capture', args: {} },
       { tool: 'js_heap_search', args: { pattern: '${input.searchTerm}' } },
     ],
   },
@@ -110,7 +110,7 @@ export const WORKFLOWS: Record<string, CrossDomainWorkflowDefinition> = {
       { tool: 'network_enable', args: {} },
       { tool: 'network_get_requests', args: { limit: 200 } },
       { tool: 'network_extract_auth', args: { includeHeaders: true } },
-      { tool: 'performance_take_heap_snapshot', args: {} },
+      { tool: 'v8_heap_snapshot_capture', args: {} },
       { tool: 'js_heap_search', args: { pattern: '${input.searchTerm}' } },
       {
         tool: 'cross_domain_correlate_all',
