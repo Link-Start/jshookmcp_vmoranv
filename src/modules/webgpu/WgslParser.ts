@@ -266,7 +266,29 @@ function parseStructFields(
 function stripComments(s: string): string {
   let out = '';
   let i = 0;
+  let inString: '"' | "'" | null = null;
   while (i < s.length) {
+    // Track string-literal state to avoid stripping comment-like
+    // patterns ("//" or "/*") that appear inside string literals.
+    if (inString !== null) {
+      if (s[i] === '\\') {
+        out += s[i];
+        i++;
+        out += s[i] ?? '';
+        i++;
+        continue;
+      }
+      if (s[i] === inString) inString = null;
+      out += s[i];
+      i++;
+      continue;
+    }
+    if (s[i] === '"' || s[i] === "'") {
+      inString = s[i] as '"' | "'";
+      out += s[i];
+      i++;
+      continue;
+    }
     if (s[i] === '/' && s[i + 1] === '/') {
       while (i < s.length && s[i] !== '\n') i++;
       continue;

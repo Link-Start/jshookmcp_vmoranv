@@ -752,6 +752,7 @@ const DEFAULT_OP_WEIGHT = 1;
 
 /** Texture-sampling opcode set (used for `textureSamples`). */
 const TEXTURE_SAMPLE_OPCODES = new Set<number>([
+  OpImageSample,
   OpImageSampleImplicitLod,
   OpImageSampleExplicitLod,
   OpImageSampleDrefImplicitLod,

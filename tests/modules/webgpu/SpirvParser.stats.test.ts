@@ -35,6 +35,7 @@ const OP_STORE = 62;
 const OP_FADD = 129;
 const OP_FMUL = 133;
 const OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87;
+const OP_IMAGE_SAMPLE = 80; // generic OpImageSample (was missing from TEXTURE_SAMPLE_OPCODES)
 const OP_IMAGE_FETCH = 95;
 const OP_BRANCH = 252;
 const OP_BRANCH_CONDITIONAL = 250;
@@ -106,6 +107,24 @@ describe('computeSpirvStats — opcode histogram & cost estimate', () => {
 
     // 2 × OpImageSampleImplicitLod + 1 × OpImageFetch
     expect(stats.textureSamples).toBe(3);
+  });
+
+  it('counts generic OpImageSample (opcode 80) as a texture sample', () => {
+    const insts: number[][] = [
+      makeInstruction(OP_TYPE_VOID, [1]),
+      makeInstruction(OP_TYPE_FLOAT, [2, 32]),
+      makeInstruction(OP_TYPE_FUNCTION, [3, 2, 1]),
+      makeInstruction(OP_LABEL, [10]),
+      // Single generic OpImageSample instruction.
+      makeInstruction(OP_IMAGE_SAMPLE, [2, 16, 15, 12]),
+      makeInstruction(OP_RETURN, []),
+      makeInstruction(OP_FUNCTION_END, []),
+    ];
+    const reflect = parseSpirv(buildModule(insts));
+    const stats = computeSpirvStats(reflect.instructions ?? []);
+
+    expect(stats.textureSamples).toBe(1);
+    expect(stats.byOpcode.OpImageSample).toBe(1);
   });
 
   it('measures control-flow complexity from branch/merge instructions', () => {
