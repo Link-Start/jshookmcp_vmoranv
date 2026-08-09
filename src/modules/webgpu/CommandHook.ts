@@ -117,6 +117,11 @@ export async function installGPUCommandHook(
         device: null,
       };
     } else {
+      // Destroy the previous querySet before overwriting the reference so the
+      // GPU resource is freed. The old reference is abandoned after this block.
+      if (ts.querySet && typeof ts.querySet.destroy === 'function') {
+        ts.querySet.destroy();
+      }
       state.timestampQuery = {
         ...ts,
         querySet: null,
@@ -125,6 +130,9 @@ export async function installGPUCommandHook(
         pending: [],
         results: {},
         overflow: false,
+        resolving: false,
+        resolveStartedAt: 0,
+        device: null,
       };
     }
 
@@ -531,8 +539,14 @@ export async function installGPUCommandHook(
                   tsq.resolving = false;
                 })
                 .catch(() => {
-                  // Resolution failed (e.g. device lost) — leave pending for
-                  // the next submit; never throw out of the submit hook.
+                  // Resolution failed (e.g. mapAsync rejected or device lost).
+                  // Destroy the dst buffer that was already allocated, then
+                  // leave pending for the next submit; never throw.
+                  try {
+                    dst.destroy();
+                  } catch {
+                    // device may already be lost — best-effort
+                  }
                   tsq.resolving = false;
                 });
             })
@@ -573,6 +587,14 @@ export async function uninstallGPUCommandHook(page: Page): Promise<void> {
     // via the stored device; mark resolving false so a later install is clean.
     if (state.timestampQuery) {
       state.timestampQuery.resolving = false;
+      // Destroy the querySet so GPU resources are released. The device may
+      // already be lost, so best-effort via optional chaining.
+      if (
+        state.timestampQuery.querySet &&
+        typeof state.timestampQuery.querySet.destroy === 'function'
+      ) {
+        state.timestampQuery.querySet.destroy();
+      }
     }
   });
 }
