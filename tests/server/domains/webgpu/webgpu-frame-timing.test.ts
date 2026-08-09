@@ -40,6 +40,44 @@ describe('computeFrameStats', () => {
     expect(stats.droppedFrames).toBe(1);
   });
 
+  it('counts budget misses — frames exceeding the 60fps 16.67ms budget', () => {
+    // All frames exceed 16.67ms — every one is a budget miss
+    const slow = [50, 52, 51, 50, 53];
+    const stats = computeFrameStats(slow, [], 'gpu-timestamp');
+    // droppedFrames uses adaptive threshold: median 51 → max(34, 76.5)=76.5 → 0 outliers
+    expect(stats.droppedFrames).toBe(0);
+    // budgetMisses counts absolute 16.67ms target: all 5 frames miss
+    expect(stats.budgetMisses).toBe(5);
+  });
+
+  it('budgetMisses is zero when all frames are within 16.67ms', () => {
+    const healthy = [14, 15, 16, 15, 14];
+    const stats = computeFrameStats(healthy, [], 'gpu-timestamp');
+    expect(stats.budgetMisses).toBe(0);
+    expect(stats.droppedFrames).toBe(0);
+  });
+
+  it('budgetMisses and droppedFrames can diverge on mixed workloads', () => {
+    // One extreme outlier (~200ms), rest consistently slow (~50ms)
+    const timings = [50, 51, 50, 200, 51, 50];
+    const stats = computeFrameStats(timings, [], 'gpu-timestamp');
+    // Adaptive: median 50.5 → threshold max(34, 75.75)=75.75 → only 200 is outlier
+    expect(stats.droppedFrames).toBe(1);
+    // Absolute: all 6 frames exceed 16.67ms
+    expect(stats.budgetMisses).toBe(6);
+  });
+
+  it('per-frame breakdown does not drop entries when arrays are equal length', () => {
+    // Bug #1 regression: both arrays same length → all entries preserved
+    const frameTimesMs = [16, 17, 16, 16, 16];
+    const gpuTimesMs = [8, 9, 8, 8, 8];
+    const stats = computeFrameStats(frameTimesMs, gpuTimesMs, 'gpu-timestamp');
+    // frameCount should match the number of frames with both CPU+GPU data
+    expect(stats.frameCount).toBe(5);
+    // avgGpuMs should use all 5 GPU measurements
+    expect(stats.avgGpuMs).toBeCloseTo(8.2, 5);
+  });
+
   it('classifies GPU-bound when gpu/frame ratio ≥ 0.8', () => {
     const stats = computeFrameStats([16, 16, 16, 16], [14, 14, 14, 14], 'gpu-timestamp');
     expect(stats.cpuOrGpuBound).toBe('gpu-bound');

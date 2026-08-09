@@ -80,9 +80,11 @@ export class FrameTimingHandler {
               const frameStart = performance.now();
               await new Promise((resolve) => requestAnimationFrame(resolve));
 
-              if (prevFrameStart !== null) {
-                frameTimesMs.push(performance.now() - prevFrameStart);
-              }
+              frameTimesMs.push(
+                prevFrameStart !== null
+                  ? performance.now() - prevFrameStart
+                  : performance.now() - frameStart,
+              );
               prevFrameStart = frameStart;
 
               if (querySet) {
@@ -183,8 +185,10 @@ export interface FrameTimingStats {
   /** True GPU pass duration (ms); null when only CPU round-trip timing exists. */
   avgGpuMs: number | null;
   p95GpuMs: number | null;
-  /** Frames whose interval exceeded max(34ms, 1.5×median). */
+  /** Frames whose interval exceeded max(34ms, 1.5×median) — outlier detection, not absolute quality. */
   droppedFrames: number;
+  /** Frames whose interval exceeded the 60fps budget (16.67ms) — absolute quality counter. */
+  budgetMisses: number;
   /** 'gpu-bound' when GPU time ≥ 80% of frame time, 'cpu-bound' ≤ 50%. */
   cpuOrGpuBound: 'gpu-bound' | 'cpu-bound' | 'balanced' | 'unknown';
   /** 'gpu-timestamp' = real timestamp queries; 'cpu-roundtrip' = degraded. */
@@ -195,6 +199,9 @@ export interface FrameTimingStats {
 
 /** Dropped-frame threshold: a frame interval beyond this is considered a drop. */
 const DROPPED_FRAME_HARD_MS = 34;
+
+/** Absolute 60fps frame budget in milliseconds. */
+const FRAME_BUDGET_MS = 1000 / 60;
 
 export function computeFrameStats(
   frameTimesMs: number[],
@@ -208,6 +215,7 @@ export function computeFrameStats(
     gpuTimesMs.length > 0 ? gpuTimesMs.reduce((a, b) => a + b, 0) / gpuTimesMs.length : null;
   const p95GpuMs = gpuTimesMs.length > 0 ? percentile(gpuTimesMs, 0.95) : null;
   const droppedFrames = countDroppedFrames(frameTimesMs);
+  const budgetMisses = countBudgetMisses(frameTimesMs);
   const cpuOrGpuBound = classifyBound(avgFrameMs, avgGpuMs, precision);
 
   return {
@@ -217,6 +225,7 @@ export function computeFrameStats(
     avgGpuMs,
     p95GpuMs,
     droppedFrames,
+    budgetMisses,
     cpuOrGpuBound,
     precision,
   };
@@ -245,13 +254,18 @@ function median(values: number[]): number {
   return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
 }
 
-/** Count frames whose interval exceeds max(34ms, 1.5 × median). */
+/** Count frames whose interval exceeds max(34ms, 1.5 × median) — outlier detector. */
 function countDroppedFrames(frameTimesMs: number[]): number {
   if (frameTimesMs.length === 0) {
     return 0;
   }
   const threshold = Math.max(DROPPED_FRAME_HARD_MS, median(frameTimesMs) * 1.5);
   return frameTimesMs.filter((ms) => ms > threshold).length;
+}
+
+/** Count frames whose interval exceeds the absolute 60fps (16.67ms) budget. */
+function countBudgetMisses(frameTimesMs: number[]): number {
+  return frameTimesMs.filter((ms) => ms > FRAME_BUDGET_MS).length;
 }
 
 /**
