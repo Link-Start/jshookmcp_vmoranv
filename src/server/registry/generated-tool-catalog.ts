@@ -16248,10 +16248,16 @@ export const GENERATED_TOOL_CATALOG = [
           },
           mode: {
             type: 'string',
-            enum: ['full', 'calls', 'branches', 'memory'],
+            enum: ['full', 'profile', 'calls', 'branches', 'memory'],
             description:
-              'Trace filter mode. full=all instructions (default). calls=BLR/BR only. branches=all conditional + unconditional branches (B, B.cond, CBZ, CBNZ, TBZ, TBNZ, RET, BR, BLR). memory=LDR/STR only.',
+              'Trace filter mode. full=all instructions (default). profile=aggregate per-pc instruction-frequency statistics + a BL/BLR call tree instead of per-step rows (uses a much larger instruction budget — see maxSteps). calls=BLR/BR only. branches=all conditional + unconditional branches (B, B.cond, CBZ, CBNZ, TBZ, TBNZ, RET, BR, BLR). memory=LDR/STR only.',
             default: 'full',
+          },
+          topN: {
+            type: 'number',
+            description:
+              'Profile mode only: number of hottest instructions to return, by execution count (default: 20)',
+            default: 20,
           },
           injectJni: {
             type: 'boolean',
@@ -16260,7 +16266,8 @@ export const GENERATED_TOOL_CATALOG = [
           },
           maxSteps: {
             type: 'number',
-            description: 'Maximum trace events to return (default: 1000)',
+            description:
+              'Maximum trace events to return (default: 1000; profile mode default and cap: 5,000,000 — frequency statistics need no per-step rows)',
             default: 1000,
           },
           persistArtifact: {
@@ -19654,6 +19661,13 @@ export const GENERATED_TOOL_CATALOG = [
             type: 'string',
             enum: ['start', 'stop'],
             description: 'Profiler action',
+          },
+          samplingInterval: {
+            type: 'number',
+            description:
+              'Sampling interval in microseconds. Default: 1000 (1ms). 30-100 for high-res profiles. Range: 30-10000',
+            minimum: 30,
+            maximum: 10000,
           },
           artifactPath: {
             type: 'string',
@@ -23807,6 +23821,13 @@ export const GENERATED_TOOL_CATALOG = [
             description: 'Number of top allocation sites to return (default: 50)',
             default: 50,
           },
+          samplingInterval: {
+            type: 'number',
+            description: 'Allocation sampling interval in bytes (default: 32768)',
+            default: 32768,
+            minimum: 256,
+            maximum: 1048576,
+          },
         },
       },
       annotations: {
@@ -24998,12 +25019,42 @@ export const GENERATED_TOOL_CATALOG = [
   },
   {
     tool: {
-      name: 'webgpu_memory_layout',
+      name: 'webgpu_frame_timing',
       description:
-        'Analyze GPU memory allocations and buffer usage. Identifies memory layout patterns that may be vulnerable to side-channel attacks.',
+        'Measure per-frame CPU and GPU cost over a rAF loop using GPU timestamp queries (device.limits.timestampPeriod conversion). Answers "how long did the GPU take" and "CPU-bound vs GPU-bound". Degrades to CPU round-trip timing with precision=cpu-roundtrip when the timestamp-query feature is unavailable.',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: {
+          frameCount: {
+            type: 'number',
+            description: 'Number of frames to measure (default 60)',
+            minimum: 1,
+            maximum: 10000,
+          },
+          includeTimestamps: {
+            type: 'boolean',
+            description: 'Include per-frame timing breakdown (default true)',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+    domain: 'webgpu',
+  },
+  {
+    tool: {
+      name: 'webgpu_memory_layout',
+      description:
+        'Analyze GPU memory allocations and buffer usage. Identifies memory layout patterns that may be vulnerable to side-channel attacks. With track=true, snapshots are stored on the shared state board (webgpu_memory_<canvasId>) and the response includes the delta vs the previous snapshot plus the growth rate in KB/s.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          track: {
+            type: 'boolean',
+            description:
+              'Store a memory snapshot and report delta/growth-rate vs the previous reading (default false)',
+          },
+        },
         additionalProperties: false,
       },
     },

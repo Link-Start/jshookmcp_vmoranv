@@ -5,7 +5,7 @@ import { resolveArtifactPath } from '@utils/artifacts';
 
 const VECTOR_RE = /^[vqdshb]\d{1,2}$/i;
 
-export type TraceMode = 'full' | 'calls' | 'branches' | 'memory';
+export type TraceMode = 'full' | 'profile' | 'calls' | 'branches' | 'memory';
 
 /** Return true if this instruction passes the `mode` filter, or if tableReg matches. */
 export function traceFilterMatch(
@@ -35,7 +35,7 @@ export function traceFilterMatch(
 
   // 'calls' mode: only BLR / BR, not plain B / B.cond / CBZ / RET etc.
   // BLR: 0xD63F0000, BR: 0xD61F0000
-  const mask = insn & 0xfffffc1f;
+  const mask = (insn & 0xfffffc1f) >>> 0;
   return mask === 0xd63f0000 || mask === 0xd61f0000;
 }
 

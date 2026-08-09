@@ -292,15 +292,24 @@ export const nativeEmulatorTools: Tool[] = [
       )
       .enum(
         'mode',
-        ['full', 'calls', 'branches', 'memory'],
-        'Trace filter mode. full=all instructions (default). calls=BLR/BR only. branches=all conditional + unconditional branches (B, B.cond, CBZ, CBNZ, TBZ, TBNZ, RET, BR, BLR). memory=LDR/STR only.',
+        ['full', 'profile', 'calls', 'branches', 'memory'],
+        'Trace filter mode. full=all instructions (default). profile=aggregate per-pc instruction-frequency statistics + a BL/BLR call tree instead of per-step rows (uses a much larger instruction budget — see maxSteps). calls=BLR/BR only. branches=all conditional + unconditional branches (B, B.cond, CBZ, CBNZ, TBZ, TBNZ, RET, BR, BLR). memory=LDR/STR only.',
         { default: 'full' },
+      )
+      .number(
+        'topN',
+        'Profile mode only: number of hottest instructions to return, by execution count (default: 20)',
+        { default: 20 },
       )
       .boolean(
         'injectJni',
         'Auto-detect JNI signature and inject the guest JNIEnv* as x0 + synthetic thiz=0 as x1 (default: auto, matching nemu_call_symbol). Set false to force raw args; set true to force JNI injection for a symbol that the auto-detector would miss.',
       )
-      .number('maxSteps', 'Maximum trace events to return (default: 1000)', { default: 1000 })
+      .number(
+        'maxSteps',
+        'Maximum trace events to return (default: 1000; profile mode default and cap: 5,000,000 — frequency statistics need no per-step rows)',
+        { default: 1000 },
+      )
       .boolean(
         'persistArtifact',
         'When true, write the full trace JSON to artifacts/traces and return traceArtifact metadata',

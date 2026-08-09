@@ -129,10 +129,7 @@ export class PerformanceMonitor {
     this.tracingPage = result.tracingPage;
   }
 
-  async stopTracing(options?: {
-    artifactPath?: string;
-    maxSizeMB?: number;
-  }): Promise<{
+  async stopTracing(options?: { artifactPath?: string; maxSizeMB?: number }): Promise<{
     artifactPath?: string;
     eventCount: number;
     sizeBytes: number;
@@ -161,8 +158,8 @@ export class PerformanceMonitor {
     sampleCount: number;
     topAllocations: Array<{ functionName: string; url: string; selfSize: number }>;
   }> {
-    const cdp = await this.ensureCDPSession();
     try {
+      const cdp = await this.ensureCDPSession();
       const result = await stopHeapSampling(cdp, this.heapSamplingEnabled, options);
       return result;
     } finally {

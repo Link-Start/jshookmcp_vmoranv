@@ -314,6 +314,6 @@ export const DOMAIN_TOOL_COUNT_MAP: Readonly<Record<string, number>> = {
   transform: 7,
   'v8-inspector': 21,
   wasm: 17,
-  webgpu: 9,
+  webgpu: 10,
   workflow: 12,
 };

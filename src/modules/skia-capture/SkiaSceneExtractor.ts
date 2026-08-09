@@ -599,7 +599,29 @@ export async function detectSkiaRenderer(
 ): Promise<LegacySkiaRendererInfo> {
   if (hasEvaluate(pageController)) {
     const webglResults = await pageController.evaluate<LegacyWebGlProbe[]>(
-      `(() => { /* UNMASKED_RENDERER_WEBGL ${canvasId ?? ''} */ return []; })()`,
+      `(() => {
+        /* UNMASKED_RENDERER_WEBGL probe ${canvasId ?? ''} */
+        const target = ${
+          canvasId
+            ? `(function () { try { return document.querySelector(${JSON.stringify(canvasId)}); } catch (err) { return null; } })()`
+            : 'null'
+        };
+        const canvas = target && typeof target.getContext === 'function' ? target : document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (!gl) { return []; }
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        const renderer = String(gl.getParameter(gl.RENDERER) || '');
+        const vendor = String(gl.getParameter(gl.VENDOR) || '');
+        const unmaskedRenderer = debugInfo ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '') : renderer;
+        const unmaskedVendor = debugInfo ? String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '') : vendor;
+        const joined = (renderer + ' ' + unmaskedRenderer).toLowerCase();
+        const hasSkiaBackend = joined.includes('swiftshader') || joined.includes('skia') ||
+          joined.includes('angle') || joined.includes('mesa') || joined.includes('vulkan') ||
+          joined.includes('metal');
+        const backend = joined.includes('swiftshader') ? 'swiftshader' :
+          joined.includes('angle') ? 'angle' : renderer ? 'native' : 'unknown';
+        return [{ vendor, renderer, unmaskedRenderer, unmaskedVendor, hasSkiaBackend, backend }];
+      })()`,
     );
     const fontProbe = await pageController.evaluate<LegacyFontProbe>(
       '(() => { /* fontBoundingBoxAscent */ return { hasSkiaFontSignatures: false, textMetrics: null }; })()',

@@ -63,6 +63,9 @@ export class CommandCaptureHandler {
               duration: analyzed.captureEndTime - analyzed.captureStartTime,
             },
             inferredTypes: analyzed.inferredTypes,
+            // Timestamp-query capability + per-pass GPU timings (Fix 2).
+            // Commands carry gpuStartNs/gpuEndNs/gpuElapsedNs when supported.
+            timestampQuery: analyzed.timestampQuery ?? { supported: false },
           };
 
           // Handle large command arrays

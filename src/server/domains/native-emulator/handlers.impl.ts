@@ -46,7 +46,17 @@ import { persistTraceArtifact, traceFilterMatch, traceRow, type TraceMode } from
 
 /** Cap on instruction-trace events returned, regardless of requested maxSteps. */
 const TRACE_HARD_CAP = 100_000;
+/** Instruction budget cap for profile-mode traces (frequency stats need no per-step rows). */
+const PROFILE_MAX_STEPS = 5_000_000;
 const DISASM_ARCHITECTURES = new Set(SUPPORTED_DISASSEMBLY_ARCHITECTURES);
+
+/** One node of the profile-mode call tree (BL/BLR targets aggregated). */
+interface ProfileCallNode {
+  address: string;
+  count: number;
+  symbolName?: string;
+  callees: ProfileCallNode[];
+}
 
 export class NativeEmulatorHandlers {
   private readonly sessions: SessionManager;
@@ -1045,7 +1055,6 @@ export class NativeEmulatorHandlers {
       }
       const callArgs = argNumberArray(args, 'args');
       const captureRegisters = argStringArray(args, 'captureRegisters');
-      const maxSteps = Math.min(argNumber(args, 'maxSteps', 1000), TRACE_HARD_CAP);
       const persistArtifact = argBool(args, 'persistArtifact', false);
       const inlineLimitArg = argNumber(args, 'traceInlineLimit');
       const injectJni = argBool(args, 'injectJni'); // undefined → auto-detect (matches call_symbol)
@@ -1053,9 +1062,16 @@ export class NativeEmulatorHandlers {
         (argEnum(
           args,
           'mode',
-          new Set(['full', 'calls', 'branches', 'memory']),
+          new Set(['full', 'profile', 'calls', 'branches', 'memory']),
           'full',
         ) as TraceMode) ?? 'full';
+      const profileMode = mode === 'profile';
+      // Profile mode trades per-step rows for volume: a much larger default budget.
+      const maxSteps = Math.min(
+        argNumber(args, 'maxSteps', profileMode ? PROFILE_MAX_STEPS : 1000),
+        profileMode ? PROFILE_MAX_STEPS : TRACE_HARD_CAP,
+      );
+      const topN = Math.min(Math.max(Math.trunc(argNumber(args, 'topN', 20) || 20), 1), 1000);
       const tableRegRaw = argNumber(args, 'tableReg');
       const tableReg: number | undefined =
         tableRegRaw !== undefined && tableRegRaw >= 0 && tableRegRaw <= 30
@@ -1069,7 +1085,76 @@ export class NativeEmulatorHandlers {
       // For registerDiff: track previous register snapshot (keyed by register name)
       let prevRegs: Record<string, unknown> | undefined;
       const engine = session.emulator.engine;
+      // ── Profile-mode aggregation state (mode === 'profile') ────────
+      // Per-pc frequency counters; the insn is kept so hot entries can be
+      // disassembled after execution (top-N only — no per-step rows).
+      const pcCounts = new Map<number, { count: number; insn: number }>();
+      const callNodeByAddr = new Map<number, ProfileCallNode>();
+      let callStack: number[] = [];
+      let profileRoot: ProfileCallNode | undefined;
+      let profileTotal = 0;
+      // Best-effort address → exported-symbol resolution (nearest preceding vaddr).
+      const symbolByAddr = new Map<number, string>();
+      if (profileMode) {
+        for (const name of engine.exportedSymbolNames()) {
+          const addr = engine.lookupSymbol(name);
+          if (addr !== undefined) symbolByAddr.set(addr, name);
+        }
+      }
+      const symbolNameAt = (addr: number): string | undefined => {
+        let best: string | undefined;
+        let bestAddr = -1;
+        for (const [a, name] of symbolByAddr) {
+          if (a <= addr && a > bestAddr) {
+            best = name;
+            bestAddr = a;
+          }
+        }
+        return best;
+      };
+      /** Record a BL/BLR call edge (target) from the current call-stack frame. */
+      const recordCall = (target: number): void => {
+        let node = callNodeByAddr.get(target);
+        if (!node) {
+          node = { address: hexAddr(target), count: 0, callees: [] };
+          const sym = symbolNameAt(target);
+          if (sym !== undefined) node.symbolName = sym;
+          callNodeByAddr.set(target, node);
+        }
+        node.count += 1;
+        const parent = callNodeByAddr.get(callStack[callStack.length - 1]!);
+        if (parent && parent !== node && !parent.callees.includes(node)) {
+          parent.callees.push(node);
+        }
+        callStack.push(target);
+      };
       const unsubscribe = engine.addInstructionHook((ev) => {
+        if (profileMode) {
+          if (profileTotal >= maxSteps) {
+            truncated = true;
+            engine.requestStop(); // hard-stop execution when budget exceeded
+            return;
+          }
+          profileTotal += 1;
+          const rec = pcCounts.get(ev.pc);
+          if (rec) rec.count += 1;
+          else pcCounts.set(ev.pc, { count: 1, insn: ev.insn });
+          const insn = ev.insn;
+          if ((insn & 0xfc000000) >>> 0 === 0x94000000) {
+            // BL imm26 — sign-extended 26-bit word offset
+            recordCall(ev.pc + (((insn & 0x03ffffff) << 6) >> 6) * 4);
+          } else if ((insn & 0xfffffc1f) >>> 0 === 0xd63f0000) {
+            // BLR Xn — target is the register value
+            try {
+              recordCall(Number(ev.x((insn >>> 5) & 0b11111)));
+            } catch {
+              /* register read may fault — skip this call edge */
+            }
+          } else if (insn === 0xd65f03c0 && callStack.length > 1) {
+            callStack.pop(); // RET — pop the current frame (never the entry frame)
+          }
+          return;
+        }
         if (events.length >= maxSteps) {
           truncated = true;
           engine.requestStop(); // hard-stop execution when trace budget exceeded
@@ -1104,6 +1189,15 @@ export class NativeEmulatorHandlers {
         // Clear stale JNI diag from prior calls so only THIS trace's
         // JNI stub invocations are reported.
         session.emulator.clearJniDiag?.();
+        // Profile mode: seed the call tree with the traced entry as its root.
+        if (profileMode) {
+          const entryAddr = address ?? engine.lookupSymbol(symbol!) ?? 0;
+          callStack = [entryAddr];
+          profileRoot = { address: hexAddr(entryAddr), count: 1, callees: [] };
+          const rootSym = symbolNameAt(entryAddr);
+          if (rootSym !== undefined) profileRoot.symbolName = rootSym;
+          callNodeByAddr.set(entryAddr, profileRoot);
+        }
         let result = 0;
         let aborted: { pc: number; insn: number } | undefined;
         try {
@@ -1128,7 +1222,7 @@ export class NativeEmulatorHandlers {
           truncated = true;
           if (e instanceof UnsupportedOpcodeError) {
             aborted = { pc: e.pc, insn: e.insn };
-            if (events.length < maxSteps) {
+            if (!profileMode && events.length < maxSteps) {
               events.push({
                 step: events.length + 1,
                 pc: `0x${e.pc.toString(16)}`,
@@ -1144,7 +1238,7 @@ export class NativeEmulatorHandlers {
             // gap worth surfacing, but trace is an exploration tool.
             const faultPc = engine.readRegister('pc');
             aborted = { pc: faultPc, insn: 0 };
-            if (events.length < maxSteps) {
+            if (!profileMode && events.length < maxSteps) {
               events.push({
                 step: events.length + 1,
                 pc: `0x${faultPc.toString(16)}`,
@@ -1152,6 +1246,42 @@ export class NativeEmulatorHandlers {
               });
             }
           }
+        }
+        // Snapshot JNI diag AFTER execution (non-destructive).
+        const jniDiag = session.emulator.jniDiagSnapshot?.();
+        const abortError = aborted
+          ? `Unsupported ARM64 opcode 0x${aborted.insn.toString(16).padStart(8, '0')} at pc=0x${aborted.pc.toString(16)} — trace aborted with partial capture`
+          : undefined;
+        if (profileMode) {
+          const total = profileTotal;
+          const hot = [...pcCounts.entries()]
+            .toSorted((a, b) => b[1].count - a[1].count || a[0] - b[0])
+            .slice(0, topN)
+            .map(([pc, rec]) => ({
+              pc: hexAddr(pc),
+              count: rec.count,
+              percentage: pct(rec.count, total),
+              asm: disassembleInstruction('arm64', rec.insn, BigInt(pc)),
+            }));
+          return {
+            sessionId: session.id,
+            ...(address !== undefined ? { address: hexAddr(address) } : { symbol: symbol! }),
+            result,
+            mode: 'profile',
+            totalInstructions: total,
+            uniqueInstructions: pcCounts.size,
+            hotInstructions: hot,
+            callTree: profileRoot ? [profileRoot] : [],
+            summary: {
+              totalInstructions: total,
+              uniqueInstructions: pcCounts.size,
+              ...(hot[0] ? { topHotPc: hot[0].pc, topHotAsm: hot[0].asm } : {}),
+            },
+            steps: total,
+            truncated,
+            ...(abortError ? { error: abortError } : {}),
+            ...(jniDiag ? { jniCalls: jniDiag } : {}),
+          };
         }
         const traceInlineLimit =
           inlineLimitArg === undefined
@@ -1161,8 +1291,6 @@ export class NativeEmulatorHandlers {
         const traceArtifact = persistArtifact
           ? await persistTraceArtifact(session.id, traceLabel, result, events, truncated)
           : undefined;
-        // Snapshot JNI diag AFTER execution (non-destructive).
-        const jniDiag = session.emulator.jniDiagSnapshot?.();
         return {
           sessionId: session.id,
           ...(address !== undefined
@@ -1174,11 +1302,7 @@ export class NativeEmulatorHandlers {
           traceInlineLimit,
           ...(traceArtifact ? { traceArtifact } : {}),
           ...(jniDiag ? { jniCalls: jniDiag } : {}),
-          ...(aborted
-            ? {
-                error: `Unsupported ARM64 opcode 0x${aborted.insn.toString(16).padStart(8, '0')} at pc=0x${aborted.pc.toString(16)} — trace aborted with partial capture`,
-              }
-            : {}),
+          ...(abortError ? { error: abortError } : {}),
           trace: events.slice(0, traceInlineLimit),
         };
       } finally {
@@ -2291,6 +2415,16 @@ function fmtHex(v: bigint): string {
 /** Format a BigInt or number as a 16-digit uppercase hex string (used by dump_frame). */
 function fmt(v: bigint | number): string {
   return `0x${BigInt(v).toString(16).toUpperCase().padStart(16, '0')}`;
+}
+
+/** Format a guest address as a lowercase 0x-hex string (matches trace rows). */
+function hexAddr(n: number): string {
+  return `0x${n.toString(16)}`;
+}
+
+/** Exact 3-decimal percentage: count / total × 100. */
+function pct(count: number, total: number): number {
+  return total === 0 ? 0 : Math.round((count / total) * 100000) / 1000;
 }
 
 function decodeBionicOptions(

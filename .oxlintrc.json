@@ -30,6 +30,7 @@
           "__jshookWsInstances",
           "__jshookWsInstancesPatched",
           "__jshookPcId",
+          "__jshookTimestamp",
           "__more",
           "__networkRequests",
           "__order",
