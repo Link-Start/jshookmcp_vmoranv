@@ -20,7 +20,7 @@ V8 检查器域，提供堆快照分析、CPU 分析和内存检查。
 - v8-inspector + browser
 - v8-inspector + debugger
 
-## 工具清单（22）
+## 工具清单（21）
 
 | 工具 | 说明 |
 | --- | --- |
@@ -31,7 +31,6 @@ V8 检查器域，提供堆快照分析、CPU 分析和内存检查。
 | `v8_heap_stats` | 待补充中文：Report V8 heap statistics: used, total, external. |
 | `v8_bytecode_extract` | 待补充中文：Extract V8 bytecode for a script by scriptId, with source fallback. |
 | `v8_version_detect` | 待补充中文：Detect V8 engine version, flags, and runtime capabilities. |
-| `v8_jit_inspect` | 待补充中文：Report JIT compilation status and optimization tier for a script. |
 | `v8_heap_find_leaks` | 待补充中文：Find suspected memory leaks in a heap snapshot. Returns leak candidates sorted by confidence, including detached DOM nodes, large arrays, closure leaks, and unexpectedly large retained objects. |
 | `v8_heap_retainers` | 待补充中文：Trace retainer chains from suspect leak objects back to GC roots. For each nodeId, walks the immediate-dominator chain to produce a "what keeps it alive" path: leaf → ... → GC root. Each step includes nodeId, name, className, shallowSize, retainedSize, and distance from the leaf. Use after v8_heap_find_leaks or v8_heap_snapshot_analyze to understand why a specific object is not being collected. |
 | `v8_deopt_trace` | 待补充中文：Trace V8 deoptimization events during a capture window. Enables %TraceDeoptimizations via natives syntax and captures deopt events (function name, reason, bailout position). Requires V8 natives syntax. Falls back gracefully when unavailable. |

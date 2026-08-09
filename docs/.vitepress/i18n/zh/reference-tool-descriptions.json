@@ -336,7 +336,6 @@
   "mojo_monitor": "启动或停止当前 Chromium 内核目标的 Mojo IPC 监控。",
   "performance_trace": "Chrome Performance Trace 录制。start 开始捕获，stop 结束并保存跟踪文件。",
   "profiler_cpu": "CDP CPU 性能分析。start 开始录制，stop 结束并保存含热点函数的 Profile。",
-  "profiler_heap_sampling": "V8 堆分配采样。start 开始追踪，stop 结束并返回主要分配热点。",
   "console_inject": "注入页面内监控器/拦截器，支持 script_monitor、xhr_interceptor、fetch_interceptor、function_tracer 等类型。",
   "console_buffers": "管理已注入拦截器的状态，支持清空缓冲区或重置拦截器。",
   "network_intercept": "管理基于 CDP Fetch 域的响应拦截规则。操作：add（创建规则）、list（显示活跃规则）、disable（移除规则）。",
@@ -346,7 +345,6 @@
   "debugger_lifecycle": "管理调试器生命周期（启用或禁用）。",
   "network_monitor": "管理网络请求监控。启用/禁用监控或查看状态，需在 page_navigate 前启用以捕获请求。",
   "enumerate_modules": "列出进程中所有已加载模块（DLL）及其基址。",
-  "performance_coverage": "开始或停止 JavaScript 与 CSS 代码覆盖率录制。",
   "trace_recording": "开始或停止时间旅行跟踪录制，数据存入 SQLite 数据库。",
   "network_traceroute": "基于 ICMP 的路由追踪，逐跳返回 RTT 与错误分类。Windows 无需管理员权限；Linux/macOS 需要 root 或 CAP_NET_RAW。",
   "network_icmp_probe": "ICMP 探测，支持 TTL 控制与错误分类。Windows 无需管理员权限；Linux/macOS 需要 root 或 CAP_NET_RAW。",
@@ -361,7 +359,6 @@
   "network_enable": "启用网络请求监控；必须在 page_navigate 之前调用才能捕获请求。",
   "network_disable": "禁用网络请求监控。",
   "network_get_status": "获取网络监控状态，包括是否启用、请求数和响应数。",
-  "performance_take_heap_snapshot": "采集一份 V8 堆内存快照。",
   "console_get_exceptions": "获取页面中已捕获的未处理异常。",
   "process_check_debug_port": "检查目标进程是否已开启可用于 CDP 附加的调试端口。",
   "state_board": "统一的共享状态板，用于跨 Agent 的键值协调。",
@@ -652,7 +649,6 @@
   "v8_heap_stats": "待补充中文：Report V8 heap statistics: used, total, external.",
   "v8_bytecode_extract": "待补充中文：Extract V8 bytecode for a script by scriptId, with source fallback.",
   "v8_version_detect": "待补充中文：Detect V8 engine version, flags, and runtime capabilities.",
-  "v8_jit_inspect": "待补充中文：Report JIT compilation status and optimization tier for a script.",
   "v8_heap_find_leaks": "待补充中文：Find suspected memory leaks in a heap snapshot. Returns leak candidates sorted by confidence, including detached DOM nodes, large arrays, closure leaks, and unexpectedly large retained objects.",
   "v8_heap_retainers": "待补充中文：Trace retainer chains from suspect leak objects back to GC roots. For each nodeId, walks the immediate-dominator chain to produce a \"what keeps it alive\" path: leaf → ... → GC root. Each step includes nodeId, name, className, shallowSize, retainedSize, and distance from the leaf. Use after v8_heap_find_leaks or v8_heap_snapshot_analyze to understand why a specific object is not being collected.",
   "v8_deopt_trace": "待补充中文：Trace V8 deoptimization events during a capture window. Enables %TraceDeoptimizations via natives syntax and captures deopt events (function name, reason, bailout position). Requires V8 natives syntax. Falls back gracefully when unavailable.",
@@ -666,5 +662,9 @@
   "v8_weakrefs_inspect": "待补充中文：Enumerate WeakRef and FinalizationRegistry instances in the page via Runtime.evaluate. Inspects registered finalization callbacks and live WeakRef targets, reporting how many WeakRefs are dereferenced vs cleared and which FinalizationRegistry callbacks have pending entries. Useful for diagnosing cleanup logic in long-lived pages. Requires browser/page CDP context.",
   "v8_heap_snapshot_list": "待补充中文：List V8 heap snapshots — both in-memory (current session) and persisted to artifacts/heap-snapshots/ (survive a server restart). Reports id, capture time, size, source (in-memory/persisted), simulated flag, and expiry status, plus aggregate stats. Snapshot payloads are NOT returned (only metadata).",
   "v8_heap_snapshot_delete": "待补充中文：Delete persisted V8 heap snapshot artifact files (.heapsnapshot data + .meta.json sidecar) and drop the matching in-memory cache entry. Use deleteAll=true to remove every persisted snapshot. Does not affect the live V8 heap.",
-  "v8_heap_snapshot_export": "待补充中文：Export a heap snapshot as a complete .heapsnapshot JSON file under artifacts/heap-snapshots/, loadable by the Chrome DevTools Memory panel. The file path is returned; the snapshot content is written to disk, not injected into the response (it can be very large)."
+  "v8_heap_snapshot_export": "待补充中文：Export a heap snapshot as a complete .heapsnapshot JSON file under artifacts/heap-snapshots/, loadable by the Chrome DevTools Memory panel. The file path is returned; the snapshot content is written to disk, not injected into the response (it can be very large).",
+  "browser_performance_observer": "待补充中文：Atomic primitive: subscribe to PerformanceObserver entry types in the active page and return both buffered and live entries observed during a collection window. Entry types are passed through to PerformanceObserver.observe({ type }) verbatim (e.g. largest-contentful-paint, layout-shift, longtask, event, long-animation-frame); unsupported entry types are skipped silently. One observer per type — the API does not accept multiple types in a single observe() call.",
+  "browser_resource_timing": "待补充中文：Atomic primitive: read Resource Timing API entries for the active page and decompose each resource into dns / connect / tls / ttfb / download phases plus transfer and body sizes. Optionally include Server-Timing headers and filter by URL substring. A read-only snapshot — no observers or listeners are installed.",
+  "browser_cdp_performance_metrics": "待补充中文：Atomic primitive: fetch browser runtime metrics via CDP Performance.getMetrics() on the active page. Returns raw CDP-level counters (LayoutCount, RecalcStyleCount, ScriptDuration, TaskDuration, JSHeapUsedSize, Nodes, Documents, Frames, ...) — not Web Vitals (use network domain performance_get_metrics for those).",
+  "v8_type_profile": "待补充中文：Atomic primitive: start or stop V8 type profiling via CDP Profiler.startTypeProfile() / takeTypeProfile() / stopTypeProfile(). Type profiles record the runtime types flowing through each function entry (type:Array, type:Object, type:number, ...) — the raw material for deobfuscating VM dispatchers or polymorphic call sites. action=\"stop\" returns per-script entries and optionally persists the raw profile to a JSON artifact (artifacts/profiles/)."
 }

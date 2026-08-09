@@ -21,7 +21,7 @@
 - browser + instrumentation
 - browser + workflow
 
-## 工具清单（76）
+## 工具清单（80）
 
 | 工具 | 说明 |
 | --- | --- |
@@ -90,6 +90,10 @@
 | `tab_workflow` | 多标签页协同操作，支持跨标签页传递数据。 |
 | `browser_codegen_start` | 开始录制浏览器操作，将页面交互转化为可回放的步骤序列。 |
 | `browser_codegen_stop` | 停止录制浏览器操作，返回经过清洗和合并的可回放步骤列表。 |
+| `browser_performance_observer` | 待补充中文：Atomic primitive: subscribe to PerformanceObserver entry types in the active page and return both buffered and live entries observed during a collection window. Entry types are passed through to PerformanceObserver.observe({ type }) verbatim (e.g. largest-contentful-paint, layout-shift, longtask, event, long-animation-frame); unsupported entry types are skipped silently. One observer per type — the API does not accept multiple types in a single observe() call. |
+| `browser_resource_timing` | 待补充中文：Atomic primitive: read Resource Timing API entries for the active page and decompose each resource into dns / connect / tls / ttfb / download phases plus transfer and body sizes. Optionally include Server-Timing headers and filter by URL substring. A read-only snapshot — no observers or listeners are installed. |
+| `browser_cdp_performance_metrics` | 待补充中文：Atomic primitive: fetch browser runtime metrics via CDP Performance.getMetrics() on the active page. Returns raw CDP-level counters (LayoutCount, RecalcStyleCount, ScriptDuration, TaskDuration, JSHeapUsedSize, Nodes, Documents, Frames, ...) — not Web Vitals (use network domain performance_get_metrics for those). |
+| `v8_type_profile` | 待补充中文：Atomic primitive: start or stop V8 type profiling via CDP Profiler.startTypeProfile() / takeTypeProfile() / stopTypeProfile(). Type profiles record the runtime types flowing through each function entry (type:Array, type:Object, type:number, ...) — the raw material for deobfuscating VM dispatchers or polymorphic call sites. action="stop" returns per-script entries and optionally persists the raw profile to a JSON artifact (artifacts/profiles/). |
 | `human_mouse` | 模拟真人移动鼠标，带随机轨迹和抖动。 |
 | `human_scroll` | 模拟真人滚动页面，带变速和停顿。 |
 | `human_typing` | 模拟真人打字，带变速和偶尔打错再修正。 |

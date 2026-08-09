@@ -21,7 +21,7 @@ Primary browser control and DOM interaction domain; the usual entry point for mo
 - browser + instrumentation
 - browser + workflow
 
-## Full tool list (76)
+## Full tool list (80)
 
 | Tool | Description |
 | --- | --- |
@@ -90,6 +90,10 @@ Primary browser control and DOM interaction domain; the usual entry point for mo
 | `tab_workflow` | Cross-tab coordination. |
 | `browser_codegen_start` | Start recording browser actions as replayable steps. |
 | `browser_codegen_stop` | Stop recording browser actions and return cleaned replay steps. |
+| `browser_performance_observer` | Atomic primitive: subscribe to PerformanceObserver entry types in the active page and return both buffered and live entries observed during a collection window. Entry types are passed through to PerformanceObserver.observe({ type }) verbatim (e.g. largest-contentful-paint, layout-shift, longtask, event, long-animation-frame); unsupported entry types are skipped silently. One observer per type — the API does not accept multiple types in a single observe() call. |
+| `browser_resource_timing` | Atomic primitive: read Resource Timing API entries for the active page and decompose each resource into dns / connect / tls / ttfb / download phases plus transfer and body sizes. Optionally include Server-Timing headers and filter by URL substring. A read-only snapshot — no observers or listeners are installed. |
+| `browser_cdp_performance_metrics` | Atomic primitive: fetch browser runtime metrics via CDP Performance.getMetrics() on the active page. Returns raw CDP-level counters (LayoutCount, RecalcStyleCount, ScriptDuration, TaskDuration, JSHeapUsedSize, Nodes, Documents, Frames, ...) — not Web Vitals (use network domain performance_get_metrics for those). |
+| `v8_type_profile` | Atomic primitive: start or stop V8 type profiling via CDP Profiler.startTypeProfile() / takeTypeProfile() / stopTypeProfile(). Type profiles record the runtime types flowing through each function entry (type:Array, type:Object, type:number, ...) — the raw material for deobfuscating VM dispatchers or polymorphic call sites. action="stop" returns per-script entries and optionally persists the raw profile to a JSON artifact (artifacts/profiles/). |
 | `human_mouse` | Move mouse along a Bezier curve with jitter. |
 | `human_scroll` | Scroll with randomized speed and pauses to mimic human behavior. |
 | `human_typing` | Type text with human-like speed and occasional typos. |
