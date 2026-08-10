@@ -239,4 +239,83 @@ describe('StructureHandlers', () => {
       expect(mockstructAnalyzer.compareInstances).not.toHaveBeenCalled();
     });
   });
+
+  describe('handleStructureExportC — ReClass.NET format', () => {
+    it('exports ReClass XML for a simple structure', async () => {
+      // No mock for exportReClassXml — it's a handler-level pure function.
+      const response = await handlers.handleStructureExportC({
+        structure: JSON.stringify({
+          baseAddress: '0x0',
+          totalSize: 16,
+          fields: [
+            { name: 'vtable', offset: 0, size: 8, type: 'vtable_ptr', confidence: 1 },
+            { name: 'health', offset: 8, size: 4, type: 'int32', confidence: 0.9 },
+            { name: 'speed', offset: 12, size: 4, type: 'float', confidence: 0.8 },
+          ],
+        }),
+        name: 'Player',
+        format: 'reclass',
+      });
+
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.format).toBe('reclass');
+      expect(parsed.xml).toContain('<ReClassProject Version="1.0">');
+      expect(parsed.xml).toContain('<Class Name="Player"');
+      expect(parsed.xml).toContain('Type="vt_ptr"');
+      expect(parsed.xml).toContain('Type="int32"');
+      expect(parsed.xml).toContain('Type="float"');
+      expect(parsed.fieldCount).toBe(3);
+    });
+
+    it('maps field types to ReClass types correctly', async () => {
+      const response = await handlers.handleStructureExportC({
+        structure: JSON.stringify({
+          baseAddress: '0x0',
+          totalSize: 48,
+          fields: [
+            { name: 'ptr', offset: 0, size: 8, type: 'pointer', confidence: 1 },
+            { name: 'str', offset: 8, size: 8, type: 'string_ptr', confidence: 1 },
+            { name: 'hex', offset: 16, size: 4, type: 'hex', confidence: 0.5 },
+            { name: 'pad', offset: 20, size: 4, type: 'padding', confidence: 0.5 },
+            { name: 'dbl', offset: 24, size: 8, type: 'double', confidence: 1 },
+            { name: 'large', offset: 32, size: 8, type: 'int64', confidence: 1 },
+            { name: 'flag', offset: 40, size: 1, type: 'uint8', confidence: 1 },
+            { name: 'unk', offset: 41, size: 7, type: 'unknown', confidence: 0.2 },
+          ],
+        }),
+        name: 'TypeMap',
+        format: 'reclass',
+      });
+
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.fieldCount).toBe(8);
+      // Verify type mappings
+      expect(parsed.xml).toContain('Type="ptr64"'); // pointer → ptr64
+      expect(parsed.xml).toContain('Type="ptr64"'); // string_ptr → ptr64
+      expect(parsed.xml).toContain('Type="hex32"'); // hex → hex32, unknown → hex32
+      expect(parsed.xml).toContain('Type="Bytes"'); // padding → Bytes
+      expect(parsed.xml).toContain('Type="double"'); // double → double
+      expect(parsed.xml).toContain('Type="int64"'); // int64 → int64
+      expect(parsed.xml).toContain('Type="uint8"'); // uint8 → uint8
+    });
+
+    it('defaults format to C when not specified', async () => {
+      mockstructAnalyzer.exportToCStruct = vi.fn().mockReturnValue({
+        name: 'TestStruct',
+        definition: 'struct TestStruct {};',
+        size: 0,
+        fieldCount: 0,
+      });
+
+      const response = await handlers.handleStructureExportC({
+        structure: JSON.stringify({ fields: [], baseAddress: '0x0', totalSize: 0 }),
+        name: 'TestStruct',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.format).toBe('c');
+    });
+  });
 });
