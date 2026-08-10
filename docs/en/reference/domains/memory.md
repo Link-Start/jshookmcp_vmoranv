@@ -20,12 +20,12 @@ Memory analysis domain for native scans, pointer-chain discovery, structure infe
 - memory + debugger
 - memory + workflow
 
-## Full tool list (38)
+## Full tool list (48)
 
 | Tool | Description |
 | --- | --- |
 | `memory_first_scan` | Start a new memory scan session. |
-| `memory_next_scan` | Narrow an existing scan session. |
+| `memory_next_scan` | Narrow an existing scan session. Supports delta modes: changed_by (value changed by exactly N), increased_by (value increased by at least N), decreased_by (value decreased by at least N), changed_by_variable (returns per-address delta in results). |
 | `memory_unknown_scan` | Start an unknown initial value scan. |
 | `memory_pointer_scan` | Find pointers to a target address. |
 | `memory_group_scan` | Search for multiple values at known offsets simultaneously. |
@@ -34,17 +34,21 @@ Memory analysis domain for native scans, pointer-chain discovery, structure infe
 | `memory_pointer_chain` | Pointer chain operations: scan (multi-level BFS), autoscan (auto-discover pointer chains by recursively scanning for pointers that point to or near the target address), validate, resolve, or export as JSON. autoscan is Cheat Engine's "pointer scan" equivalent — no manual base/offsets needed. |
 | `memory_structure_analyze` | Analyze memory at an address to infer data structure layout. |
 | `memory_vtable_parse` | Parse a vtable to enumerate virtual function pointers and resolve them to module+offset. Also attempts RTTI parsing for class name and inheritance hierarchy. |
-| `memory_structure_export_c` | Export an inferred structure as a C-style struct definition with offset comments and type annotations. |
+| `memory_structure_export_c` | Export an inferred structure as a C-style struct definition or ReClass.NET XML project. Pass format="reclass" for a ReClass.NET 1.0 XML project importable by ReClass.NET. |
 | `memory_structure_compare` | Compare two structure instances to identify which fields differ (dynamic values like health/position) vs which are constant (vtable, type flags). Useful for finding important fields. |
-| `memory_breakpoint` | Hardware breakpoint via x64 debug registers (DR0-DR3). Actions: set, remove, list, trace. Two debugger modes: "win32" (default, uses DebugActiveProcess — freezes entire process) and "veh" (Vectored Exception Handler — injects shellcode, only faulting thread pauses). VEH mode is less intrusive but requires code injection which may be detected by anti-cheat systems. |
+| `memory_breakpoint` | Breakpoint via hardware debug registers (DR0-DR3) or software INT3 (0xCC). Actions: set, remove, list, trace. Hardware BPs (type='hardware'): use x64 DR0-DR3, max 4 concurrent, support read/write/readwrite/execute. Software BPs (type='software'): use INT3 (0xCC) patching, unlimited count, execute-only. Two debugger modes: "win32" (default, uses DebugActiveProcess — freezes entire process) and "veh" (Vectored Exception Handler — injects shellcode, only faulting thread pauses). VEH mode is less intrusive but requires code injection which may be detected by anti-cheat systems. Conditional breakpoints: pass a JS expression as "condition" (e.g. "rax &gt; 0x1000"), evaluated against register context on each hit; falsy results auto-resume without reporting. |
 | `memory_patch_bytes` | Write bytes to target process at address. Saves original bytes for undo. Use for runtime code patching. |
 | `memory_patch_nop` | NOP out instructions at address (replace with 0x90). Useful for disabling checks or jumps. |
 | `memory_patch_undo` | Undo a previous patch by restoring the original bytes. |
 | `memory_code_caves` | Find code caves (runs of 0x00 or 0xCC) in executable sections of loaded modules. Returns largest caves first. |
+| `memory_allocate` | Allocate executable memory in target process (VirtualAllocEx wrapper). Win32 only. Requires JSHOOK_INJECTION_ENABLE=1. |
+| `memory_free` | Free remote memory in target process (VirtualFreeEx wrapper). Win32 only. Requires JSHOOK_INJECTION_ENABLE=1. |
+| `memory_inject_shellcode` | Inject shellcode into target process. Win32 only. Methods: createremote (CreateRemoteThread) or ntcreatethread (NtCreateThreadEx). Requires JSHOOK_INJECTION_ENABLE=1. |
+| `memory_inject_dll` | Inject a DLL into target process. Win32 only. Modes: loadlibrary (LoadLibraryW injection) or manualmap (manual mapping). Requires JSHOOK_INJECTION_ENABLE=1. |
 | `memory_write_value` | Write a typed value to a memory address. Supports undo/redo via memory_write_history(action=undo\|redo). |
 | `memory_freeze` | Freeze or unfreeze a memory address. Freeze continuously writes a value to prevent changes; unfreeze stops it. |
 | `memory_dump` | Dump memory region as hex with ASCII column. Outputs a formatted hex dump similar to xxd. |
-| `memory_speedhack` | Hook time APIs (GetTickCount64/GetTickCount/QueryPerformanceCounter) to scale process time via an in-process SSE2 trampoline. Actions: apply (hook + set speed), set (adjust speed without re-hooking), restore (unhook and restore original functions). Speed range 0.01–100x; values outside this range are rejected to avoid destabilising the target. |
+| `memory_speedhack` | Hook time APIs (GetTickCount64/GetTickCount/QueryPerformanceCounter/QueryPerformanceFrequency/timeGetTime/GetSystemTimeAsFileTime) to scale process time via an in-process SSE2 trampoline. time via an in-process SSE2 trampoline. Actions: apply (hook + set speed), set (adjust speed without re-hooking), restore (unhook and restore original functions). Speed range 0.01–100x; values outside this range are rejected to avoid destabilising the target. |
 | `memory_write_history` | Undo or redo the last memory write operation. Pass pid to scope the operation to a specific process — per-PID undo prevents reverting an unrelated process's write when multiple processes are being edited concurrently. |
 | `memory_heap_enumerate` | Enumerate all heaps and heap blocks in a process via Toolhelp32 snapshot. Returns heap list with block counts, sizes, and overall statistics. |
 | `memory_heap_stats` | Get detailed heap statistics with size distribution buckets (0-64B, 64B-1KB, 1-64KB, 64KB-1MB, &gt;1MB), fragmentation ratio, and aggregate metrics. |
@@ -62,3 +66,9 @@ Memory analysis domain for native scans, pointer-chain discovery, structure infe
 | `memory_generate_signature` | Generate an update-resistant AOB (Array-of-Bytes) signature from bytes at a memory address. Detects relative offsets in CALL/JMP/LEA/Jcc instructions and replaces the displacement bytes with wildcards (??), making the signature survive minor code changes between updates. Uses byte-pattern heuristics — no Capstone dependency required. |
 | `memory_rtti_info` | Parse MSVC RTTI (Run-Time Type Information) at an object address. Reads vtable pointer, follows the Complete Object Locator chain, extracts class name, base classes, and class hierarchy descriptor. Equivalent to CE's "Find out what addresses this code accesses" for type discovery — quickly answer "what type is this object?" without a full structure analysis. Only works on MSVC x64 binaries with RTTI enabled. |
 | `memory_parse_dump` | Parse a Windows Minidump (.dmp) file and extract forensic information: loaded modules (base/size/name/timestamp), threads (ID/stack/context), memory ranges (64-bit or 32-bit), system info (OS/CPU), and exception records. Optionally resolve a list of addresses against the dump contents. Pure TS — cross-platform (can analyze Windows dumps on Linux/macOS). |
+| `memory_mono_detect` | Detect Mono or IL2CPP runtime in a target process. Returns runtime kind (mono/il2cpp), module name, pointer size, and root domain address if resolved. Works on Unity games and other Mono/.NET applications. |
+| `memory_mono_assemblies` | List Mono assemblies loaded in the root domain of a Unity/Mono process. Returns assembly name, address, and image address. Optionally filter by name substring. |
+| `memory_mono_classes` | List Mono classes in a specific assembly from a Unity/Mono process. Reads the MonoImage type definition table (MONO_TABLE_TYPEDEF) and resolves class names from the string heap. Optionally filter by namespace. |
+| `memory_mono_objects` | Find live Mono objects of a specific class in the managed heap. Resolves class vtable, then scans writable heap regions for vtable pointer matches. Returns object addresses with class name and estimated size. |
+| `memory_mono_fields` | Read field values from a Mono object at the given address. Resolves the class via vtable pointer, walks MonoClass fields, and decodes each field value with type-aware heuristics (int, float, string pointer detection). |
+| `memory_mono_methods` | Inspect method count for a Mono class in a Unity/Mono process. Full method name enumeration requires walking the MonoMethod table from MonoImage (not yet implemented — returns methodCount from the type definition table). |

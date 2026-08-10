@@ -21,7 +21,7 @@ In-process, dependency-free self-built ARM64 interpreter for emulating Android `
 - native-emulator + binary-instrument
 - native-emulator + dart-inspector
 
-## Full tool list (55)
+## Full tool list (56)
 
 | Tool | Description |
 | --- | --- |
@@ -80,3 +80,4 @@ In-process, dependency-free self-built ARM64 interpreter for emulating Android `
 | `nemu_scan_memory` | Scan emulated memory for a byte pattern (like Volatility). Searches a guest address range for an exact byte match using Boyer-Moore-Horspool. Returns a list of matched addresses. Skips unmapped regions silently — use nemu_mem_map to extend the scan range if needed. |
 | `nemu_xor_region` | XOR a region of emulated memory with a single-byte key. Returns the XOR result as base64. Use for quick decryption testing — XOR a buffer with a candidate key byte and inspect the preview without modifying guest state. Set dryRun=false to write the XOR result back into guest memory. |
 | `nemu_relay` | Connect to a remote native-emulator session via IPC relay. Proxies nemu operations through a named pipe (Windows) or Unix domain socket (Linux/macOS) with JSON-RPC over length-prefixed frames. Use to drive ARM64 nemu sessions on a Linux host from a Windows MCP server (or vice versa). |
+| `nemu_gdbserver` | GDB Remote Serial Protocol (RSP) stub over a user-provided TCP listener. This is a protocol-stub layer — you must provide your own TCP socket (e.g. netcat, a Python socket script, or custom bridge). The tool receives raw RSP packets and dispatches them to the emulator, returning RSP responses. Packet format: $data#checksum (RFC 5.1 GDB Remote Serial Protocol). Supported commands: ? (halt reason), g (read registers), G (write registers), m addr,len (read memory), M addr,len:data (write memory), s (step), c (continue), Z0,z0 (set/clear software breakpoint). Actions: packet (process a single RSP packet — returns the response for the caller to send back over the wire), status (report session readiness). This is a CE 7.6+ / x64dbg gdbserver-compatible minimal implementation. |

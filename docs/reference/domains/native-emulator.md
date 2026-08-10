@@ -21,7 +21,7 @@
 - native-emulator + binary-instrument
 - native-emulator + dart-inspector
 
-## 工具清单（55）
+## 工具清单（56）
 
 | 工具 | 说明 |
 | --- | --- |
@@ -80,3 +80,4 @@
 | `nemu_scan_memory` | 在仿真内存中扫描字节模式（类似 Volatility）。使用 Boyer-Moore-Horspool 算法在 guest 地址范围内搜索精确字节匹配。返回匹配地址列表。静默跳过未映射区域——如需扩展扫描范围请先调用 nemu_mem_map。 |
 | `nemu_xor_region` | 用单字节密钥对仿真内存区域进行 XOR 运算。返回 XOR 结果的 base64。用于快速解密测试——用候选密钥字节 XOR 缓冲区并检查预览，不修改 guest 状态。设 dryRun=false 将 XOR 结果写回 guest 内存。 |
 | `nemu_relay` | 待补充中文：Connect to a remote native-emulator session via IPC relay. Proxies nemu operations through a named pipe (Windows) or Unix domain socket (Linux/macOS) with JSON-RPC over length-prefixed frames. Use to drive ARM64 nemu sessions on a Linux host from a Windows MCP server (or vice versa). |
+| `nemu_gdbserver` | 待补充中文：GDB Remote Serial Protocol (RSP) stub over a user-provided TCP listener. This is a protocol-stub layer — you must provide your own TCP socket (e.g. netcat, a Python socket script, or custom bridge). The tool receives raw RSP packets and dispatches them to the emulator, returning RSP responses. Packet format: $data#checksum (RFC 5.1 GDB Remote Serial Protocol). Supported commands: ? (halt reason), g (read registers), G (write registers), m addr,len (read memory), M addr,len:data (write memory), s (step), c (continue), Z0,z0 (set/clear software breakpoint). Actions: packet (process a single RSP packet — returns the response for the caller to send back over the wire), status (report session readiness). This is a CE 7.6+ / x64dbg gdbserver-compatible minimal implementation. |

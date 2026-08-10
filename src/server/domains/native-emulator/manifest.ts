@@ -73,6 +73,7 @@ const registrations = defineMethodRegistrations<H, (typeof nativeEmulatorTools)[
     { tool: 'nemu_scan_memory', method: 'handleScanMemory' },
     { tool: 'nemu_xor_region', method: 'handleXorRegion' },
     { tool: 'nemu_relay', method: 'handleRelay' },
+    { tool: 'nemu_gdbserver', method: 'handleGdbserver' },
   ],
 });
 

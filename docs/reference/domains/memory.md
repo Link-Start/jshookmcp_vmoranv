@@ -20,7 +20,7 @@
 - memory + debugger
 - memory + workflow
 
-## 工具清单（38）
+## 工具清单（48）
 
 | 工具 | 说明 |
 | --- | --- |
@@ -41,6 +41,10 @@
 | `memory_patch_nop` | 将指定地址处的指令改写为 NOP（0x90）。常用于禁用检查逻辑或跳转指令。 |
 | `memory_patch_undo` | 撤销之前的补丁，并恢复原始字节内容。 |
 | `memory_code_caves` | 在已加载模块的可执行节中查找 code cave（连续的 0x00 或 0xCC 区段），并按大小优先返回。 |
+| `memory_allocate` | 待补充中文：Allocate executable memory in target process (VirtualAllocEx wrapper). Win32 only. Requires JSHOOK_INJECTION_ENABLE=1. |
+| `memory_free` | 待补充中文：Free remote memory in target process (VirtualFreeEx wrapper). Win32 only. Requires JSHOOK_INJECTION_ENABLE=1. |
+| `memory_inject_shellcode` | 待补充中文：Inject shellcode into target process. Win32 only. Methods: createremote (CreateRemoteThread) or ntcreatethread (NtCreateThreadEx). Requires JSHOOK_INJECTION_ENABLE=1. |
+| `memory_inject_dll` | 待补充中文：Inject a DLL into target process. Win32 only. Modes: loadlibrary (LoadLibraryW injection) or manualmap (manual mapping). Requires JSHOOK_INJECTION_ENABLE=1. |
 | `memory_write_value` | 向指定内存地址写入一个带类型的值，并支持通过 memory_write_history 的 undo/redo 动作进行撤销与重做。 |
 | `memory_freeze` | 将某个地址冻结为固定值。工具会按设定间隔持续回写该值，防止它被其他逻辑修改。 |
 | `memory_dump` | 以十六进制 + ASCII 列的形式导出一段内存区域，输出风格类似 xxd 的格式化十六进制转储。 |
@@ -62,3 +66,9 @@
 | `memory_generate_signature` | 待补充中文：Generate an update-resistant AOB (Array-of-Bytes) signature from bytes at a memory address. Detects relative offsets in CALL/JMP/LEA/Jcc instructions and replaces the displacement bytes with wildcards (??), making the signature survive minor code changes between updates. Uses byte-pattern heuristics — no Capstone dependency required. |
 | `memory_rtti_info` | 待补充中文：Parse MSVC RTTI (Run-Time Type Information) at an object address. Reads vtable pointer, follows the Complete Object Locator chain, extracts class name, base classes, and class hierarchy descriptor. Equivalent to CE's "Find out what addresses this code accesses" for type discovery — quickly answer "what type is this object?" without a full structure analysis. Only works on MSVC x64 binaries with RTTI enabled. |
 | `memory_parse_dump` | 解析 Windows Minidump（.dmp）文件并提取取证信息：已加载模块（基址/大小/名称/时间戳）、线程（ID/栈/上下文）、内存范围（64 位或 32 位）、系统信息（OS/CPU）和异常记录。可选解析地址列表对照 dump 内容。纯 TS 实现——跨平台（可在 Linux/macOS 上分析 Windows dump）。 |
+| `memory_mono_detect` | 待补充中文：Detect Mono or IL2CPP runtime in a target process. Returns runtime kind (mono/il2cpp), module name, pointer size, and root domain address if resolved. Works on Unity games and other Mono/.NET applications. |
+| `memory_mono_assemblies` | 待补充中文：List Mono assemblies loaded in the root domain of a Unity/Mono process. Returns assembly name, address, and image address. Optionally filter by name substring. |
+| `memory_mono_classes` | 待补充中文：List Mono classes in a specific assembly from a Unity/Mono process. Reads the MonoImage type definition table (MONO_TABLE_TYPEDEF) and resolves class names from the string heap. Optionally filter by namespace. |
+| `memory_mono_objects` | 待补充中文：Find live Mono objects of a specific class in the managed heap. Resolves class vtable, then scans writable heap regions for vtable pointer matches. Returns object addresses with class name and estimated size. |
+| `memory_mono_fields` | 待补充中文：Read field values from a Mono object at the given address. Resolves the class via vtable pointer, walks MonoClass fields, and decodes each field value with type-aware heuristics (int, float, string pointer detection). |
+| `memory_mono_methods` | 待补充中文：Inspect method count for a Mono class in a Unity/Mono process. Full method name enumeration requires walking the MonoMethod table from MonoImage (not yet implemented — returns methodCount from the type definition table). |
