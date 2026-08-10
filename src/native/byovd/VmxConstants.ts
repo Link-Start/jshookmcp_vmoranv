@@ -19,6 +19,9 @@ export const IA32_VMX_BASIC = 0x480;
 /** Allowed 1-settings for pin-based VM-execution controls. */
 export const IA32_VMX_PINBASED_CTLS = 0x481;
 
+/** Allowed 1-settings for pin-based VM-execution controls (true). */
+export const IA32_VMX_TRUE_PINBASED_CTLS = 0x48d;
+
 /** Allowed 1-settings for primary processor-based VM-execution controls. */
 export const IA32_VMX_PROCBASED_CTLS = 0x482;
 
@@ -65,7 +68,7 @@ export const IA32_VMX_TRUE_PROCBASED_CTLS2 = 0x491;
 export const IA32_VMX_EPT_VPID_CAP = 0x48c;
 
 /** Allowed 1-settings for VM-function controls (if VM-functions are supported). */
-export const IA32_VMX_VMFUNC = 0x491;
+export const IA32_VMX_VMFUNC = 0x492;
 
 // ── VMX Basic MSR Bit Layout (IA32_VMX_BASIC) ──
 
@@ -758,3 +761,267 @@ export const EPT_ENTRY_SIZE = 8;
 
 /** Total size of one EPT table page (512 entries * 8 bytes). */
 export const EPT_TABLE_SIZE = 4096;
+
+// ── VMCS Field Encoding (Intel SDM Vol 3C, Appendix B) ──
+
+/**
+ * VMCS field encoding format (32-bit):
+ *   Bit 0:    Access type — 0=full, 1=high (for 64-bit fields)
+ *   Bits 9:1: Index — distinguishes fields within a group
+ *   Bits 11:10: Type — 0=control, 1=VM-exit info (RO), 2=guest-state, 3=host-state
+ *   Bits 14:13: Width — 0=16-bit, 1=64-bit, 2=32-bit, 3=natural-width
+ *
+ * VMREAD/VMWRITE encode these fields into a 32-bit value.
+ */
+
+/** VMCS field width encodings. */
+export const VMCS_WIDTH_16BIT = 0;
+export const VMCS_WIDTH_64BIT = 1;
+export const VMCS_WIDTH_32BIT = 2;
+export const VMCS_WIDTH_NATURAL = 3;
+
+/** VMCS field type encodings. */
+export const VMCS_TYPE_CONTROL = 0;
+export const VMCS_TYPE_VMEXIT_INFO = 1;
+export const VMCS_TYPE_GUEST_STATE = 2;
+export const VMCS_TYPE_HOST_STATE = 3;
+
+/**
+ * Encode a VMCS field for VMWRITE/VMREAD instructions.
+ *
+ * @param width  Field width (0=16-bit, 1=64-bit, 2=32-bit, 3=natural).
+ * @param type   Field type (0=control, 1=VM-exit info, 2=guest-state, 3=host-state).
+ * @param index  Field index (0-511, distinguishes fields within a type/width group).
+ * @param access Access type — 0=full, 1=high (only meaningful for 64-bit fields).
+ * @returns The 32-bit VMCS field encoding.
+ */
+export function encodeVmcsField(
+  width: number,
+  type: number,
+  index: number,
+  access: number = 0,
+): number {
+  return ((width & 0x3) << 13) | ((type & 0x3) << 10) | ((index & 0x1ff) << 1) | (access & 0x1);
+}
+
+/**
+ * Decode a 32-bit VMCS field encoding into its components.
+ *
+ * @returns Object with width, type, index, access, and a human-readable label.
+ */
+export function decodeVmcsField(encoding: number): {
+  width: number;
+  widthName: string;
+  type: number;
+  typeName: string;
+  index: number;
+  access: number;
+  isHigh: boolean;
+} {
+  const access = encoding & 0x1;
+  const index = (encoding >> 1) & 0x1ff;
+  const type = (encoding >> 10) & 0x3;
+  const width = (encoding >> 13) & 0x3;
+
+  const widthNames = ['16-bit', '64-bit', '32-bit', 'natural-width'];
+  const typeNames = ['control', 'VM-exit info', 'guest-state', 'host-state'];
+
+  return {
+    width,
+    widthName: widthNames[width] ?? 'unknown',
+    type,
+    typeName: typeNames[type] ?? 'unknown',
+    index,
+    access,
+    isHigh: access === 1,
+  };
+}
+
+/**
+ * Known VMCS field encodings for programmatic field iteration.
+ *
+ * Each entry is {encoding, name} — used by the capability report to
+ * list fields that the kernel component must write.
+ */
+export const VMCS_FIELD_CATALOG: ReadonlyArray<{
+  encoding: number;
+  name: string;
+  description: string;
+}> = [
+  // 16-bit control
+  { encoding: 0x0000, name: 'VPID', description: 'Virtual Processor Identifier' },
+  {
+    encoding: 0x0002,
+    name: 'POSTED_INT_NOTIFICATION_VECTOR',
+    description: 'Posted-interrupt notification vector',
+  },
+  { encoding: 0x0004, name: 'EPTP_INDEX', description: 'EPTP index' },
+  // 16-bit guest-state
+  { encoding: 0x0800, name: 'GUEST_ES_SELECTOR', description: 'Guest ES selector' },
+  { encoding: 0x0802, name: 'GUEST_CS_SELECTOR', description: 'Guest CS selector' },
+  { encoding: 0x0804, name: 'GUEST_SS_SELECTOR', description: 'Guest SS selector' },
+  { encoding: 0x0806, name: 'GUEST_DS_SELECTOR', description: 'Guest DS selector' },
+  { encoding: 0x0808, name: 'GUEST_FS_SELECTOR', description: 'Guest FS selector' },
+  { encoding: 0x080a, name: 'GUEST_GS_SELECTOR', description: 'Guest GS selector' },
+  { encoding: 0x080c, name: 'GUEST_LDTR_SELECTOR', description: 'Guest LDTR selector' },
+  { encoding: 0x080e, name: 'GUEST_TR_SELECTOR', description: 'Guest TR selector' },
+  // 16-bit host-state
+  { encoding: 0x0c00, name: 'HOST_ES_SELECTOR', description: 'Host ES selector' },
+  { encoding: 0x0c02, name: 'HOST_CS_SELECTOR', description: 'Host CS selector' },
+  { encoding: 0x0c04, name: 'HOST_SS_SELECTOR', description: 'Host SS selector' },
+  { encoding: 0x0c06, name: 'HOST_DS_SELECTOR', description: 'Host DS selector' },
+  { encoding: 0x0c08, name: 'HOST_FS_SELECTOR', description: 'Host FS selector' },
+  { encoding: 0x0c0a, name: 'HOST_GS_SELECTOR', description: 'Host GS selector' },
+  { encoding: 0x0c0c, name: 'HOST_TR_SELECTOR', description: 'Host TR selector' },
+  // 64-bit control
+  { encoding: 0x2000, name: 'IO_BITMAP_A', description: 'I/O bitmap A address' },
+  { encoding: 0x2002, name: 'IO_BITMAP_B', description: 'I/O bitmap B address' },
+  { encoding: 0x2004, name: 'MSR_BITMAP', description: 'MSR bitmap address' },
+  { encoding: 0x2006, name: 'VMEXIT_MSR_STORE', description: 'VM-exit MSR store address' },
+  { encoding: 0x2008, name: 'VMEXIT_MSR_LOAD', description: 'VM-exit MSR load address' },
+  { encoding: 0x200a, name: 'VMENTRY_MSR_LOAD', description: 'VM-entry MSR load address' },
+  { encoding: 0x2010, name: 'TSC_OFFSET', description: 'TSC offset' },
+  { encoding: 0x201a, name: 'EPT_POINTER', description: 'Extended Page Table Pointer' },
+  // 64-bit guest-state
+  { encoding: 0x2802, name: 'GUEST_DEBUGCTL', description: 'Guest IA32_DEBUGCTL' },
+  { encoding: 0x2804, name: 'GUEST_PAT', description: 'Guest IA32_PAT' },
+  { encoding: 0x2806, name: 'GUEST_EFER', description: 'Guest IA32_EFER' },
+  // 64-bit host-state
+  { encoding: 0x2c00, name: 'HOST_PAT', description: 'Host IA32_PAT' },
+  { encoding: 0x2c02, name: 'HOST_EFER', description: 'Host IA32_EFER' },
+  // 32-bit control
+  { encoding: 0x4000, name: 'PIN_BASED_CTLS', description: 'Pin-based VM-execution controls' },
+  {
+    encoding: 0x4002,
+    name: 'PROC_BASED_CTLS',
+    description: 'Primary processor-based VM-execution controls',
+  },
+  { encoding: 0x4004, name: 'EXCEPTION_BITMAP', description: 'Exception bitmap' },
+  { encoding: 0x400c, name: 'VM_EXIT_CTLS', description: 'VM-exit controls' },
+  { encoding: 0x4012, name: 'VM_ENTRY_CTLS', description: 'VM-entry controls' },
+  {
+    encoding: 0x401e,
+    name: 'SECONDARY_PROC_BASED_CTLS',
+    description: 'Secondary processor-based VM-execution controls',
+  },
+  // 32-bit guest-state
+  { encoding: 0x4824, name: 'GUEST_INTERRUPTIBILITY', description: 'Guest interruptibility state' },
+  { encoding: 0x4826, name: 'GUEST_ACTIVITY_STATE', description: 'Guest activity state' },
+  { encoding: 0x482a, name: 'GUEST_SYSENTER_CS', description: 'Guest IA32_SYSENTER_CS' },
+  // 32-bit host-state
+  { encoding: 0x4c00, name: 'HOST_SYSENTER_CS', description: 'Host IA32_SYSENTER_CS' },
+  // Natural-width control
+  { encoding: 0x6000, name: 'CR0_GUEST_HOST_MASK', description: 'CR0 guest/host mask' },
+  { encoding: 0x6002, name: 'CR4_GUEST_HOST_MASK', description: 'CR4 guest/host mask' },
+  { encoding: 0x6004, name: 'CR0_READ_SHADOW', description: 'CR0 read shadow' },
+  { encoding: 0x6006, name: 'CR4_READ_SHADOW', description: 'CR4 read shadow' },
+  // Natural-width guest-state
+  { encoding: 0x6800, name: 'GUEST_CR0', description: 'Guest CR0' },
+  { encoding: 0x6802, name: 'GUEST_CR3', description: 'Guest CR3' },
+  { encoding: 0x6804, name: 'GUEST_CR4', description: 'Guest CR4' },
+  { encoding: 0x680e, name: 'GUEST_FS_BASE', description: 'Guest FS base' },
+  { encoding: 0x6810, name: 'GUEST_GS_BASE', description: 'Guest GS base' },
+  { encoding: 0x681a, name: 'GUEST_DR7', description: 'Guest DR7' },
+  { encoding: 0x681c, name: 'GUEST_RSP', description: 'Guest RSP' },
+  { encoding: 0x681e, name: 'GUEST_RIP', description: 'Guest RIP' },
+  { encoding: 0x6820, name: 'GUEST_RFLAGS', description: 'Guest RFLAGS' },
+  { encoding: 0x6824, name: 'GUEST_SYSENTER_ESP', description: 'Guest IA32_SYSENTER_ESP' },
+  { encoding: 0x6826, name: 'GUEST_SYSENTER_EIP', description: 'Guest IA32_SYSENTER_EIP' },
+  // Natural-width host-state
+  { encoding: 0x6c00, name: 'HOST_CR0', description: 'Host CR0' },
+  { encoding: 0x6c02, name: 'HOST_CR3', description: 'Host CR3' },
+  { encoding: 0x6c04, name: 'HOST_CR4', description: 'Host CR4' },
+  { encoding: 0x6c06, name: 'HOST_FS_BASE', description: 'Host FS base' },
+  { encoding: 0x6c08, name: 'HOST_GS_BASE', description: 'Host GS base' },
+  { encoding: 0x6c0a, name: 'HOST_TR_BASE', description: 'Host TR base' },
+  { encoding: 0x6c0c, name: 'HOST_GDTR_BASE', description: 'Host GDTR base' },
+  { encoding: 0x6c0e, name: 'HOST_IDTR_BASE', description: 'Host IDTR base' },
+  { encoding: 0x6c10, name: 'HOST_SYSENTER_ESP', description: 'Host IA32_SYSENTER_ESP' },
+  { encoding: 0x6c12, name: 'HOST_SYSENTER_EIP', description: 'Host IA32_SYSENTER_EIP' },
+  { encoding: 0x6c14, name: 'HOST_RSP', description: 'Host RSP' },
+  { encoding: 0x6c16, name: 'HOST_RIP', description: 'Host RIP' },
+  // Read-only VM-exit info
+  {
+    encoding: 0x2400,
+    name: 'GUEST_PHYSICAL_ADDRESS',
+    description: 'Guest-physical address (EPT violation)',
+  },
+  { encoding: 0x4402, name: 'EXIT_REASON', description: 'VM-exit reason' },
+  { encoding: 0x6400, name: 'EXIT_QUALIFICATION', description: 'VM-exit qualification' },
+  { encoding: 0x640a, name: 'GUEST_LINEAR_ADDRESS', description: 'Guest-linear address' },
+];
+
+// ── MSR Indices (syscall / control registers) ──
+
+/** IA32_FEATURE_CONTROL — VMX lock bit (bit 0 = lock, bit 2 = VMXON in SMX). */
+export const IA32_FEATURE_CONTROL = 0x3a;
+
+/** IA32_SYSENTER_CS — system call CS (0x174). */
+export const IA32_SYSENTER_CS = 0x174;
+
+/** IA32_SYSENTER_ESP — system call ESP (0x175). */
+export const IA32_SYSENTER_ESP = 0x175;
+
+/** IA32_SYSENTER_EIP — system call EIP (0x176). */
+export const IA32_SYSENTER_EIP = 0x176;
+
+/** IA32_DEBUGCTL — debug control (LBR, BTF, etc.). */
+export const IA32_DEBUGCTL = 0x1d9;
+
+/** IA32_EFER — Extended Feature Enable Register. */
+export const IA32_EFER = 0xc0000080;
+
+/** IA32_STAR — SYSCALL target CS/SS (legacy mode). */
+export const IA32_STAR = 0xc0000081;
+
+/** IA32_LSTAR — 64-bit SYSCALL target RIP. */
+export const IA32_LSTAR = 0xc0000082;
+
+/** IA32_CSTAR — SYSCALL target RIP in compatibility mode. */
+export const IA32_CSTAR = 0xc0000083;
+
+/** IA32_FMASK — RFLAGS mask for SYSCALL. */
+export const IA32_FMASK = 0xc0000084;
+
+/** IA32_FS_BASE — FS segment base (0xC0000100). */
+export const IA32_FS_BASE = 0xc0000100;
+
+/** IA32_GS_BASE — GS segment base (0xC0000101). */
+export const IA32_GS_BASE = 0xc0000101;
+
+/** IA32_KERNEL_GS_BASE — swapgs target base (0xC0000102). */
+export const IA32_KERNEL_GS_BASE = 0xc0000102;
+
+/** IA32_PAT — Page Attribute Table (0x277). */
+export const IA32_PAT = 0x277;
+
+/** IA32_MTRR_CAP — MTRR capabilities (0xFE). */
+export const IA32_MTRR_CAP = 0xfe;
+
+/** IA32_PERF_GLOBAL_CTRL — performance counter global control (0x38F). */
+export const IA32_PERF_GLOBAL_CTRL = 0x38f;
+
+// ── Feature Control MSR Bits ──
+
+/** IA32_FEATURE_CONTROL[0] — Lock bit. MSR is locked when set. */
+export const FEATURE_CONTROL_LOCK = 1 << 0;
+
+/** IA32_FEATURE_CONTROL[2] — Enable VMXON in SMX mode. */
+export const FEATURE_CONTROL_VMXON_IN_SMX = 1 << 2;
+
+/** IA32_FEATURE_CONTROL[1] — Enable VMXON outside SMX. */
+export const FEATURE_CONTROL_VMXON_OUTSIDE_SMX = 1 << 1;
+
+// ── EFER Bits ──
+
+/** EFER.SCE — System Call Extensions enable (bit 0). */
+export const EFER_SCE = 1 << 0;
+
+/** EFER.LME — Long Mode Enable (bit 8). */
+export const EFER_LME = 1 << 8;
+
+/** EFER.LMA — Long Mode Active (bit 10). */
+export const EFER_LMA = 1 << 10;
+
+/** EFER.NXE — No-Execute Enable (bit 11). */
+export const EFER_NXE = 1 << 11;
