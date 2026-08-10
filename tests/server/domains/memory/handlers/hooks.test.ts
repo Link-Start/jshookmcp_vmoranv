@@ -54,11 +54,17 @@ describe('HookHandlers', () => {
       const response = await handlers.handleBreakpointSet(dummyArgs);
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);
-      expect(mockbpEngine.setBreakpoint).toHaveBeenCalledWith(1234, '0x7FF612340000', 'read', 4);
+      expect(mockbpEngine.setBreakpoint).toHaveBeenCalledWith(
+        1234,
+        '0x7FF612340000',
+        'read',
+        4,
+        undefined,
+      );
     });
 
     it('throws when bpEngine is null (unsupported platform)', async () => {
-      handlers = new HookHandlers(null, null, mockinjector, undefined, undefined, auditTrail);
+      handlers = new HookHandlers(null, null, null, mockinjector, undefined, undefined, auditTrail);
       mockbpEngine.setBreakpoint = vi.fn();
       const response = await handlers.handleBreakpointSet(dummyArgs);
       const parsed = JSON.parse((response.content[0] as any).text);
@@ -372,6 +378,7 @@ describe('HookHandlers', () => {
       handlers = new HookHandlers(
         mockbpEngine,
         mockVehEngine,
+        null,
         mockinjector,
         undefined,
         undefined,
@@ -381,7 +388,13 @@ describe('HookHandlers', () => {
       const response = await handlers.handleBreakpointSet(vehArgs);
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);
-      expect(mockVehEngine.setBreakpoint).toHaveBeenCalledWith(1234, '0x7FF612340000', 'read', 4);
+      expect(mockVehEngine.setBreakpoint).toHaveBeenCalledWith(
+        1234,
+        '0x7FF612340000',
+        'read',
+        4,
+        undefined,
+      );
       expect(parsed.mode).toBe('veh');
     });
 
@@ -390,6 +403,7 @@ describe('HookHandlers', () => {
       handlers = new HookHandlers(
         mockbpEngine,
         mockVehEngine,
+        null,
         mockinjector,
         undefined,
         undefined,
@@ -410,6 +424,7 @@ describe('HookHandlers', () => {
       handlers = new HookHandlers(
         mockbpEngine,
         mockVehEngine,
+        null,
         mockinjector,
         undefined,
         undefined,
@@ -429,6 +444,7 @@ describe('HookHandlers', () => {
       handlers = new HookHandlers(
         mockbpEngine,
         mockVehEngine,
+        null,
         mockinjector,
         undefined,
         undefined,
@@ -443,7 +459,7 @@ describe('HookHandlers', () => {
     });
 
     it('throws when vehEngine is null but debuggerMode=veh requested', async () => {
-      handlers = new HookHandlers(null, null, mockinjector, undefined, undefined, auditTrail);
+      handlers = new HookHandlers(null, null, null, mockinjector, undefined, undefined, auditTrail);
       const response = await handlers.handleBreakpointSet({
         pid: 1234,
         address: '0x1',
@@ -462,6 +478,7 @@ describe('HookHandlers', () => {
       handlers = new HookHandlers(
         mockbpEngine,
         mockVehEngine,
+        null,
         mockinjector,
         undefined,
         undefined,
