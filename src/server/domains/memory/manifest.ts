@@ -163,6 +163,9 @@ const WIN32_ONLY_TOOLS = new Set([
   'memory_free',
   'memory_inject_shellcode',
   'memory_inject_dll',
+  'memory_handle_enum',
+  // Call stack walking — Win32 kernel32/dbghelp koffi
+  'memory_call_stack',
 ]);
 
 // All tool registrations — then filtered by platform
@@ -283,6 +286,16 @@ const allRegistrations = [
     tool: toolByName('memory_write_value'),
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleWriteValue(a)),
+  },
+  {
+    tool: toolByName('memory_batch_edit'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleBatchEdit(a)),
+  },
+  {
+    tool: toolByName('memory_watch'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleWatch(a)),
   },
   {
     tool: toolByName('memory_freeze'),
@@ -423,6 +436,58 @@ const allRegistrations = [
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleMonoMethods(a)),
   },
+  // ── Handle Enumeration (Win32-only) ──
+  {
+    tool: toolByName('memory_handle_enum'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleHandleEnum(a)),
+  },
+  // ── Memory Protection (cross-platform) ──
+  {
+    tool: toolByName('memory_protect'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleProtect(a)),
+  },
+  // ── Region Comparison (cross-platform) ──
+  {
+    tool: toolByName('memory_region_compare'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleRegionCompare(a)),
+  },
+  // ── Bookmarks (cross-platform) ──
+  {
+    tool: toolByName('memory_bookmark'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleBookmarkDispatch(a)),
+  },
+  // ── Custom Scan Types (CE parity) ──
+  {
+    tool: toolByName('memory_register_type'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleRegisterType(a)),
+  },
+  {
+    tool: toolByName('memory_list_types'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleListTypes(a)),
+  },
+  {
+    tool: toolByName('memory_unregister_type'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleUnregisterType(a)),
+  },
+  // ── Call Stack View (Win32-only) ──
+  {
+    tool: toolByName('memory_call_stack'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleCallStack(a)),
+  },
+  // ── Process Suspend / Resume (cross-platform) ──
+  {
+    tool: toolByName('memory_process_control'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleProcessControl(a)),
+  },
 ] as const;
 
 // Filter: on non-Windows platforms, exclude Win32-only tools
@@ -497,6 +562,8 @@ const manifest: DomainManifest<typeof DEP_KEY, H, typeof DOMAIN> = {
           ]
         : []),
       'memory_write_history',
+      'memory_batch_edit',
+      'memory_watch',
     ],
     hint: IS_WIN32
       ? 'Memory domain: scan → narrow → pointer chain → structure | breakpoint trace → patch/NOP → freeze ' +

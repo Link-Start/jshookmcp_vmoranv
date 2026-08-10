@@ -98,7 +98,7 @@ describe('ScanHandlers', () => {
 
   describe('handleNextScan', () => {
     it('returns success response on happy path', async () => {
-      mockscanner.nextScan = vi.fn().mockReturnValue({ totalMatches: 0, results: [] });
+      mockscanner.nextScan = vi.fn().mockReturnValue({ totalMatches: 0, addresses: [] });
 
       const response = await handlers.handleNextScan(dummyArgs);
       const parsed = JSON.parse((response.content[0] as any).text);
@@ -141,6 +141,41 @@ describe('ScanHandlers', () => {
       expect(parsed.success).toBe(false);
       expect(parsed.error).toContain('Invalid mode');
       expect(mockscanner.nextScan).not.toHaveBeenCalled();
+    });
+
+    it('normalizes not_equal_to to not_equal for the native scanner', async () => {
+      mockscanner.nextScan = vi.fn().mockReturnValue({ totalMatches: 5, addresses: [] });
+
+      const response = await handlers.handleNextScan({
+        sessionId: 'test-session',
+        mode: 'not_equal_to',
+        value: '100',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(mockscanner.nextScan).toHaveBeenCalledWith(
+        'test-session',
+        'not_equal',
+        '100',
+        undefined,
+        undefined,
+        undefined,
+      );
+    });
+
+    it('skips excludeValues post-filter when addresses array is empty', async () => {
+      mockscanner.nextScan = vi.fn().mockReturnValue({ totalMatches: 0, addresses: [] });
+
+      const response = await handlers.handleNextScan({
+        sessionId: 'test-session',
+        mode: 'exact',
+        value: '100',
+        excludeValues: ['aabb'],
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      // excludeValues is a no-op when addresses are empty
+      expect(parsed.totalMatches).toBe(0);
     });
   });
 
@@ -426,6 +461,151 @@ describe('ScanHandlers', () => {
       expect(parsed.results.length).toBe(10);
       expect(parsed.truncated).toBe(true);
       expect(parsed.totalFound).toBe(100);
+    });
+  });
+
+  describe('Encrypted value search (GameGuardian parity)', () => {
+    it('returns encryptedAddresses when encrypted=true with int32', async () => {
+      mockscanner.firstScan = vi
+        .fn()
+        .mockResolvedValueOnce({
+          totalMatches: 1,
+          sessionId: 's1',
+          addresses: ['0x7FF612340010'],
+          matchCount: 1,
+          scanNumber: 1,
+          truncated: false,
+          elapsed: '2ms',
+        })
+        .mockResolvedValueOnce({
+          totalMatches: 1,
+          sessionId: 's2',
+          addresses: ['0x7FF612340020'],
+          matchCount: 1,
+          scanNumber: 1,
+          truncated: false,
+          elapsed: '1ms',
+        });
+
+      const response = await handlers.handleFirstScan({
+        pid: 1234,
+        value: '100',
+        valueType: 'int32',
+        encrypted: true,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.encryptedScan).toBe(true);
+      expect(parsed.encryptedAddresses).toEqual(['0x7FF612340020']);
+      expect(parsed.xorKey).toBe(0xff);
+    });
+
+    it('skips encrypted scan for float type (not supported)', async () => {
+      mockscanner.firstScan = vi.fn().mockResolvedValue({
+        totalMatches: 3,
+        sessionId: 's1',
+        addresses: ['0x1000', '0x2000', '0x3000'],
+        matchCount: 3,
+        scanNumber: 1,
+        truncated: false,
+        elapsed: '4ms',
+      });
+
+      const response = await handlers.handleFirstScan({
+        pid: 1234,
+        value: '3.14',
+        valueType: 'float',
+        encrypted: true,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      // encryptedAddresses should not be set for float
+      expect(parsed.encryptedAddresses).toBeUndefined();
+    });
+
+    it('uses custom xorKey parameter', async () => {
+      mockscanner.firstScan = vi
+        .fn()
+        .mockResolvedValueOnce({
+          totalMatches: 0,
+          sessionId: 's1',
+          addresses: [],
+          matchCount: 0,
+          scanNumber: 1,
+          truncated: false,
+          elapsed: '1ms',
+        })
+        .mockResolvedValueOnce({
+          totalMatches: 1,
+          sessionId: 's2',
+          addresses: ['0x5000'],
+          matchCount: 1,
+          scanNumber: 1,
+          truncated: false,
+          elapsed: '1ms',
+        });
+
+      const response = await handlers.handleFirstScan({
+        pid: 1234,
+        value: '42',
+        valueType: 'int32',
+        encrypted: true,
+        xorKey: 0xaa,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.xorKey).toBe(0xaa);
+      expect(parsed.encryptedAddresses).toEqual(['0x5000']);
+    });
+  });
+
+  describe('Custom scan types (CE parity)', () => {
+    it('registers and lists custom types', async () => {
+      const regResp = await handlers.handleRegisterType({
+        name: 'custom_hp',
+        size: 4,
+        encoding: 'int',
+        endian: 'le',
+      });
+      const regParsed = JSON.parse((regResp.content[0] as any).text);
+      expect(regParsed.success).toBe(true);
+      expect(regParsed.type.name).toBe('custom_hp');
+
+      const listResp = await handlers.handleListTypes({});
+      const listParsed = JSON.parse((listResp.content[0] as any).text);
+      expect(listParsed.success).toBe(true);
+      expect(listParsed.count).toBeGreaterThanOrEqual(1);
+      expect(listParsed.types.some((t: any) => t.name === 'custom_hp')).toBe(true);
+    });
+
+    it('unregisters a custom type', async () => {
+      await handlers.handleRegisterType({
+        name: 'tmp_type',
+        size: 2,
+        encoding: 'uint',
+      });
+
+      const unregResp = await handlers.handleUnregisterType({ name: 'tmp_type' });
+      const unregParsed = JSON.parse((unregResp.content[0] as any).text);
+      expect(unregParsed.success).toBe(true);
+      expect(unregParsed.name).toBe('tmp_type');
+    });
+
+    it('rejects duplicate type name', async () => {
+      await handlers.handleRegisterType({
+        name: 'dup_type',
+        size: 1,
+        encoding: 'hex',
+      });
+
+      const dupResp = await handlers.handleRegisterType({
+        name: 'dup_type',
+        size: 4,
+        encoding: 'int',
+      });
+      const dupParsed = JSON.parse((dupResp.content[0] as any).text);
+      expect(dupParsed.success).toBe(false);
+      expect(dupParsed.error).toContain('already registered');
     });
   });
 });

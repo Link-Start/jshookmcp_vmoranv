@@ -45,6 +45,11 @@ import { RegionHandlers } from './handlers/region-enumerate';
 import { MinidumpHandlers } from './handlers/minidump-parse';
 import { MonoHandlers } from './handlers/mono';
 import { MemoryAuditTrail } from '@modules/process/memory/AuditTrail';
+import { HandleEnumHandlers } from './handlers/handle-enum';
+import { ProtectHandlers } from './handlers/protect';
+import { RegionCompareHandlers } from './handlers/region-compare';
+import { BookmarkHandlers } from './handlers/bookmark';
+
 import { logger } from '@utils/logger';
 
 export class MemoryScanHandlers {
@@ -59,6 +64,11 @@ export class MemoryScanHandlers {
   private readonly findAccesses: FindAccessesHandlers;
   private readonly minidump: MinidumpHandlers;
   private readonly mono: MonoHandlers;
+  private readonly handleEnum: HandleEnumHandlers;
+  private readonly protect: ProtectHandlers;
+  private readonly regionCompare: RegionCompareHandlers;
+  private readonly bookmarks: BookmarkHandlers;
+
   /** Shared audit trail for destructive operations (write/freeze/patch). */
   readonly auditTrail = new MemoryAuditTrail();
 
@@ -113,6 +123,10 @@ export class MemoryScanHandlers {
     );
     this.minidump = new MinidumpHandlers();
     this.mono = new MonoHandlers(processManager, ctx);
+    this.handleEnum = new HandleEnumHandlers(processManager, ctx);
+    this.protect = new ProtectHandlers(processManager, ctx, this.auditTrail);
+    this.regionCompare = new RegionCompareHandlers(processManager, ctx);
+    this.bookmarks = new BookmarkHandlers(processManager, ctx);
   }
 
   // ── Session ──
@@ -143,6 +157,9 @@ export class MemoryScanHandlers {
   handleGenerateSignature = (args: Record<string, unknown>) =>
     this.scans.handleGenerateSignature(args);
   handleSearchString = (args: Record<string, unknown>) => this.scans.handleSearchString(args);
+  handleRegisterType = (args: Record<string, unknown>) => this.scans.handleRegisterType(args);
+  handleListTypes = (args: Record<string, unknown>) => this.scans.handleListTypes(args);
+  handleUnregisterType = (args: Record<string, unknown>) => this.scans.handleUnregisterType(args);
 
   // ── Pointer Chain ──
 
@@ -219,6 +236,8 @@ export class MemoryScanHandlers {
   handleMemoryFree = (args: Record<string, unknown>) => this.hooks.handleMemoryFree(args);
   handleInjectShellcode = (args: Record<string, unknown>) => this.hooks.handleInjectShellcode(args);
   handleInjectDll = (args: Record<string, unknown>) => this.hooks.handleInjectDll(args);
+  handleCallStack = (args: Record<string, unknown>) => this.hooks.handleCallStack(args);
+  handleProcessControl = (args: Record<string, unknown>) => this.hooks.handleProcessControl(args);
 
   // ── Read / Write ──
 
@@ -238,6 +257,8 @@ export class MemoryScanHandlers {
   handleDump = (args: Record<string, unknown>) => this.readwrite.handleDump(args);
   handleWriteUndo = (args: Record<string, unknown>) => this.readwrite.handleWriteUndo(args);
   handleWriteRedo = (args: Record<string, unknown>) => this.readwrite.handleWriteRedo(args);
+  handleBatchEdit = (args: Record<string, unknown>) => this.readwrite.handleBatchEdit(args);
+  handleWatch = (args: Record<string, unknown>) => this.readwrite.handleWatch(args);
 
   // ── Integrity (speedhack + heap + PE + anti-cheat) ──
 
@@ -289,6 +310,24 @@ export class MemoryScanHandlers {
   handleMonoObjects = (args: Record<string, unknown>) => this.mono.handleMonoObjects(args);
   handleMonoFields = (args: Record<string, unknown>) => this.mono.handleMonoFields(args);
   handleMonoMethods = (args: Record<string, unknown>) => this.mono.handleMonoMethods(args);
+  // ── Handle Enumeration ──
+
+  handleHandleEnum = (args: Record<string, unknown>) => this.handleEnum.handleHandleEnum(args);
+
+  // ── Memory Protection ──
+
+  handleProtect = (args: Record<string, unknown>) => this.protect.handleProtect(args);
+
+  // ── Region Comparison ──
+
+  handleRegionCompare = (args: Record<string, unknown>) =>
+    this.regionCompare.handleRegionCompare(args);
+
+  // ── Bookmarks ──
+
+  handleBookmarkDispatch(args: Record<string, unknown>) {
+    return this.bookmarks.handleBookmarkDispatch(args);
+  }
 }
 
 // ── FindAccessesHandlers dependency adapters ──

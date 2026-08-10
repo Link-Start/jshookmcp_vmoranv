@@ -32,6 +32,7 @@ const ScanCompareModeOptions = [
   'increased_by',
   'decreased_by',
   'changed_by_variable',
+  'not_equal_to',
 ] as const;
 
 export const memoryScanToolDefinitions: readonly Tool[] = [
@@ -49,6 +50,17 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .number(
         'tolerance',
         'Float comparison tolerance (non-negative). Only valid with float/double valueType. Overrides default epsilon.',
+      )
+      .boolean(
+        'encrypted',
+        'Enable encrypted value search (GameGuardian parity). When true, also searches for value XOR xorKey. ' +
+          'Only applies to integer types (byte/int8/int16/uint16/int32/uint32/int64/uint64). ' +
+          'Encrypted matches are returned alongside normal matches with encrypted=true flag.',
+      )
+      .number(
+        'xorKey',
+        'XOR key for encrypted search (default: 0xFF). Only used when encrypted=true. ' +
+          'The key is applied byte-wise to the value representation.',
       )
       .prop('regionFilter', {
         type: 'object',
@@ -91,6 +103,13 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
         'tolerance',
         'Float comparison tolerance (non-negative). Only valid with float/double valueType. ' +
           'With delta modes: abs(diff - delta) <= tolerance.',
+      )
+      .array(
+        'excludeValues',
+        { type: 'string' },
+        'Hex byte strings to exclude from results (post-filter). Each value is compared against ' +
+          'the result value string. Useful for filtering out known noise values. Only applied when ' +
+          'mode is exact, not_equal, or not_equal_to.',
       )
       .requiredOpenWorld('sessionId', 'mode'),
   ),
@@ -666,10 +685,11 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   tool('memory_aob_scan', (t) =>
     t
       .desc(
-        'Array-of-Bytes scan with wildcard support. Search for byte patterns like ' +
-          '"48 8B ?? ?? 00 00" across readable memory. Accepts hex bytes (00-FF, optional 0x prefix) ' +
-          'and "??" wildcards. Case insensitive. Use regionFilter to restrict to specific modules or ' +
-          'skip system modules.',
+        'Array-of-Bytes scan with wildcard and operator support (CE 7.6 parity). Search for byte patterns like ' +
+          '"48 8B ?? ?? 00 00" across readable memory. Supports hex bytes (00-FF, optional 0x prefix), ' +
+          '"??" wildcards, and operators: >XX (greater than), <XX (less than), XX-YY (range inclusive). ' +
+          'Example: "48 8B >40 <80 00 00" matches bytes >0x40 at position 2 and <0x80 at position 3. ' +
+          'Case insensitive. Use regionFilter to restrict to specific modules or skip system modules.',
       )
       .number('pid', 'Target process ID (optional when a browser session is attached)')
       .string(
@@ -899,6 +919,192 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .string('assemblyName', 'Assembly name substring to match')
       .string('className', 'Class name substring to match within the assembly')
       .required('assemblyName', 'className')
+      .query(),
+  ),
+
+  // ── Batch Edit Tool ──
+  tool('memory_batch_edit', (t) =>
+    t
+      .desc(
+        'Write a value to ALL addresses in a scan session at once. Thin wrapper that iterates ' +
+          'through the session address list and calls writeValue for each. Capped at 1000 addresses ' +
+          'per call with a clear error when exceeded. Destructive — an audit trail entry is recorded ' +
+          'for each write. Equivalent to GameGuardian\'s gg.editAll() or Cheat Engine\'s "Edit All".',
+      )
+      .string('sessionId', 'Scan session ID whose addresses will all be written to')
+      .string('value', 'Value to write to all addresses (as string, e.g. "100", "3.14")')
+      .enum('valueType', [...ScanValueTypeOptions], 'Data type of the value to write')
+      .required('sessionId', 'value', 'valueType')
+      .destructive(),
+  ),
+
+  // ── Watch Value Change Tool ──
+  tool('memory_watch', (t) =>
+    t
+      .desc(
+        'Poll a memory address until its value changes (like scanmem\'s "watch" command). ' +
+          'Reads the current value, then polls at a configurable interval. Returns immediately with the ' +
+          'old value, new value, and elapsed time when a change is detected. If no change occurs within ' +
+          'the timeout, returns the unchanged value and a hint. Useful for "tell me when this variable ' +
+          'changes" workflows.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('address', 'Memory address to watch (hex, e.g. "0x7FF612340000")')
+      .enum('valueType', [...ScanValueTypeOptions], 'Data type of the value to watch')
+      .number(
+        'size',
+        'Number of bytes to read on each poll. Auto-detected for numeric types (1-8 bytes), ' +
+          'required for string/hex value types.',
+      )
+      .number('intervalMs', 'Poll interval in ms (default: 500, min: 100)')
+      .number('timeoutMs', 'Maximum time to wait in ms (default: 30000, max: 120000)')
+      .required('address', 'valueType')
+      .query(),
+  ),
+
+  // ── Custom Scan Types (CE parity) ──
+  tool('memory_register_type', (t) =>
+    t
+      .desc(
+        'Register a custom value type for memory scanning (Cheat Engine parity). ' +
+          'Registered types can be used as valueType in memory_first_scan, memory_unknown_scan, etc. ' +
+          'Types are session-scoped (live as long as the domain handler instance).',
+      )
+      .string(
+        'name',
+        'Unique type name (identifier, alphanumeric + underscore, e.g. "custom_hp", "vec3")',
+      )
+      .number('size', 'Byte size: 1, 2, 4, or 8')
+      .enum(
+        'encoding',
+        ['int', 'uint', 'float', 'hex'],
+        'How to interpret bytes: int (signed integer), uint (unsigned), float (IEEE 754), hex (raw bytes)',
+      )
+      .enum('endian', ['le', 'be'], 'Byte order: le (little-endian, default) or be (big-endian)', {
+        default: 'le',
+      })
+      .required('name', 'size', 'encoding')
+      .query(),
+  ),
+  tool('memory_list_types', (t) =>
+    t.desc('List all registered custom scan types.').required().query(),
+  ),
+  tool('memory_unregister_type', (t) =>
+    t
+      .desc('Remove a registered custom scan type by name.')
+      .string('name', 'Custom type name to unregister')
+      .required('name')
+      .query(),
+  ),
+
+  // Call Stack View Tool
+  tool('memory_call_stack', (t) =>
+    t
+      .desc(
+        'Walk the call stack of a target process thread using the x64 RBP frame-pointer chain. ' +
+          'Suspends the thread, reads the CONTEXT to get RBP/RSP/RIP, then follows the linked list ' +
+          'of [saved_RBP][return_address] frames via ReadProcessMemory. Resolves module names ' +
+          'using Toolhelp32 module snapshots. Returns an array of {frameIndex, returnAddress, ' +
+          'moduleName, functionName}. Equivalent to x64dbg\'s "standard" call stack mode. ' +
+          'Win32 (x64) only — requires Administrator privileges.',
+      )
+      .number('pid', 'Target process ID')
+      .number('threadId', 'Specific thread ID to walk (optional; defaults to the first thread)')
+      .number('maxFrames', 'Maximum frames to return (default: 128)')
+      .required('pid')
+      .query(),
+  ),
+
+  // Process Suspend / Resume Tool
+  tool('memory_process_control', (t) =>
+    t
+      .desc(
+        'Suspend or resume a target process for consistent memory snapshots. ' +
+          'Suspend freezes all threads (NtSuspendProcess on Win32, SIGSTOP on Linux, ' +
+          'task_suspend on macOS) so memory reads/scans see a consistent state. ' +
+          'Resume thaws all threads. Useful before memory_dump or memory_first_scan for ' +
+          'processes with actively-changing memory. Cross-platform.',
+      )
+      .enum('action', ['suspend', 'resume'], 'Operation to perform')
+      .number('pid', 'Target process ID')
+      .required('action', 'pid')
+      .query(),
+  ),
+
+  // ── Handle Enumeration Tool (Win32-only) ──
+  tool('memory_handle_enum', (t) =>
+    t
+      .desc(
+        'Enumerate all open handles in a target process via NtQuerySystemInformation. ' +
+          'Returns handle value, object type, access mask, and object name for each handle. ' +
+          'Filterable by type: File, Key, Process, Thread, Token, Section, etc. ' +
+          'Useful for finding handles to protected resources and analyzing process security posture. ' +
+          'Win32-only, admin required.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string(
+        'filterType',
+        'Filter handles by type name. Common types: File, Key, Process, Thread, Token, Section, Event, Mutant. ' +
+          'Omit for all types.',
+      )
+      .boolean(
+        'includeNames',
+        'Resolve object names (default: true). Slow on many File handles due to named-pipe hang risk.',
+        { default: true },
+      )
+      .number('maxResults', 'Maximum handles to return (default: 200, max: 1000)')
+      .required()
+      .query(),
+  ),
+
+  // ── Memory Protection Tool (cross-platform) ──
+  tool('memory_protect', (t) =>
+    t
+      .desc(
+        'Change memory page protection for a region in the target process. ' +
+          'Wraps VirtualProtectEx (Win32) / mprotect (Linux) / mach_vm_protect (macOS). ' +
+          'Protection: r (read-only), rw (read-write), rx (read-execute), rwx (all), none (no-access). ' +
+          'Returns the old protection. Destructive — audit trail recorded.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('address', 'Base address of the region (hex, e.g. "0x7FF612340000")')
+      .number('size', 'Region size in bytes (positive integer)')
+      .enum('protection', ['r', 'rw', 'rx', 'rwx', 'none'], 'New protection level')
+      .required('address', 'size', 'protection')
+      .destructive(),
+  ),
+
+  // ── Memory Region Comparison Tool (cross-platform) ──
+  tool('memory_region_compare', (t) =>
+    t
+      .desc(
+        'Compare two memory regions byte-by-byte and return a diff summary. ' +
+          "Equivalent to Cheat Engine's compareMemory(). Returns identical flag, diff count, " +
+          'and per-offset differences (byte1, byte2). Max compare size: 64KB.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('address1', 'First base address (hex, e.g. "0x7FF612340000")')
+      .string('address2', 'Second base address (hex, e.g. "0x7FF612340000")')
+      .number('size', 'Number of bytes to compare (default: 256, max: 65536)')
+      .required('address1', 'address2')
+      .query(),
+  ),
+
+  // ── Address Bookmark Tool (cross-platform) ──
+  tool('memory_bookmark', (t) =>
+    t
+      .desc(
+        'Manage address bookmarks for a process. Actions: add (bookmark an address with optional label and color), ' +
+          'remove (delete a bookmark), list (show all bookmarks for the PID), clear (remove all bookmarks for the PID). ' +
+          'Labels help categorize findings; colors use hex format (e.g. "#FF0000"). Bookmarks are scoped per PID. ' +
+          'For long-term persistence, export via state_board_io with namespace "memory_bookmarks:<pid>".',
+      )
+      .enum('action', ['add', 'remove', 'list', 'clear'], 'Bookmark operation')
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('address', 'Address to bookmark (hex, required for add/remove)')
+      .string('label', 'User-defined label for the bookmark (optional)')
+      .string('color', 'Hex color string for categorization (optional, e.g. "#FF0000")')
+      .required('action')
       .query(),
   ),
 ];
