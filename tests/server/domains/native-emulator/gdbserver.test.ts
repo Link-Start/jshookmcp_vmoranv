@@ -8,19 +8,16 @@ import { describe, it, expect } from 'vitest';
 import { NativeEmulatorHandlers } from '@server/domains/native-emulator/handlers.impl';
 
 describe('nemu_gdbserver', () => {
-  it('status returns protocol info and supported commands', async () => {
+  it('status returns server state when no session provided', async () => {
     const handlers = new NativeEmulatorHandlers();
     const result = await handlers.handleGdbserver({ action: 'status' });
 
     expect(result).toBeDefined();
-    // handleSafe wraps result
     const content = (result as { content?: Array<{ type: string; text: string }> }).content;
     if (content?.[0]) {
       const data = JSON.parse(content[0].text);
-      expect(data.protocol).toBe('gdb-rsp-v1');
-      expect(data.supportedCommands).toBeInstanceOf(Array);
-      expect(data.supportedCommands.length).toBeGreaterThanOrEqual(6);
-      expect(data.sessionReady).toBe(false);
+      expect(data.running).toBe(false);
+      expect(data.servers).toBeInstanceOf(Array);
     }
   });
 
