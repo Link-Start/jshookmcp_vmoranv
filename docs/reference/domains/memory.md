@@ -20,7 +20,7 @@
 - memory + debugger
 - memory + workflow
 
-## 工具清单（48）
+## 工具清单（59）
 
 | 工具 | 说明 |
 | --- | --- |
@@ -46,6 +46,8 @@
 | `memory_inject_shellcode` | 待补充中文：Inject shellcode into target process. Win32 only. Methods: createremote (CreateRemoteThread) or ntcreatethread (NtCreateThreadEx). Requires JSHOOK_INJECTION_ENABLE=1. |
 | `memory_inject_dll` | 待补充中文：Inject a DLL into target process. Win32 only. Modes: loadlibrary (LoadLibraryW injection) or manualmap (manual mapping). Requires JSHOOK_INJECTION_ENABLE=1. |
 | `memory_write_value` | 向指定内存地址写入一个带类型的值，并支持通过 memory_write_history 的 undo/redo 动作进行撤销与重做。 |
+| `memory_batch_edit` | 待补充中文：Write a value to ALL addresses in a scan session at once. Thin wrapper that iterates through the session address list and calls writeValue for each. Capped at 1000 addresses per call with a clear error when exceeded. Destructive — an audit trail entry is recorded for each write. Equivalent to GameGuardian's gg.editAll() or Cheat Engine's "Edit All". |
+| `memory_watch` | 待补充中文：Poll a memory address until its value changes (like scanmem's "watch" command). Reads the current value, then polls at a configurable interval. Returns immediately with the old value, new value, and elapsed time when a change is detected. If no change occurs within the timeout, returns the unchanged value and a hint. Useful for "tell me when this variable changes" workflows. |
 | `memory_freeze` | 将某个地址冻结为固定值。工具会按设定间隔持续回写该值，防止它被其他逻辑修改。 |
 | `memory_dump` | 以十六进制 + ASCII 列的形式导出一段内存区域，输出风格类似 xxd 的格式化十六进制转储。 |
 | `memory_speedhack` | 通过进程内 SSE2 蹦床挂钩时间 API 来缩放进程时间。操作包括：apply（挂钩并设置速度）、set（调整速度无需重新挂钩）、restore（取消挂钩并恢复原始函数）。速度范围 0.01–100 倍。共挂钩 6 个 API：GetTickCount64、GetTickCount、QueryPerformanceCounter、QueryPerformanceFrequency（速度=0 时除零保护→1.0）、timeGetTime（winmm.dll）、GetSystemTimeAsFileTime。三区 W^X 分配架构（代码/蹦床/数据分离，从不同时可写可执行）。仅 Win32。 |
@@ -72,3 +74,12 @@
 | `memory_mono_objects` | 待补充中文：Find live Mono objects of a specific class in the managed heap. Resolves class vtable, then scans writable heap regions for vtable pointer matches. Returns object addresses with class name and estimated size. |
 | `memory_mono_fields` | 待补充中文：Read field values from a Mono object at the given address. Resolves the class via vtable pointer, walks MonoClass fields, and decodes each field value with type-aware heuristics (int, float, string pointer detection). |
 | `memory_mono_methods` | 待补充中文：Inspect method count for a Mono class in a Unity/Mono process. Full method name enumeration requires walking the MonoMethod table from MonoImage (not yet implemented — returns methodCount from the type definition table). |
+| `memory_handle_enum` | 待补充中文：Enumerate all open handles in a target process via NtQuerySystemInformation. Returns handle value, object type, access mask, and object name for each handle. Filterable by type: File, Key, Process, Thread, Token, Section, etc. Useful for finding handles to protected resources and analyzing process security posture. Win32-only, admin required. |
+| `memory_protect` | 待补充中文：Change memory page protection for a region in the target process. Wraps VirtualProtectEx (Win32) / mprotect (Linux) / mach_vm_protect (macOS). Protection: r (read-only), rw (read-write), rx (read-execute), rwx (all), none (no-access). Returns the old protection. Destructive — audit trail recorded. |
+| `memory_region_compare` | 待补充中文：Compare two memory regions byte-by-byte and return a diff summary. Equivalent to Cheat Engine's compareMemory(). Returns identical flag, diff count, and per-offset differences (byte1, byte2). Max compare size: 64KB. |
+| `memory_bookmark` | 待补充中文：Manage address bookmarks for a process. Actions: add (bookmark an address with optional label and color), remove (delete a bookmark), list (show all bookmarks for the PID), clear (remove all bookmarks for the PID). Labels help categorize findings; colors use hex format (e.g. "#FF0000"). Bookmarks are scoped per PID. For long-term persistence, export via state_board_io with namespace "memory_bookmarks:&lt;pid&gt;". |
+| `memory_register_type` | 待补充中文：Register a custom value type for memory scanning (Cheat Engine parity). Registered types can be used as valueType in memory_first_scan, memory_unknown_scan, etc. Types are session-scoped (live as long as the domain handler instance). |
+| `memory_list_types` | 待补充中文：List all registered custom scan types. |
+| `memory_unregister_type` | 待补充中文：Remove a registered custom scan type by name. |
+| `memory_call_stack` | 待补充中文：Walk the call stack of a target process thread using the x64 RBP frame-pointer chain. Suspends the thread, reads the CONTEXT to get RBP/RSP/RIP, then follows the linked list of [saved_RBP][return_address] frames via ReadProcessMemory. Resolves module names using Toolhelp32 module snapshots. Returns an array of {frameIndex, returnAddress, moduleName, functionName}. Equivalent to x64dbg's "standard" call stack mode. Win32 (x64) only — requires Administrator privileges. |
+| `memory_process_control` | 待补充中文：Suspend or resume a target process for consistent memory snapshots. Suspend freezes all threads (NtSuspendProcess on Win32, SIGSTOP on Linux, task_suspend on macOS) so memory reads/scans see a consistent state. Resume thaws all threads. Useful before memory_dump or memory_first_scan for processes with actively-changing memory. Cross-platform. |
