@@ -54,6 +54,7 @@ import { ReverseMWTHandlers } from './handlers/reverse-mwt';
 import { TraceCodeHandlers } from './handlers/trace-code';
 import { PointerMapHandlers } from './handlers/pointer-map';
 import { AssembleHandlers } from './handlers/assemble';
+import { AutoAssemblerHandlers } from './handlers/auto-assembler';
 
 import { logger } from '@utils/logger';
 
@@ -78,6 +79,7 @@ export class MemoryScanHandlers {
   private readonly traceCode: TraceCodeHandlers;
   private readonly ptrMaps: PointerMapHandlers;
   private readonly assembler: AssembleHandlers;
+  private readonly aa: AutoAssemblerHandlers;
 
   /** Shared audit trail for destructive operations (write/freeze/patch). */
   readonly auditTrail = new MemoryAuditTrail();
@@ -142,6 +144,7 @@ export class MemoryScanHandlers {
     this.traceCode = new TraceCodeHandlers(processManager, ctx);
     this.ptrMaps = new PointerMapHandlers();
     this.assembler = new AssembleHandlers(processManager, ctx, this.auditTrail);
+    this.aa = new AutoAssemblerHandlers(injector, scanner, memCtrl, processManager);
   }
 
   // ── Session ──
@@ -396,10 +399,72 @@ export class MemoryScanHandlers {
 
   handleAssemble = (args: Record<string, unknown>) => this.assembler.handleAssemble(args);
 
+  // ── Auto Assembler (CE parity) ──
+
+  handleAutoAssemble = (args: Record<string, unknown>) => this.aa.handleAutoAssemble(args);
+  handleAutoAssembleDisable = (args: Record<string, unknown>) =>
+    this.aa.handleAutoAssembleDisable(args);
+
   // ── Bookmarks ──
 
   handleBookmarkDispatch(args: Record<string, unknown>) {
     return this.bookmarks.handleBookmarkDispatch(args);
+  }
+
+  // ── Remote Debugging Stub ──
+
+  async handleRemote(args: Record<string, unknown>): Promise<unknown> {
+    const { getOrCreateRemoteProxy, getRemoteProxy, removeRemoteProxy, listRemoteProxies } =
+      await import('@native/RemoteProxy');
+
+    const action = typeof args.action === 'string' ? args.action : 'status';
+    const proxyId = typeof args.proxyId === 'string' ? args.proxyId : 'default';
+    const url = typeof args.url === 'string' ? args.url : '';
+
+    if (action === 'disconnect') {
+      const removed = removeRemoteProxy(proxyId);
+      return { disconnected: removed, proxyId };
+    }
+
+    if (action === 'status') {
+      const proxy = getRemoteProxy(proxyId);
+      if (proxy) return proxy.status;
+      return { proxies: listRemoteProxies() };
+    }
+
+    if (action === 'connect') {
+      if (!url) throw new Error('memory_remote: "url" is required for connect action');
+
+      const authToken = typeof args.authToken === 'string' ? args.authToken : undefined;
+      const connectTimeoutMs =
+        typeof args.connectTimeoutMs === 'number' ? args.connectTimeoutMs : undefined;
+
+      const proxy = getOrCreateRemoteProxy(proxyId, { url, authToken, connectTimeoutMs });
+      await proxy.connect();
+      return proxy.status;
+    }
+
+    if (action === 'forward') {
+      if (!url) throw new Error('memory_remote: "url" is required for forward action');
+
+      const toolName = typeof args.toolName === 'string' ? args.toolName : '';
+      if (!toolName) throw new Error('memory_remote: "toolName" is required for forward action');
+
+      const toolArgs =
+        typeof args.toolArgs === 'object' && args.toolArgs !== null
+          ? (args.toolArgs as Record<string, unknown>)
+          : {};
+      const requestTimeoutMs =
+        typeof args.requestTimeoutMs === 'number' ? args.requestTimeoutMs : undefined;
+
+      const proxy = getOrCreateRemoteProxy(proxyId, { url });
+      const result = await proxy.forward(toolName, toolArgs, requestTimeoutMs);
+      return { result, proxyId };
+    }
+
+    throw new Error(
+      `memory_remote: invalid action "${action}" — expected connect, disconnect, status, or forward`,
+    );
   }
 }
 

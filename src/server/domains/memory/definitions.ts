@@ -1316,4 +1316,68 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .required()
       .query(),
   ),
+
+  // ── Auto Assembler (CE parity) ──
+  tool('memory_auto_assemble', (t) =>
+    t
+      .desc(
+        'Execute a Cheat Engine-style Auto Assembler script. ' +
+          'Parses [ENABLE]/[DISABLE] sections and executes ENABLE commands. ' +
+          'Supported commands: ALLOC(name,size), DEALLOC(name), LABEL(name[,addr]), ' +
+          'REGISTERSYMBOL(name), AOBSCAN(name,pattern), ASSERT(address,bytes), ' +
+          'CREATETHREAD(address), DEFINE(name,value), FULLACCESS(address,size), ' +
+          'READMEM(address,size), WRITEMEM(address,bytes). ' +
+          'INCLUDE and LOADBINARY are rejected for security. ' +
+          'Returns a disableScript for use with memory_auto_assemble_disable. ' +
+          'Win32 only — requires native process access.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('script', 'Auto Assembler script string with [ENABLE] and [DISABLE] sections')
+      .required('script')
+      .destructive(),
+  ),
+  tool('memory_auto_assemble_disable', (t) =>
+    t
+      .desc(
+        'Execute the DISABLE section of a previously-run Auto Assembler script. ' +
+          'Pass the disableScript returned by memory_auto_assemble. ' +
+          'Executes DISABLE commands, running DEALLOC last (CE convention). ' +
+          'Win32 only — requires native process access.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string(
+        'disableScript',
+        'JSON string of the disableScript object returned by memory_auto_assemble',
+      )
+      .required('disableScript')
+      .destructive(),
+  ),
+  // ── Remote Debugging Stub (ceserver-style) ──────────────────────────
+  tool('memory_remote', (t) =>
+    t
+      .desc(
+        'Connect to a remote jshookmcp MCP server via WebSocket for remote debugging. ' +
+          'Enables ceserver-style remote memory operations: connect to a remote instance, ' +
+          'forward tool calls (memory read/write, process enumerate, etc.), and receive results. ' +
+          'Uses JSON-RPC 2.0 over WebSocket with auth token support and auto-reconnect. ' +
+          'Actions: connect (establish WebSocket link), disconnect (tear down), ' +
+          'status (connection state + stats), forward (proxy a tool call to the remote instance).',
+      )
+      .enum(
+        'action',
+        ['connect', 'disconnect', 'status', 'forward'],
+        'connect=establish WebSocket link, disconnect=tear down, status=connection state, forward=proxy a tool call',
+      )
+      .string('url', 'WebSocket URL (e.g. ws://192.168.1.100:17171). Required for connect/forward.')
+      .string('authToken', 'Bearer token for authenticated remote connections')
+      .number('connectTimeoutMs', 'Connection timeout in ms (default: 10000)')
+      .number('requestTimeoutMs', 'Per-request timeout in ms (default: 60000)')
+      .string(
+        'toolName',
+        'Target tool name to forward to the remote instance (e.g. "memory_read"). Required for forward.',
+      )
+      .object('toolArgs', {}, 'Tool arguments object to forward. Required for forward.')
+      .string('proxyId', 'Proxy identifier for reconnecting to an existing session')
+      .required('action'),
+  ),
 ];

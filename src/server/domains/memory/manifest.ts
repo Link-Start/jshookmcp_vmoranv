@@ -164,6 +164,9 @@ const WIN32_ONLY_TOOLS = new Set([
   'memory_inject_shellcode',
   'memory_inject_dll',
   'memory_handle_enum',
+  // Auto Assembler — Win32 VirtualAllocEx/VirtualFreeEx/CreateRemoteThread/AOB scan
+  'memory_auto_assemble',
+  'memory_auto_assemble_disable',
   // Call stack walking — Win32 kernel32/dbghelp koffi
   'memory_call_stack',
   // Ultimap-style INT3 code tracing — Win32 debug API
@@ -531,6 +534,23 @@ const allRegistrations = [
     tool: toolByName('memory_assemble'),
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleAssemble(a)),
+  },
+  // ── Auto Assembler (CE parity) ──
+  {
+    tool: toolByName('memory_auto_assemble'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleAutoAssemble(a)),
+  },
+  {
+    tool: toolByName('memory_auto_assemble_disable'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleAutoAssembleDisable(a)),
+  },
+  // ── Remote Debugging Stub (ceserver-style) ──
+  {
+    tool: toolByName('memory_remote'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleRemote(a)),
   },
 ] as const;
 
