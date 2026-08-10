@@ -460,6 +460,18 @@ const allRegistrations = [
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleBookmarkDispatch(a)),
   },
+  // ── Type Define (cross-platform, pure TS) ──
+  {
+    tool: toolByName('memory_type_define'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleTypeDefine(a)),
+  },
+  // ── Emulator Detect (cross-platform, pure TS) ──
+  {
+    tool: toolByName('memory_emulator_detect'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleEmulatorDetect(a)),
+  },
   // ── Custom Scan Types (CE parity) ──
   {
     tool: toolByName('memory_register_type'),
@@ -487,6 +499,24 @@ const allRegistrations = [
     tool: toolByName('memory_process_control'),
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleProcessControl(a)),
+  },
+  // ── Find References (x64dbg parity, cross-platform) ──
+  {
+    tool: toolByName('memory_find_references'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleFindReferences(a)),
+  },
+  // ── Pointer Map Persistence (.PTR parity) ──
+  {
+    tool: toolByName('memory_pointer_map'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handlePointerMap(a)),
+  },
+  // ── Inline Assembler (x64dbg parity) ──
+  {
+    tool: toolByName('memory_assemble'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleAssemble(a)),
   },
 ] as const;
 
@@ -544,6 +574,7 @@ const manifest: DomainManifest<typeof DEP_KEY, H, typeof DOMAIN> = {
       'memory_scan_session',
       'memory_breakpoint',
       'memory_find_accesses',
+      'memory_find_references',
       ...(IS_WIN32 ? ['memory_speedhack'] : []),
       'memory_patch_bytes',
       'memory_freeze',

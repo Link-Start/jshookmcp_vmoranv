@@ -49,6 +49,9 @@ import { HandleEnumHandlers } from './handlers/handle-enum';
 import { ProtectHandlers } from './handlers/protect';
 import { RegionCompareHandlers } from './handlers/region-compare';
 import { BookmarkHandlers } from './handlers/bookmark';
+import { FindReferencesHandlers } from './handlers/find-references';
+import { PointerMapHandlers } from './handlers/pointer-map';
+import { AssembleHandlers } from './handlers/assemble';
 
 import { logger } from '@utils/logger';
 
@@ -68,6 +71,9 @@ export class MemoryScanHandlers {
   private readonly protect: ProtectHandlers;
   private readonly regionCompare: RegionCompareHandlers;
   private readonly bookmarks: BookmarkHandlers;
+  private readonly findRefs: FindReferencesHandlers;
+  private readonly ptrMaps: PointerMapHandlers;
+  private readonly assembler: AssembleHandlers;
 
   /** Shared audit trail for destructive operations (write/freeze/patch). */
   readonly auditTrail = new MemoryAuditTrail();
@@ -127,6 +133,9 @@ export class MemoryScanHandlers {
     this.protect = new ProtectHandlers(processManager, ctx, this.auditTrail);
     this.regionCompare = new RegionCompareHandlers(processManager, ctx);
     this.bookmarks = new BookmarkHandlers(processManager, ctx);
+    this.findRefs = new FindReferencesHandlers(processManager, ctx);
+    this.ptrMaps = new PointerMapHandlers();
+    this.assembler = new AssembleHandlers(processManager, ctx, this.auditTrail);
   }
 
   // ── Session ──
@@ -205,6 +214,8 @@ export class MemoryScanHandlers {
   handleCheatTableDispatch(args: Record<string, unknown>) {
     const action = String(args['action'] ?? '');
     if (action === 'import') return this.structures.handleCheatTableImport(args);
+    if (action === 'sign') return this.structures.handleCheatTableSign(args);
+    if (action === 'verify') return this.structures.handleCheatTableVerify(args);
     return this.structures.handleCheatTableExport(args);
   }
 
@@ -287,6 +298,41 @@ export class MemoryScanHandlers {
   handleIntegrityCheck = (args: Record<string, unknown>) =>
     this.integrity.handleIntegrityCheck(args);
 
+  // ── Type Define ──
+
+  handleTypeDefine = (args: Record<string, unknown>) => this.structures.handleTypeDefine(args);
+
+  // ── Emulator Detection ──
+
+  async handleEmulatorDetect(args: Record<string, unknown>) {
+    const { detectEmulator, listKnownEmulators } = await import('./handlers/emulator');
+    const processName = typeof args.processName === 'string' ? args.processName : '';
+    const moduleNames = Array.isArray(args.moduleNames)
+      ? (args.moduleNames as string[])
+      : undefined;
+    const listAll = args.list === true || args.list === 'true';
+
+    if (listAll) {
+      return {
+        success: true,
+        knownEmulators: listKnownEmulators(),
+        count: listKnownEmulators().length,
+      };
+    }
+
+    if (!processName) {
+      throw new Error(
+        'memory_emulator_detect: missing required argument "processName" (or set list=true to list all known emulators)',
+      );
+    }
+
+    const result = detectEmulator(processName, moduleNames);
+    return {
+      success: true,
+      ...result,
+    };
+  }
+
   // ── Region Enumeration ──
 
   handleRegionEnumerate = (args: Record<string, unknown>) =>
@@ -296,6 +342,11 @@ export class MemoryScanHandlers {
 
   handleFindAccesses = (args: Record<string, unknown>) =>
     this.findAccesses.handleFindAccesses(args);
+
+  // ── Find References (x64dbg parity) ──
+
+  handleFindReferences = (args: Record<string, unknown>) =>
+    this.findRefs.handleFindReferences(args);
 
   // ── Minidump Parser ──
 
@@ -322,6 +373,14 @@ export class MemoryScanHandlers {
 
   handleRegionCompare = (args: Record<string, unknown>) =>
     this.regionCompare.handleRegionCompare(args);
+
+  // ── Pointer Map Persistence (.PTR parity) ──
+
+  handlePointerMap = (args: Record<string, unknown>) => this.ptrMaps.handlePointerMap(args);
+
+  // ── Inline Assembler (x64dbg parity) ──
+
+  handleAssemble = (args: Record<string, unknown>) => this.assembler.handleAssemble(args);
 
   // ── Bookmarks ──
 

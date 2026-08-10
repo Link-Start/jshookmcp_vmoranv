@@ -62,6 +62,13 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
         'XOR key for encrypted search (default: 0xFF). Only used when encrypted=true. ' +
           'The key is applied byte-wise to the value representation.',
       )
+      .boolean(
+        'persistToDisk',
+        'When true, stream scan results to a binary temp file (16 bytes per address: 8-byte address + 8-byte value LE) ' +
+          'instead of holding all addresses in memory. Caps at 100M addresses (~1.6 GB file). Above that, the scan is ' +
+          'rejected with a "narrow first" message. Useful for extremely large initial scans where the result set might ' +
+          'exhaust RAM. Next scans read from the persisted file.',
+      )
       .prop('regionFilter', {
         type: 'object',
         properties: {
@@ -253,15 +260,17 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   tool('memory_structure_export_c', (t) =>
     t
       .desc(
-        'Export an inferred structure as a C-style struct definition or ReClass.NET XML project. ' +
-          'Pass format="reclass" for a ReClass.NET 1.0 XML project importable by ReClass.NET.',
+        'Export an inferred structure as a C-style struct definition, ReClass.NET XML, Rust #[repr(C)], ' +
+          'or C# [StructLayout] with explicit FieldOffset attributes. ' +
+          'C export auto-detects composite types (Vector3, Matrix4x4, pointer arrays).',
       )
       .string('structure', 'JSON string of InferredStruct to export')
       .string('name', 'Struct name (defaults to RTTI class name or "UnknownStruct")')
       .enum(
         'format',
-        ['c', 'reclass'],
-        'Export format: "c" (default) for C header, "reclass" for ReClass.NET XML project',
+        ['c', 'reclass', 'rust', 'csharp'],
+        'Export format: "c" (default, with composite type detection), "reclass" for ReClass.NET XML, ' +
+          '"rust" for #[repr(C)] struct, "csharp" for [StructLayout] with FieldOffset',
         { default: 'c' },
       )
       .required('structure')
@@ -270,12 +279,26 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   tool('memory_structure_compare', (t) =>
     t
       .desc(
-        'Compare two structure instances to identify which fields differ (dynamic values like health/position) vs' +
-          ' which are constant (vtable, type flags). Useful for finding important fields.',
+        'Compare struct instances to identify differing vs constant fields. ' +
+          'Two modes: (1) Pairwise—compare address1 vs address2. ' +
+          '(2) Group comparison (CE dissect data parity)—pass arrays of addresses in group1Addresses ' +
+          'and group2Addresses. Group mode computes per-offset statistics and classifies fields as: ' +
+          'between_groups (differs across groups—likely gameplay state), within_group (varies within groups—dynamic), ' +
+          'constant_all (same everywhere—likely vtable, type flags). Returns confidence scores.',
       )
       .number('pid', 'Target process ID (optional when a browser session is attached)')
-      .string('address1', 'First instance address (hex)')
-      .string('address2', 'Second instance address (hex)')
+      .string('address1', 'First instance address (hex, pairwise mode)')
+      .string('address2', 'Second instance address (hex, pairwise mode)')
+      .array(
+        'group1Addresses',
+        { type: 'string' },
+        'Group 1 instance addresses (hex array, group mode)',
+      )
+      .array(
+        'group2Addresses',
+        { type: 'string' },
+        'Group 2 instance addresses (hex array, group mode)',
+      )
       .number('size', 'Size to compare in bytes (default: 256)')
       .required('address1', 'address2')
       .query(),
@@ -664,7 +687,9 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .desc(
         'Enumerate memory regions in a target process. Cross-platform: Windows (VirtualQueryEx), ' +
           'macOS (mach_vm_region), Linux (/proc/pid/maps). Returns base address, size, protection ' +
-          '(r/w/x/rw/rx/rwx), state, type (image/mapped/private), and module name (if module-backed).',
+          '(r/w/x/rw/rx/rwx), state, type (image/mapped/private), and module name (if module-backed). ' +
+          'Emulator mode (mode="emulator"): use with memory_emulator_detect to get emulator-specific ' +
+          'memory region descriptors (EE RAM for PCSX2, MEM1/MEM2 for Dolphin, etc.) and filter results.',
       )
       .number('pid', 'Target process ID (optional when a browser session is attached)')
       .enum(
@@ -675,6 +700,12 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .string(
         'moduleName',
         'Filter regions by module name (optional, case-insensitive substring match)',
+      )
+      .string(
+        'emulatorName',
+        'Emulator name for emulator-mode region mapping (e.g. "PCSX2", "Dolphin"). ' +
+          'When set, returns emulator-specific region descriptors alongside normal region enumeration. ' +
+          'Use with memory_emulator_detect first to identify the emulator.',
       )
       .number('maxRegions', 'Maximum regions to return (default: 500)')
       .required()
@@ -723,13 +754,14 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   tool('memory_cheat_table', (t) =>
     t
       .desc(
-        'Import or export a Cheat Engine .CT file. Export: converts a JSON array of {description, address, ' +
-          'valueType, moduleName?, offset?} entries to a valid .CT XML file. Import: parses a .CT XML string ' +
-          'and returns entries as JSON. Addresses can be hex ("0x7FF612340000") or module+offset ' +
-          '("game.exe"+00123456). Auto Assembler scripts are skipped with a warning.',
+        'Import, export, sign, or verify Cheat Engine .CT files. ' +
+          'Export: converts JSON entries to valid .CT XML. Import: parses .CT XML to JSON. ' +
+          'Sign: HMAC-SHA256 sign the XML using a secret (from JSHOOK_TABLE_SECRET env var, ' +
+          'state_board "memory_ct_sign" secret key, or explicit "secret" arg). ' +
+          "Verify: validate a signed table's HMAC signature. Addresses can be hex or module+offset.",
       )
-      .enum('action', ['export', 'import'], 'Operation mode')
-      .string('xml', 'CT XML string content (action=import)')
+      .enum('action', ['export', 'import', 'sign', 'verify'], 'Operation mode')
+      .string('xml', 'CT XML string content (action=import/sign/verify)')
       .array(
         'entries',
         {
@@ -753,9 +785,14 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
           },
           required: ['description', 'address', 'valueType'],
         },
-        'Array of CheatEntry objects (action=export)',
+        'Array of CheatEntry objects (action=export/sign)',
       )
       .number('version', 'CE table version (action=export, default: 45)')
+      .string(
+        'secret',
+        'Signing secret (action=sign/verify). Falls back to JSHOOK_TABLE_SECRET env var or state_board.',
+      )
+      .string('signer', 'Signer attribution name (action=sign, default: "jshookmcp")')
       .required('action')
       .query(),
   ),
@@ -1090,6 +1127,94 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .query(),
   ),
 
+  // ── Cross-Reference Engine (x64dbg parity, cross-platform) ──
+  tool('memory_find_references', (t) =>
+    t
+      .desc(
+        'Find all references to an address in executable memory (x64dbg parity). ' +
+          'Scans all executable regions for CALL rel32, JMP rel32, Jcc rel32, LEA [RIP+disp32], ' +
+          'and MOV [RIP+disp32] instructions that reference the target address. ' +
+          'Uses pure-TS byte-pattern heuristics — no Capstone dependency. ' +
+          'Returns reference type, source address, disassembly, module name, and module offset. ' +
+          'Optionally filter by module name.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('address', 'Target address to find references to (hex, e.g. "0x7FF612340000")')
+      .string(
+        'moduleName',
+        'Restrict search to a specific module (optional, case-insensitive substring match)',
+      )
+      .number('maxResults', 'Maximum results to return (default: 500)')
+      .required('address')
+      .query(),
+  ),
+
+  // ── Pointer Map Persistence (.PTR parity) ──
+  tool('memory_pointer_map', (t) =>
+    t
+      .desc(
+        'Save, load, or compare pointer maps for cross-instance filtering (Cheat Engine .PTR parity). ' +
+          'save: serialize pointer scan results to a .ptr.json file in <project>/.ptr/. ' +
+          'load: deserialize a pointer map from file. ' +
+          'compare: load 2+ pointer map files and find addresses that appear in ALL maps — ' +
+          'the CE "rescan across multiple instances" workflow for finding stable pointer chains.',
+      )
+      .enum('action', ['save', 'load', 'compare'], 'Operation mode')
+      .string('name', 'Pointer map name without extension (action=save/load)')
+      .number('pid', 'Target process ID (action=save)')
+      .string('targetAddress', 'Target address these pointer chains resolve to, hex (action=save)')
+      .array(
+        'entries',
+        {
+          type: 'object',
+          properties: {
+            address: { type: 'string', description: 'Hex address' },
+            value: { type: 'string', description: 'Hex value at the address' },
+            moduleName: { type: 'string', description: 'Optional module name' },
+            label: { type: 'string', description: 'Optional human-readable label' },
+          },
+          required: ['address', 'value'],
+        },
+        'Array of {address, value, moduleName?, label?} pointer scan results (action=save)',
+      )
+      .string('filePath', 'Absolute path to a .ptr.json file (action=load, overrides name lookup)')
+      .array('names', { type: 'string' }, 'Array of pointer map names to compare (action=compare)')
+      .array(
+        'filePaths',
+        { type: 'string' },
+        'Array of absolute file paths to compare (action=compare, overrides names)',
+      )
+      .string('projectRoot', 'Project root directory for .ptr/ storage (defaults to cwd)')
+      .required('action'),
+  ),
+
+  // ── Inline Assembler (x64dbg parity) ──
+  tool('memory_assemble', (t) =>
+    t
+      .desc(
+        'Assemble x64 assembly instructions to machine code bytes (x64dbg inline assembler parity). ' +
+          'Uses Keystone assembler via koffi FFI (keystone.dll) if available on Windows, with a built-in ' +
+          'fallback opcode table for common instructions (NOP, RET, INT3, PUSH/POP, MOV, XOR, ADD, SUB, INC, DEC). ' +
+          'assemble: compile ASM string to hex bytes. ' +
+          'assemble_at: assemble + write directly to target process memory at address (destructive, audit trail recorded). ' +
+          'Separate multiple instructions with semicolons or newlines. Max 256 instructions, 4096 assembled bytes.',
+      )
+      .enum('action', ['assemble', 'assemble_at'], 'Operation mode')
+      .string(
+        'code',
+        'Assembly instructions as semicolon-separated or newline-separated string. ' +
+          'Example: "mov rax, 0x1234; nop; ret"',
+      )
+      .number(
+        'address',
+        'Base address for relative instructions (action=assemble, optional — default 0)',
+      )
+      .number('pid', 'Target process ID (action=assemble_at)')
+      .string('targetAddress', 'Address to write assembled bytes to, hex (action=assemble_at)')
+      .boolean('dryRun', 'Preview without writing (action=assemble_at, default: false)')
+      .required('action', 'code'),
+  ),
+
   // ── Address Bookmark Tool (cross-platform) ──
   tool('memory_bookmark', (t) =>
     t
@@ -1105,6 +1230,45 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .string('label', 'User-defined label for the bookmark (optional)')
       .string('color', 'Hex color string for categorization (optional, e.g. "#FF0000")')
       .required('action')
+      .query(),
+  ),
+
+  // ── Type Definition Override (x64dbg/ReClass parity) ──
+  tool('memory_type_define', (t) =>
+    t
+      .desc(
+        'Override field types in an inferred structure. ' +
+          'Actions: set (define a type at offset+size), list (show all overrides), ' +
+          'clear (remove all overrides). Overrides are applied in subsequent memory_structure_analyze calls. ' +
+          'Supported types: int8, uint8, int16, uint16, int32, uint32, int64, uint64, ' +
+          'float, double, pointer, string_ptr, vtable_ptr, hex, padding, unknown.',
+      )
+      .enum('action', ['set', 'list', 'clear'], 'Operation mode', { default: 'set' })
+      .number('offset', 'Byte offset of the field to override (action=set)')
+      .number('size', 'Byte size of the field (action=set)')
+      .string('type', 'Type name to assign (action=set, e.g. "int32", "float", "pointer")')
+      .required('action')
+      .query(),
+  ),
+
+  // ── Emulator Detection (ArtMoney parity) ──
+  tool('memory_emulator_detect', (t) =>
+    t
+      .desc(
+        'Detect if a target process is a known console emulator (ArtMoney parity). ' +
+          'Supports: PCSX2, Dolphin, RPCS3, Yuzu, Cemu, ePSXe, PPSSPP, xemu. ' +
+          'Detection uses process name matching + optional module fingerprint confirmation. ' +
+          'Returns emulator name, platform, and known memory region layout for emulator-mode scanning. ' +
+          'Set list=true to enumerate all known emulators without a process check.',
+      )
+      .string('processName', 'Process executable name (e.g. "pcsx2.exe", "dolphin-emu.exe")')
+      .array(
+        'moduleNames',
+        { type: 'string' },
+        'Optional loaded module names for fingerprint confirmation',
+      )
+      .boolean('list', 'List all known emulators instead of detecting (default: false)')
+      .required()
       .query(),
   ),
 ];
