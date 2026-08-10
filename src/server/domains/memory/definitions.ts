@@ -1149,6 +1149,26 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .query(),
   ),
 
+  // ── Reverse MWT (inverse of find_accesses, cross-platform) ──
+  tool('memory_reverse_mwt', (t) =>
+    t
+      .desc(
+        'Reverse memory write trace — given a code address, find what data addresses the ' +
+          'instruction accesses. Inverse of memory_find_accesses. Disassembles the instruction ' +
+          'at the given address using Capstone, then resolves RIP-relative and absolute memory ' +
+          'operands to their target addresses. Returns instruction text, raw bytes, and a ' +
+          'list of accessed addresses with access type (READ/WRITE/RIP_REL). ' +
+          'Useful for understanding what data a specific piece of code operates on.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('address', 'Code address to analyze (hex, e.g. "0x7FF612340000")')
+      .boolean('disassemble', 'Whether to disassemble the instruction (default: true)', {
+        default: true,
+      })
+      .required('address')
+      .query(),
+  ),
+
   // ── Pointer Map Persistence (.PTR parity) ──
   tool('memory_pointer_map', (t) =>
     t

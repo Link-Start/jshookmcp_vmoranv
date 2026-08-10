@@ -506,6 +506,12 @@ const allRegistrations = [
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleFindReferences(a)),
   },
+  // ── Reverse MWT (inverse of find_accesses, cross-platform) ──
+  {
+    tool: toolByName('memory_reverse_mwt'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleReverseMWT(a)),
+  },
   // ── Pointer Map Persistence (.PTR parity) ──
   {
     tool: toolByName('memory_pointer_map'),

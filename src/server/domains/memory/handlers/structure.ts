@@ -9,11 +9,21 @@ import { logger } from '@utils/logger';
 import { MemoryAuditTrail } from '@modules/process/memory/AuditTrail';
 import { parseJsonArg } from './validation';
 import { parseAddressFormula } from './address-formula';
+import {
+  exportCSharpStruct,
+  exportRustStruct,
+  detectCompositeTypes,
+  setTypeOverride,
+  clearTypeOverrides,
+  listTypeOverrides,
+} from './composite-types';
+import { signCheatTable, verifyCheatTable } from './cheat-table-sign';
 
 const TOOL_STRUCTURE_ANALYZE = 'memory_structure_analyze';
 const TOOL_VTABLE_PARSE = 'memory_vtable_parse';
 const TOOL_STRUCTURE_EXPORT_C = 'memory_structure_export_c';
 const TOOL_STRUCTURE_COMPARE = 'memory_structure_compare';
+const TOOL_TYPE_DEFINE = 'memory_type_define';
 
 /** Upper bound for structure analysis/compare sizes — reading megabytes into
  * the structure inferencer is almost always a mistake and risks huge reads. */
@@ -273,9 +283,41 @@ export class StructureHandlers {
         };
       }
 
+      if (format === 'rust') {
+        const definition = exportRustStruct(normalized, name);
+        return {
+          format: 'rust',
+          definition,
+          name,
+          fieldCount: normalized.fields.length,
+          size: normalized.totalSize,
+          hint: `Exported ${normalized.fields.length} fields as Rust #[repr(C)] struct.`,
+        };
+      }
+
+      if (format === 'csharp') {
+        const definition = exportCSharpStruct(normalized, name);
+        return {
+          format: 'csharp',
+          definition,
+          name,
+          fieldCount: normalized.fields.length,
+          size: normalized.totalSize,
+          hint: `Exported ${normalized.fields.length} fields as C# [StructLayout] struct.`,
+        };
+      }
+
+      // Default: C format
+      const compositeDetections = detectCompositeTypes(normalized.fields);
+      const cResult = this.structAnalyzer.exportToCStruct(normalized, name);
       return {
         format: 'c',
-        ...this.structAnalyzer.exportToCStruct(normalized, name),
+        ...cResult,
+        compositeTypes: compositeDetections.length > 0 ? compositeDetections : undefined,
+        hint:
+          compositeDetections.length > 0
+            ? `Exported ${normalized.fields.length} fields as C struct. Detected ${compositeDetections.length} composite type(s): ${compositeDetections.map((d) => d.suggestedType).join(', ')}.`
+            : undefined,
       };
     });
   }
@@ -314,6 +356,16 @@ export class StructureHandlers {
           `${TOOL_STRUCTURE_COMPARE}: size ${size} exceeds maximum ${STRUCTURE_MAX_SIZE} bytes (64KB). Compare a smaller region.`,
         );
       }
+      // ── Group comparison mode (CE dissect data parity) ──
+      const group1Raw = args.group1Addresses;
+      const group2Raw = args.group2Addresses;
+      if (
+        (Array.isArray(group1Raw) && group1Raw.length > 0) ||
+        (Array.isArray(group2Raw) && group2Raw.length > 0)
+      ) {
+        return this.handleGroupStructureCompare(args, pid, size);
+      }
+
       const result = await this.structAnalyzer.compareInstances(pid, address1, address2, size);
       return {
         matchingFieldCount: result.matching.length,
@@ -323,7 +375,204 @@ export class StructureHandlers {
     });
   }
 
-  // ── Cheat Table Import/Export ──
+  /**
+   * Group structure comparison: read all instances from group1Addresses and
+   * group2Addresses, compute per-offset statistics, and report:
+   * - Fields that differ BETWEEN groups (gameplay state)
+   * - Fields constant WITHIN a group but different between groups (identity)
+   * - Fields constant across ALL instances (vtable, type flags)
+   */
+  private async handleGroupStructureCompare(
+    args: Record<string, unknown>,
+    pid: number,
+    size?: number,
+  ) {
+    const group1Raw = (Array.isArray(args.group1Addresses) ? args.group1Addresses : []) as string[];
+    const group2Raw = (Array.isArray(args.group2Addresses) ? args.group2Addresses : []) as string[];
+    const allAddrs = [...group1Raw, ...group2Raw];
+    const effectiveSize = size ?? 256;
+
+    if (allAddrs.length === 0) {
+      throw new Error(
+        `${TOOL_STRUCTURE_COMPARE}: group comparison requires at least one address in group1Addresses or group2Addresses`,
+      );
+    }
+
+    if (effectiveSize > STRUCTURE_MAX_SIZE) {
+      throw new Error(
+        `${TOOL_STRUCTURE_COMPARE}: size ${effectiveSize} exceeds maximum ${STRUCTURE_MAX_SIZE} bytes`,
+      );
+    }
+
+    // Read all instances
+    const instances: Array<{ group: 1 | 2; bytes: Buffer }> = [];
+    for (let i = 0; i < group1Raw.length; i++) {
+      const addr = group1Raw[i]!;
+      const formula = parseAddressFormula(addr);
+      if (!formula.address) {
+        throw new Error(
+          `${TOOL_STRUCTURE_COMPARE}: invalid group1 address at index ${i}: ${formula.error}`,
+        );
+      }
+      const raw = await this.structAnalyzer.readMemory(pid, formula.address, effectiveSize);
+      instances.push({ group: 1, bytes: Buffer.from(raw) });
+    }
+    for (let i = 0; i < group2Raw.length; i++) {
+      const addr = group2Raw[i]!;
+      const formula = parseAddressFormula(addr);
+      if (!formula.address) {
+        throw new Error(
+          `${TOOL_STRUCTURE_COMPARE}: invalid group2 address at index ${i}: ${formula.error}`,
+        );
+      }
+      const raw = await this.structAnalyzer.readMemory(pid, formula.address, effectiveSize);
+      instances.push({ group: 2, bytes: Buffer.from(raw) });
+    }
+
+    const group1Instances = instances.filter((i) => i.group === 1);
+    const group2Instances = instances.filter((i) => i.group === 2);
+
+    // Per-offset analysis
+    const matches: Array<{ offset: number; size: number; description: string }> = [];
+    const diffs: Array<{
+      offset: number;
+      size: number;
+      description: string;
+      group1Values: string[];
+      group2Values: string[];
+      confidence: number;
+      category: 'between_groups' | 'within_group' | 'constant_all';
+    }> = [];
+
+    for (let off = 0; off < effectiveSize; off += 4) {
+      const readSize = Math.min(4, effectiveSize - off);
+
+      // Collect values per group
+      const g1Vals = group1Instances.map((inst) => readUInt(inst.bytes, off, readSize));
+      const g2Vals = group2Instances.map((inst) => readUInt(inst.bytes, off, readSize));
+      const allVals = [...g1Vals, ...g2Vals];
+
+      // Check: all identical across every instance?
+      const allSame = allVals.every((v) => v === allVals[0]);
+      if (allSame) {
+        matches.push({
+          offset: off,
+          size: readSize,
+          description:
+            allVals[0] === 0
+              ? `Constant zero across all ${instances.length} instances (likely padding or null pointer)`
+              : `Constant value 0x${allVals[0]!.toString(16)} across all ${instances.length} instances (likely vtable, type flag, or static data)`,
+        });
+        continue;
+      }
+
+      // Check: same within each group, different between groups
+      const g1Same = g1Vals.every((v) => v === g1Vals[0]);
+      const g2Same = g2Vals.every((v) => v === g2Vals[0]);
+      if (g1Same && g2Same && g1Vals[0] !== g2Vals[0]) {
+        diffs.push({
+          offset: off,
+          size: readSize,
+          description: `Differs between groups: Group1=0x${g1Vals[0]!.toString(16)}, Group2=0x${g2Vals[0]!.toString(16)}`,
+          group1Values: g1Vals.map((v) => `0x${v!.toString(16)}`),
+          group2Values: g2Vals.map((v) => `0x${v!.toString(16)}`),
+          confidence: 0.85,
+          category: 'between_groups',
+        });
+        continue;
+      }
+
+      // Check: varies within groups (dynamic state)
+      const g1Varies = new Set(g1Vals).size > 1;
+      const g2Varies = new Set(g2Vals).size > 1;
+      if (g1Varies || g2Varies) {
+        diffs.push({
+          offset: off,
+          size: readSize,
+          description: `Varies within groups — likely dynamic runtime state (health, position, timer)`,
+          group1Values: g1Vals.map((v) => `0x${v!.toString(16)}`),
+          group2Values: g2Vals.map((v) => `0x${v!.toString(16)}`),
+          confidence: 0.6,
+          category: 'within_group',
+        });
+        continue;
+      }
+
+      // Fallthrough
+      matches.push({
+        offset: off,
+        size: readSize,
+        description: `No clear pattern at offset 0x${off.toString(16)}`,
+      });
+    }
+
+    return {
+      totalInstances: instances.length,
+      group1Count: group1Instances.length,
+      group2Count: group2Instances.length,
+      compareSize: effectiveSize,
+      matchingFieldCount: matches.length,
+      differingFieldCount: diffs.length,
+      matches,
+      differing: diffs,
+      categorySummary: {
+        between_groups: diffs.filter((d) => d.category === 'between_groups').length,
+        within_group: diffs.filter((d) => d.category === 'within_group').length,
+        constant_all: matches.length,
+      },
+    };
+  }
+
+  // ── Type Define ──
+
+  async handleTypeDefine(args: Record<string, unknown>) {
+    return handleSafe(async () => {
+      const offset = argNumber(args, 'offset');
+      if (offset === undefined || !Number.isFinite(offset) || offset < 0) {
+        throw new Error(`${TOOL_TYPE_DEFINE}: missing or invalid required argument "offset"`);
+      }
+      const size = argNumber(args, 'size');
+      if (size === undefined || !Number.isFinite(size) || size <= 0) {
+        throw new Error(`${TOOL_TYPE_DEFINE}: missing or invalid required argument "size"`);
+      }
+      const type = argString(args, 'type');
+      if (!type) {
+        throw new Error(`${TOOL_TYPE_DEFINE}: missing or invalid required argument "type"`);
+      }
+
+      const action = typeof args.action === 'string' ? args.action : 'set';
+      if (action === 'clear') {
+        clearTypeOverrides();
+        return {
+          success: true,
+          action: 'clear',
+          hint: 'All type overrides cleared.',
+        };
+      }
+
+      if (action === 'list') {
+        return {
+          success: true,
+          action: 'list',
+          overrides: listTypeOverrides(),
+        };
+      }
+
+      // action === 'set'
+      const normalized = normalizeFieldType(type);
+      setTypeOverride(offset, size, normalized);
+      return {
+        success: true,
+        action: 'set',
+        offset,
+        size,
+        type: normalized,
+        hint: `Type override set: offset 0x${offset.toString(16)}, size ${size} → ${normalized}. Use memory_structure_analyze to re-analyze with overrides applied.`,
+      };
+    });
+  }
+
+  // ── Cheat Table Import/Export/Sign/Verify ──
 
   async handleCheatTableExport(args: Record<string, unknown>) {
     return handleSafe(async () => {
@@ -353,6 +602,33 @@ export class StructureHandlers {
 
       const version = typeof args.version === 'number' && args.version > 0 ? args.version : 45;
       const xml = exportCheatTable(entries, version);
+
+      // If sign action is requested, sign after export
+      const action = typeof args.action === 'string' ? args.action : 'export';
+      if (action === 'sign') {
+        const signResult = await signCheatTable(xml, args);
+        if (!signResult.success) {
+          return {
+            success: false,
+            exportSuccess: true,
+            xml,
+            entryCount: entries.length,
+            version,
+            signError: signResult.error,
+          };
+        }
+        return {
+          success: true,
+          xml: signResult.signedXml,
+          entryCount: entries.length,
+          version,
+          signed: true,
+          signature: signResult.signature,
+          signer: signResult.signer,
+          timestamp: signResult.timestamp,
+          hint: 'Cheat table exported and signed. Use memory_cheat_table action=verify to validate.',
+        };
+      }
 
       return {
         success: true,
@@ -386,6 +662,52 @@ export class StructureHandlers {
         entries: mappedEntries,
         entryCount: mappedEntries.length,
         warnings: result.warnings,
+      };
+    });
+  }
+
+  async handleCheatTableSign(args: Record<string, unknown>) {
+    return handleSafe(async () => {
+      const xml = argString(args, 'xml');
+      if (!xml) {
+        throw new Error(
+          'memory_cheat_table sign: missing or invalid argument "xml" (expected CT XML string)',
+        );
+      }
+      const result = await signCheatTable(xml, args);
+      if (!result.success) {
+        return { success: false, error: result.error };
+      }
+      return {
+        success: true,
+        signedXml: result.signedXml,
+        signature: result.signature,
+        signer: result.signer,
+        timestamp: result.timestamp,
+        entryCount: result.entryCount,
+        hint: 'Cheat table signed. Use memory_cheat_table action=verify to validate the signature.',
+      };
+    });
+  }
+
+  async handleCheatTableVerify(args: Record<string, unknown>) {
+    return handleSafe(async () => {
+      const xml = argString(args, 'xml');
+      if (!xml) {
+        throw new Error(
+          'memory_cheat_table verify: missing or invalid argument "xml" (expected CT XML string)',
+        );
+      }
+      const result = await verifyCheatTable(xml, args);
+      return {
+        success: true,
+        valid: result.valid,
+        signer: result.signer,
+        timestamp: result.timestamp,
+        error: result.error,
+        hint: result.valid
+          ? `Signature valid — signed by "${result.signer}" at ${new Date(result.timestamp!).toISOString()}.`
+          : (result.error ?? 'Signature verification failed.'),
       };
     });
   }
@@ -429,5 +751,19 @@ export class StructureHandlers {
         hint: `Class: ${result.className}${result.baseClasses.length > 0 ? ` (inherits: ${result.baseClasses.join(' → ')})` : ''}`,
       };
     });
+  }
+}
+
+/** Read a little-endian unsigned integer from a buffer at offset. */
+function readUInt(buf: Buffer, offset: number, size: number): number {
+  switch (size) {
+    case 1:
+      return buf.readUInt8(offset);
+    case 2:
+      return buf.readUInt16LE(offset);
+    case 4:
+      return buf.readUInt32LE(offset);
+    default:
+      return buf.readUInt32LE(offset);
   }
 }
