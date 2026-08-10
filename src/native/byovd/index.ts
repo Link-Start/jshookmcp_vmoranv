@@ -8,3 +8,14 @@ export type {
   CallbackFilter,
   CallbackRestorePoint,
 } from './KernelCallbackManager';
+export { Hypervisor, getHypervisor, resetHypervisorForTest } from './Hypervisor';
+export type {
+  Cpuid1Features,
+  CpuidLeaf,
+  VmxMsrValues,
+  VmxBasicInfo,
+  EptVpidCapabilities,
+  VmxCapabilities,
+  HypervisorStatus,
+  VmcsConfig,
+} from './Hypervisor.types';

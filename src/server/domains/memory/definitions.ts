@@ -1352,6 +1352,32 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .required('disableScript')
       .destructive(),
   ),
+  // ── EPT Hypervisor ───────────────────────────────────────────────────
+  tool('memory_hypervisor', (t) =>
+    t
+      .desc(
+        'EPT Hypervisor Phase 1: VMXON, VMCS setup, basic VM-exit handler design, CPUID spoofing. ' +
+          'Intel VT-x only. Requires BYOVD kernel driver for MSR reads and VMXON region preparation. ' +
+          'Gate: JSHOOK_HYPERVISOR_ENABLE=1 + admin. ' +
+          'Actions: capabilities (detect VT-x/EPT/VPID, MSR values, Hyper-V conflicts), ' +
+          'load (validate readiness + build VMCS config), ' +
+          'unload (reset state), status (runtime state). ' +
+          'NOTE: Actual VMXON/VMLAUNCH execution requires a kernel-mode component (not yet implemented). ' +
+          'Phase 1 provides detection, configuration, and the exit-handler design.',
+      )
+      .enum(
+        'action',
+        ['capabilities', 'load', 'unload', 'status'],
+        'capabilities=detect VT-x/EPT/VPID support, load=validate + build VMCS config, ' +
+          'unload=reset state, status=runtime state',
+      )
+      .string(
+        'detectFirst',
+        'Set to "false" to skip auto-detection before load (default: auto-detect)',
+      )
+      .required('action'),
+  ),
+
   // ── Remote Debugging Stub (ceserver-style) ──────────────────────────
   tool('memory_remote', (t) =>
     t

@@ -55,6 +55,7 @@ import { TraceCodeHandlers } from './handlers/trace-code';
 import { PointerMapHandlers } from './handlers/pointer-map';
 import { AssembleHandlers } from './handlers/assemble';
 import { AutoAssemblerHandlers } from './handlers/auto-assembler';
+import { HypervisorHandlers } from './handlers/hypervisor';
 
 import { logger } from '@utils/logger';
 
@@ -80,6 +81,7 @@ export class MemoryScanHandlers {
   private readonly ptrMaps: PointerMapHandlers;
   private readonly assembler: AssembleHandlers;
   private readonly aa: AutoAssemblerHandlers;
+  private readonly hypervisor: HypervisorHandlers;
 
   /** Shared audit trail for destructive operations (write/freeze/patch). */
   readonly auditTrail = new MemoryAuditTrail();
@@ -145,6 +147,7 @@ export class MemoryScanHandlers {
     this.ptrMaps = new PointerMapHandlers();
     this.assembler = new AssembleHandlers(processManager, ctx, this.auditTrail);
     this.aa = new AutoAssemblerHandlers(injector, scanner, memCtrl, processManager);
+    this.hypervisor = new HypervisorHandlers();
   }
 
   // ── Session ──
@@ -410,6 +413,10 @@ export class MemoryScanHandlers {
   handleBookmarkDispatch(args: Record<string, unknown>) {
     return this.bookmarks.handleBookmarkDispatch(args);
   }
+
+  // ── EPT Hypervisor ──
+
+  handleHypervisor = (args: Record<string, unknown>) => this.hypervisor.handleHypervisor(args);
 
   // ── Remote Debugging Stub ──
 

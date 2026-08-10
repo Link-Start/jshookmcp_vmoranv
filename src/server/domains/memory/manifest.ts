@@ -171,6 +171,8 @@ const WIN32_ONLY_TOOLS = new Set([
   'memory_call_stack',
   // Ultimap-style INT3 code tracing — Win32 debug API
   'memory_trace_code',
+  // EPT Hypervisor — Intel VT-x + Win32 kernel driver
+  'memory_hypervisor',
 ]);
 
 // All tool registrations — then filtered by platform
@@ -551,6 +553,12 @@ const allRegistrations = [
     tool: toolByName('memory_remote'),
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleRemote(a)),
+  },
+  // ── EPT Hypervisor ──
+  {
+    tool: toolByName('memory_hypervisor'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleHypervisor(a)),
   },
 ] as const;
 
