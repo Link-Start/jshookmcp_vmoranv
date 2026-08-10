@@ -234,13 +234,7 @@ export class AntiDetectionHandlers {
         priorityProtected: defenseReport.priorityProtected,
       };
 
-      if (defenseReport.terminationProtected) {
-        warnings.push(
-          'WARNING: ProcessBreakOnTermination is ENABLED. ' +
-            'Any termination attempt will cause BSOD. ' +
-            'This CANNOT be undone from user-mode.',
-        );
-      }
+      // terminationProtected is always false (stub) — no BSOD warning needed
     } catch (err) {
       results.selfDefense = {
         applied: false,

@@ -222,8 +222,8 @@ export const SCAN_CHAOS_DUMMY_RATE = int('JSHOOK_CHAOS_DUMMY_RATE', 5);
  *  Requires JSHOOK_SELFDEFENSE=1. */
 export const SELFDEFENSE_ENABLED = bool('JSHOOK_SELFDEFENSE', false);
 
-/** Enable EXTREME self-defense (ProcessBreakOnTermination — causes BSOD on kill).
- *  Requires JSHOOK_SELFDEFENSE_EXTREME=1 separately. */
+/** Enable EXTREME self-defense (ProcessBreakOnTermination — PERMANENTLY DISABLED stub).
+ *  The actual feature has been disabled after causing 6 BSOD crashes. See BSOD-CRITICAL_PROCESS_DIED-Analysis.md. */
 export const SELFDEFENSE_EXTREME = bool('JSHOOK_SELFDEFENSE_EXTREME', false);
 
 /** Poll interval in ms for self-defense handle monitoring. */
