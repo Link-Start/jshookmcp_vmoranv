@@ -51,6 +51,7 @@ import { RegionCompareHandlers } from './handlers/region-compare';
 import { BookmarkHandlers } from './handlers/bookmark';
 import { FindReferencesHandlers } from './handlers/find-references';
 import { ReverseMWTHandlers } from './handlers/reverse-mwt';
+import { TraceCodeHandlers } from './handlers/trace-code';
 import { PointerMapHandlers } from './handlers/pointer-map';
 import { AssembleHandlers } from './handlers/assemble';
 
@@ -74,6 +75,7 @@ export class MemoryScanHandlers {
   private readonly bookmarks: BookmarkHandlers;
   private readonly findRefs: FindReferencesHandlers;
   private readonly reverseMwt: ReverseMWTHandlers;
+  private readonly traceCode: TraceCodeHandlers;
   private readonly ptrMaps: PointerMapHandlers;
   private readonly assembler: AssembleHandlers;
 
@@ -137,6 +139,7 @@ export class MemoryScanHandlers {
     this.bookmarks = new BookmarkHandlers(processManager, ctx);
     this.findRefs = new FindReferencesHandlers(processManager, ctx);
     this.reverseMwt = new ReverseMWTHandlers(memCtrl, processManager, ctx);
+    this.traceCode = new TraceCodeHandlers(processManager, ctx);
     this.ptrMaps = new PointerMapHandlers();
     this.assembler = new AssembleHandlers(processManager, ctx, this.auditTrail);
   }
@@ -354,6 +357,10 @@ export class MemoryScanHandlers {
   // ── Reverse MWT (inverse of find_accesses) ──
 
   handleReverseMWT = (args: Record<string, unknown>) => this.reverseMwt.handleReverseMWT(args);
+
+  // ── Code Trace (Ultimap-style) ──
+
+  handleTraceCode = (args: Record<string, unknown>) => this.traceCode.handleTraceCode(args);
 
   // ── Minidump Parser ──
 

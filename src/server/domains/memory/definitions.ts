@@ -1149,6 +1149,31 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .query(),
   ),
 
+  // ── Instruction-Level Code Tracing (Ultimap-style, Win32-only) ──
+  tool('memory_trace_code', (t) =>
+    t
+      .desc(
+        'Ultimap-style instruction-level code tracing. Sets INT3 (0xCC) software breakpoints ' +
+          'at function entry points and logs every execution. Aggregates hit counts per address ' +
+          'to produce a hot-code-path heat map. ' +
+          'Win32-only — requires the Win32 debug API (DebugActiveProcess). ' +
+          'Provide either "addresses" (list of specific hex addresses) or ' +
+          '"startAddress" + "size" (range to scan for 0x55 push-rbp prologues). ' +
+          'Max trace time: 30s, max hits: 10000.',
+      )
+      .number('pid', 'Target process ID (required)')
+      .array('addresses', { type: 'string' }, 'List of hex addresses to set breakpoints at')
+      .string(
+        'startAddress',
+        'Start address of the range to scan for function entries (hex, e.g. "0x7FF612341000")',
+      )
+      .number('size', 'Size of the range to scan in bytes (required with startAddress)')
+      .number('maxHits', 'Maximum hits to collect before auto-stop (default: 10000)')
+      .number('timeoutMs', 'Maximum trace time in ms (default: 30000, max: 120000)')
+      .required('pid')
+      .destructive(),
+  ),
+
   // ── Reverse MWT (inverse of find_accesses, cross-platform) ──
   tool('memory_reverse_mwt', (t) =>
     t

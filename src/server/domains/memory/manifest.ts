@@ -166,6 +166,8 @@ const WIN32_ONLY_TOOLS = new Set([
   'memory_handle_enum',
   // Call stack walking — Win32 kernel32/dbghelp koffi
   'memory_call_stack',
+  // Ultimap-style INT3 code tracing — Win32 debug API
+  'memory_trace_code',
 ]);
 
 // All tool registrations — then filtered by platform
@@ -511,6 +513,12 @@ const allRegistrations = [
     tool: toolByName('memory_reverse_mwt'),
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleReverseMWT(a)),
+  },
+  // ── Code Trace (Ultimap-style, Win32-only) ──
+  {
+    tool: toolByName('memory_trace_code'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleTraceCode(a)),
   },
   // ── Pointer Map Persistence (.PTR parity) ──
   {
