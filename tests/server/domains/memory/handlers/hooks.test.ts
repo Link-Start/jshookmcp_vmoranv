@@ -32,7 +32,15 @@ describe('HookHandlers', () => {
     mockbpEngine.listBreakpoints = vi.fn().mockReturnValue([]);
     mockVehEngine.listBreakpoints = vi.fn().mockReturnValue([]);
     auditTrail = new MemoryAuditTrail();
-    handlers = new HookHandlers(mockbpEngine, null, mockinjector, undefined, undefined, auditTrail);
+    handlers = new HookHandlers(
+      mockbpEngine,
+      null,
+      null,
+      mockinjector,
+      undefined,
+      undefined,
+      auditTrail,
+    );
   });
 
   it('instantiates correctly', async () => {

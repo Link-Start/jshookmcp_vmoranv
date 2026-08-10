@@ -16,15 +16,31 @@ vi.mock('@native/CodeInjector', () => ({ codeInjector: {} }));
 vi.mock('@native/MemoryController', () => ({ memoryController: {} }));
 // Win32-only engines — may not be importable on macOS
 vi.mock('@native/HardwareBreakpoint', () => ({ hardwareBreakpointEngine: {} }));
+vi.mock('@native/VehDebugger', () => ({ vehDebuggerEngine: {} }));
+vi.mock('@native/SoftwareBreakpoint', () => ({ softwareBreakpointEngine: {} }));
 vi.mock('@native/Speedhack', () => ({ speedhack: {} }));
 vi.mock('@native/HeapAnalyzer', () => ({ heapAnalyzer: {} }));
 vi.mock('@native/PEAnalyzer', () => ({ peAnalyzer: {} }));
 vi.mock('@native/AntiCheatDetector', () => ({ antiCheatDetector: {} }));
+vi.mock('@native/CrossPlatformBreakpointEngine', () => ({ crossPlatformBreakpointEngine: {} }));
 
 const IS_WIN32 = process.platform === 'win32';
 
-// Win32-only tools that should be absent on macOS
-const WIN32_ONLY_TOOLS = new Set(['memory_breakpoint', 'memory_find_accesses', 'memory_speedhack']);
+// Win32-only tools that should be absent on non-Windows platforms.
+// Hardware breakpoints and find_accesses are now cross-platform.
+const WIN32_ONLY_TOOLS = new Set([
+  'memory_speedhack',
+  'memory_mono_detect',
+  'memory_mono_assemblies',
+  'memory_mono_classes',
+  'memory_mono_objects',
+  'memory_mono_fields',
+  'memory_mono_methods',
+  'memory_allocate',
+  'memory_free',
+  'memory_inject_shellcode',
+  'memory_inject_dll',
+]);
 
 // Cross-platform tools that should always be present
 const CROSS_PLATFORM_TOOLS = [
@@ -71,9 +87,9 @@ describe('memory manifest platform filtering', () => {
     expect(manifest.domain).toBe('memory');
   });
 
-  it(`should have ${IS_WIN32 ? 38 : 35} tools on ${process.platform}`, async () => {
+  it(`should have ${IS_WIN32 ? 48 : 37} tools on ${process.platform}`, async () => {
     const manifest = await loadManifestWithPlatform();
-    const expected = IS_WIN32 ? 38 : 35;
+    const expected = IS_WIN32 ? 48 : 37;
     expect(manifest.registrations.length).toBe(expected);
   });
 
@@ -121,8 +137,8 @@ describe('memory manifest platform filtering', () => {
     const win32Manifest = await loadManifestWithPlatform('win32');
     const linuxManifest = await loadManifestWithPlatform('linux');
 
-    expect(win32Manifest.registrations.length).toBe(38);
-    // E5-A: +3, E5-B: +1, E5-C: +2, E5-D-heap: +3. CE parity: +2 (search_string, pointer_chain autoscan). Total Linux: 22→37.
+    expect(win32Manifest.registrations.length).toBe(48);
+    // E5-A: +3, E5-B: +1, E5-C: +2, E5-D-heap: +3. CE parity: +2 (search_string, pointer_chain autoscan). Mono: +6 (Win32-only). Code injection: +4 (Win32-only). Win32: 38→48.
     expect(linuxManifest.registrations.length).toBe(37);
   });
 });

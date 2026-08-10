@@ -103,7 +103,14 @@ describe('ScanHandlers', () => {
       const response = await handlers.handleNextScan(dummyArgs);
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);
-      expect(mockscanner.nextScan).toHaveBeenCalledWith('test-session', 'exact', '1.2', undefined);
+      expect(mockscanner.nextScan).toHaveBeenCalledWith(
+        'test-session',
+        'exact',
+        '1.2',
+        undefined,
+        undefined,
+        undefined,
+      );
     });
 
     it('returns error response on failure', async () => {

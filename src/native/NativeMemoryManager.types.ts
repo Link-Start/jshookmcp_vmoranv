@@ -81,7 +81,11 @@ export type ScanCompareMode =
   | 'greater_than'
   | 'less_than'
   | 'between'
-  | 'not_equal';
+  | 'not_equal'
+  | 'changed_by'
+  | 'increased_by'
+  | 'decreased_by'
+  | 'changed_by_variable';
 
 /** Region filter for scan operations — generalized CE-style filter. */
 export interface RegionFilter {

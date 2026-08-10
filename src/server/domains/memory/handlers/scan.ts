@@ -50,7 +50,21 @@ const SCAN_COMPARE_MODES = new Set<ScanCompareMode>([
   'less_than',
   'between',
   'not_equal',
+  'changed_by',
+  'increased_by',
+  'decreased_by',
+  'changed_by_variable',
 ]);
+
+const DELTA_REQUIRED_MODES = new Set<ScanCompareMode>([
+  'changed_by',
+  'increased_by',
+  'decreased_by',
+]);
+
+const NON_NEGATIVE_DELTA_MODES = new Set<ScanCompareMode>(['increased_by', 'decreased_by']);
+
+const FLOAT_TYPES = new Set<ScanValueType>(['float', 'double']);
 
 const TOOL_FIRST_SCAN = 'memory_first_scan';
 const TOOL_NEXT_SCAN = 'memory_next_scan';
@@ -155,6 +169,47 @@ export class ScanHandlers {
       }
       const value = typeof args.value === 'string' ? args.value : undefined;
       const value2 = typeof args.value2 === 'string' ? args.value2 : undefined;
+
+      // Parse delta for delta modes
+      let delta: number | undefined;
+      if (DELTA_REQUIRED_MODES.has(mode)) {
+        const rawDelta = argNumber(args, 'delta');
+        if (rawDelta === undefined || !Number.isFinite(rawDelta)) {
+          throw new Error(
+            `${TOOL_NEXT_SCAN}: mode "${mode}" requires argument "delta" (a finite number)`,
+          );
+        }
+        if (NON_NEGATIVE_DELTA_MODES.has(mode) && rawDelta < 0) {
+          throw new Error(
+            `${TOOL_NEXT_SCAN}: mode "${mode}" requires a non-negative "delta", got: ${rawDelta}`,
+          );
+        }
+        delta = rawDelta;
+      }
+
+      // Parse tolerance for float/double valueType
+      let tolerance: number | undefined;
+      if (args.tolerance !== undefined) {
+        const rawTol = argNumber(args, 'tolerance');
+        if (rawTol === undefined || !Number.isFinite(rawTol)) {
+          throw new Error(
+            `${TOOL_NEXT_SCAN}: "tolerance" must be a finite number, got: ${JSON.stringify(args.tolerance)}`,
+          );
+        }
+        if (rawTol < 0) {
+          throw new Error(`${TOOL_NEXT_SCAN}: "tolerance" must be non-negative, got: ${rawTol}`);
+        }
+        // Validate that the session valueType is float/double
+        const { scanSessionManager } = await import('@native/MemoryScanSession');
+        const session = scanSessionManager.getSession(sessionId);
+        if (!FLOAT_TYPES.has(session.valueType)) {
+          throw new Error(
+            `${TOOL_NEXT_SCAN}: "tolerance" is only valid with float or double valueType (session valueType is "${session.valueType}")`,
+          );
+        }
+        tolerance = rawTol;
+      }
+
       // "between" requires both bounds — enforce here so the native layer never
       // receives an undefined upper bound and produce a cryptic comparator error.
       if (mode === 'between') {
@@ -164,7 +219,8 @@ export class ScanHandlers {
           );
         }
       }
-      const result = await this.scanner.nextScan(sessionId, mode, value, value2);
+
+      const result = await this.scanner.nextScan(sessionId, mode, value, value2, delta, tolerance);
       return {
         ...result,
         hint:

@@ -56,14 +56,21 @@ async function ensure(ctx: MCPServerContext): Promise<H> {
 
   if (IS_WIN32) {
     // Lazy-load Win32-only engines — only load on Windows
-    const [hardwareBreakpointEngine, vehDebuggerEngine, speedhack, peAnalyzer, antiCheatDetector] =
-      await Promise.all([
-        import('@native/HardwareBreakpoint'),
-        import('@native/VehDebugger'),
-        import('@native/Speedhack'),
-        import('@native/PEAnalyzer'),
-        import('@native/AntiCheatDetector'),
-      ]);
+    const [
+      hardwareBreakpointEngine,
+      vehDebuggerEngine,
+      softwareBreakpointEngine,
+      speedhack,
+      peAnalyzer,
+      antiCheatDetector,
+    ] = await Promise.all([
+      import('@native/HardwareBreakpoint'),
+      import('@native/VehDebugger'),
+      import('@native/SoftwareBreakpoint'),
+      import('@native/Speedhack'),
+      import('@native/PEAnalyzer'),
+      import('@native/AntiCheatDetector'),
+    ]);
 
     ctxAny[DEP_KEY] = new MemoryScanHandlers(
       memoryScanner.memoryScanner,
@@ -72,6 +79,7 @@ async function ensure(ctx: MCPServerContext): Promise<H> {
       structureAnalyzer.structureAnalyzer,
       hardwareBreakpointEngine.hardwareBreakpointEngine,
       vehDebuggerEngine.vehDebuggerEngine,
+      softwareBreakpointEngine.softwareBreakpointEngine,
       codeInjector.codeInjector,
       memoryController.memoryController,
       speedhack.speedhack,
@@ -94,6 +102,7 @@ async function ensure(ctx: MCPServerContext): Promise<H> {
       structureAnalyzer.structureAnalyzer,
       crossPlatformBp.crossPlatformBreakpointEngine,
       null, // vehDebuggerEngine — Win32 VEH only; requires code injection
+      null, // softBpEngine — Win32 INT3 only; requires Win32 debug APIs
       codeInjector.codeInjector,
       memoryController.memoryController,
       null, // speedhack
@@ -142,6 +151,18 @@ const WIN32_ONLY_TOOLS = new Set([
   // memory_breakpoint and memory_find_accesses are registered on all platforms.
   // Speedhack (Win32 timer hooking — LD_PRELOAD parity pending — E5-D)
   'memory_speedhack',
+  // Mono/.NET runtime introspection (Win32 ReadProcessMemory via Unity mono-2.0-bdwgc.dll)
+  'memory_mono_detect',
+  'memory_mono_assemblies',
+  'memory_mono_classes',
+  'memory_mono_objects',
+  'memory_mono_fields',
+  'memory_mono_methods',
+  // Code injection tools — Win32 VirtualAllocEx/VirtualFreeEx/CreateRemoteThread
+  'memory_allocate',
+  'memory_free',
+  'memory_inject_shellcode',
+  'memory_inject_dll',
 ]);
 
 // All tool registrations — then filtered by platform
@@ -235,6 +256,27 @@ const allRegistrations = [
     tool: toolByName('memory_code_caves'),
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleCodeCaves(a)),
+  },
+  // ── Code Injection Tools (Win32 only) ──
+  {
+    tool: toolByName('memory_allocate'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleMemoryAllocate(a)),
+  },
+  {
+    tool: toolByName('memory_free'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleMemoryFree(a)),
+  },
+  {
+    tool: toolByName('memory_inject_shellcode'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleInjectShellcode(a)),
+  },
+  {
+    tool: toolByName('memory_inject_dll'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleInjectDll(a)),
   },
   // ── Control Tools ──
   {
@@ -350,6 +392,37 @@ const allRegistrations = [
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleMemoryParseDump(a)),
   },
+  // ── Mono / .NET Runtime Tools (Win32-only) ──
+  {
+    tool: toolByName('memory_mono_detect'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleMonoDetect(a)),
+  },
+  {
+    tool: toolByName('memory_mono_assemblies'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleMonoAssemblies(a)),
+  },
+  {
+    tool: toolByName('memory_mono_classes'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleMonoClasses(a)),
+  },
+  {
+    tool: toolByName('memory_mono_objects'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleMonoObjects(a)),
+  },
+  {
+    tool: toolByName('memory_mono_fields'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleMonoFields(a)),
+  },
+  {
+    tool: toolByName('memory_mono_methods'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleMonoMethods(a)),
+  },
 ] as const;
 
 // Filter: on non-Windows platforms, exclude Win32-only tools
@@ -390,6 +463,8 @@ const manifest: DomainManifest<typeof DEP_KEY, H, typeof DOMAIN> = {
       /anti.?cheat|anti.?debug|反作弊|反调试/i,
       /guard\s*page|integrity\s*check|代码完整性/i,
       /内存\s*(扫描|搜索|分析|结构|断点|注入|冻结|加速|堆|模块|反作弊)/i,
+      /mono|il2cpp|unity|\.net\s*assembly|managed\s*heap/i,
+      /Mono\s*(class|object|field|assembly|method|domain|runtime)/i,
     ],
     priority: 90,
     tools: [
@@ -414,13 +489,18 @@ const manifest: DomainManifest<typeof DEP_KEY, H, typeof DOMAIN> = {
             'memory_heap_enumerate',
             'memory_pe_headers',
             'memory_anticheat_detect',
+            'memory_mono_detect',
+            'memory_mono_assemblies',
+            'memory_mono_classes',
+            'memory_mono_objects',
+            'memory_mono_fields',
           ]
         : []),
       'memory_write_history',
     ],
     hint: IS_WIN32
       ? 'Memory domain: scan → narrow → pointer chain → structure | breakpoint trace → patch/NOP → freeze ' +
-        ' speedhack | heap analysis | PE introspection | anti-cheat detection'
+        ' speedhack | heap analysis | PE introspection | anti-cheat detection | Mono/.NET runtime introspection'
       : 'Memory domain: scan → narrow → pointer chain → structure | breakpoint trace → patch/NOP → freeze | dump',
   },
 };

@@ -28,6 +28,10 @@ const ScanCompareModeOptions = [
   'less_than',
   'between',
   'not_equal',
+  'changed_by',
+  'increased_by',
+  'decreased_by',
+  'changed_by_variable',
 ] as const;
 
 export const memoryScanToolDefinitions: readonly Tool[] = [
@@ -42,6 +46,10 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
         'Alignment in bytes (0=unaligned, 4=4-byte aligned). Default: natural alignment for the type.',
       )
       .number('maxResults', 'Maximum results to return (default: 1,000,000)')
+      .number(
+        'tolerance',
+        'Float comparison tolerance (non-negative). Only valid with float/double valueType. Overrides default epsilon.',
+      )
       .prop('regionFilter', {
         type: 'object',
         properties: {
@@ -64,11 +72,26 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   ),
   tool('memory_next_scan', (t) =>
     t
-      .desc('Narrow an existing scan session.')
+      .desc(
+        'Narrow an existing scan session. Supports delta modes: changed_by (value changed by exactly N), ' +
+          'increased_by (value increased by at least N), decreased_by (value decreased by at least N), ' +
+          'changed_by_variable (returns per-address delta in results).',
+      )
       .string('sessionId', 'Scan session ID')
       .enum('mode', [...ScanCompareModeOptions], 'Comparison mode')
       .string('value', 'Target value for exact/greater_than/less_than/between/not_equal modes')
       .string('value2', 'Upper bound value for "between" mode')
+      .number(
+        'delta',
+        'Delta value for changed_by/increased_by/decreased_by modes. ' +
+          'changed_by: abs(cur-prev) === delta. increased_by: (cur-prev) >= delta. ' +
+          'decreased_by: (prev-cur) >= delta. Required for these modes, non-negative for increased_by/decreased_by.',
+      )
+      .number(
+        'tolerance',
+        'Float comparison tolerance (non-negative). Only valid with float/double valueType. ' +
+          'With delta modes: abs(diff - delta) <= tolerance.',
+      )
       .requiredOpenWorld('sessionId', 'mode'),
   ),
   tool('memory_unknown_scan', (t) =>
@@ -211,10 +234,17 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   tool('memory_structure_export_c', (t) =>
     t
       .desc(
-        'Export an inferred structure as a C-style struct definition with offset comments and type annotations.',
+        'Export an inferred structure as a C-style struct definition or ReClass.NET XML project. ' +
+          'Pass format="reclass" for a ReClass.NET 1.0 XML project importable by ReClass.NET.',
       )
       .string('structure', 'JSON string of InferredStruct to export')
       .string('name', 'Struct name (defaults to RTTI class name or "UnknownStruct")')
+      .enum(
+        'format',
+        ['c', 'reclass'],
+        'Export format: "c" (default) for C header, "reclass" for ReClass.NET XML project',
+        { default: 'c' },
+      )
       .required('structure')
       .query(),
   ),
@@ -236,12 +266,22 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   tool('memory_breakpoint', (t) =>
     t
       .desc(
-        `Hardware breakpoint via x64 debug registers (DR0-DR3). Actions: set, remove, list, trace. ` +
+        `Breakpoint via hardware debug registers (DR0-DR3) or software INT3 (0xCC). Actions: set, remove, list, trace. ` +
+          `Hardware BPs (type='hardware'): use x64 DR0-DR3, max 4 concurrent, support read/write/readwrite/execute. ` +
+          `Software BPs (type='software'): use INT3 (0xCC) patching, unlimited count, execute-only. ` +
           `Two debugger modes: "win32" (default, uses DebugActiveProcess — freezes entire process) ` +
           `and "veh" (Vectored Exception Handler — injects shellcode, only faulting thread pauses). ` +
-          `VEH mode is less intrusive but requires code injection which may be detected by anti-cheat systems.`,
+          `VEH mode is less intrusive but requires code injection which may be detected by anti-cheat systems. ` +
+          `Conditional breakpoints: pass a JS expression as "condition" (e.g. "rax > 0x1000"), evaluated against ` +
+          `register context on each hit; falsy results auto-resume without reporting.`,
       )
       .enum('action', ['set', 'remove', 'list', 'trace'], 'Breakpoint operation')
+      .enum(
+        'type',
+        ['hardware', 'software'],
+        'Breakpoint type: hardware (DR0-DR3, default) or software (INT3/0xCC, unlimited count, execute-only)',
+        { default: 'hardware' },
+      )
       .number(
         'pid',
         'Target process ID (optional when a browser session is attached; action=set/trace)',
@@ -252,6 +292,12 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .string('breakpointId', 'Breakpoint ID (action=remove)')
       .number('maxHits', 'Max hits to collect (action=trace, default: 50)')
       .number('timeoutMs', 'Timeout ms (action=trace, default: 10000)')
+      .string(
+        'condition',
+        'JS expression evaluated against register context on each hit (e.g. "rax > 0x1000 && ecx == 5"). ' +
+          'Falsy results auto-resume without reporting. Register aliases: rax/rbx/rcx/rdx/rsi/rdi/rsp/rbp/rip/rflags and ' +
+          'x86-32 names (eax/ebx/ecx/edx/esi/edi/esp/ebp/eip/eflags). Use BigInt n-suffix for bitwise ops on rflags.',
+      )
       .enum(
         'debuggerMode',
         ['win32', 'veh'],
@@ -340,6 +386,60 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .query(),
   ),
 
+  // Code Injection Tools (Win32 only, gated behind JSHOOK_INJECTION_ENABLE=1)
+  tool('memory_allocate', (t) =>
+    t
+      .desc(
+        'Allocate executable memory in target process (VirtualAllocEx wrapper). Win32 only. ' +
+          'Requires JSHOOK_INJECTION_ENABLE=1.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .number('size', 'Size in bytes to allocate')
+      .required('size')
+      .destructive(),
+  ),
+  tool('memory_free', (t) =>
+    t
+      .desc(
+        'Free remote memory in target process (VirtualFreeEx wrapper). Win32 only. ' +
+          'Requires JSHOOK_INJECTION_ENABLE=1.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('address', 'Address to free (hex)')
+      .required('address')
+      .destructive(),
+  ),
+  tool('memory_inject_shellcode', (t) =>
+    t
+      .desc(
+        'Inject shellcode into target process. Win32 only. ' +
+          'Methods: createremote (CreateRemoteThread) or ntcreatethread (NtCreateThreadEx). ' +
+          'Requires JSHOOK_INJECTION_ENABLE=1.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('shellcode', 'Shellcode as hex bytes (e.g. "48 31 C0 ...")')
+      .enum(
+        'method',
+        ['createremote', 'ntcreatethread'],
+        'Injection method (default: createremote)',
+      )
+      .required('shellcode')
+      .destructive(),
+  ),
+  tool('memory_inject_dll', (t) =>
+    t
+      .desc(
+        'Inject a DLL into target process. Win32 only. ' +
+          'Modes: loadlibrary (LoadLibraryW injection) or manualmap (manual mapping). ' +
+          'Requires JSHOOK_INJECTION_ENABLE=1.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('dllPath', 'Path to the DLL file to inject')
+      .enum('mode', ['loadlibrary', 'manualmap'], 'Injection mode (default: loadlibrary)')
+      .required('dllPath')
+      .destructive(),
+  ),
+
   // Control Tools
   tool('memory_write_value', (t) =>
     t
@@ -388,7 +488,8 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
   tool('memory_speedhack', (t) =>
     t
       .desc(
-        `Hook time APIs (GetTickCount64/GetTickCount/QueryPerformanceCounter) to scale process ` +
+        `Hook time APIs (GetTickCount64/GetTickCount/QueryPerformanceCounter/QueryPerformanceFrequency/` +
+          `timeGetTime/GetSystemTimeAsFileTime) to scale process time via an in-process SSE2 trampoline. ` +
           `time via an in-process SSE2 trampoline. Actions: apply (hook + set speed), set (adjust ` +
           `speed without re-hooking), restore (unhook and restore original functions). Speed range ` +
           `0.01–100x; values outside this range are rejected to avoid destabilising the target.`,
@@ -719,5 +820,85 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
         'Optional list of addresses to resolve against the dump',
       )
       .required('filePath'),
+  ),
+
+  // ── Mono / .NET Runtime Tools (Win32-only) ──
+  tool('memory_mono_detect', (t) =>
+    t
+      .desc(
+        'Detect Mono or IL2CPP runtime in a target process. Returns runtime kind (mono/il2cpp), ' +
+          'module name, pointer size, and root domain address if resolved. ' +
+          'Works on Unity games and other Mono/.NET applications.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .required()
+      .query(),
+  ),
+  tool('memory_mono_assemblies', (t) =>
+    t
+      .desc(
+        'List Mono assemblies loaded in the root domain of a Unity/Mono process. ' +
+          'Returns assembly name, address, and image address. ' +
+          'Optionally filter by name substring.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('nameFilter', 'Optional substring filter on assembly name (case-insensitive)')
+      .required()
+      .query(),
+  ),
+  tool('memory_mono_classes', (t) =>
+    t
+      .desc(
+        'List Mono classes in a specific assembly from a Unity/Mono process. ' +
+          'Reads the MonoImage type definition table (MONO_TABLE_TYPEDEF) and resolves ' +
+          'class names from the string heap. Optionally filter by namespace.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string(
+        'assemblyName',
+        'Assembly name substring to match (e.g. "Assembly-CSharp", "UnityEngine")',
+      )
+      .string('namespaceFilter', 'Optional namespace substring filter')
+      .number('maxResults', 'Maximum classes to return (default: 500)')
+      .required('assemblyName')
+      .query(),
+  ),
+  tool('memory_mono_objects', (t) =>
+    t
+      .desc(
+        'Find live Mono objects of a specific class in the managed heap. ' +
+          'Resolves class vtable, then scans writable heap regions for vtable pointer matches. ' +
+          'Returns object addresses with class name and estimated size.',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('className', 'Class name substring to match (e.g. "Player", "EnemyController")')
+      .number('maxResults', 'Maximum objects to return (default: 100)')
+      .required('className')
+      .query(),
+  ),
+  tool('memory_mono_fields', (t) =>
+    t
+      .desc(
+        'Read field values from a Mono object at the given address. ' +
+          'Resolves the class via vtable pointer, walks MonoClass fields, and decodes each ' +
+          'field value with type-aware heuristics (int, float, string pointer detection).',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('address', 'Object address (hex, e.g. "0x7FF612340000")')
+      .required('address')
+      .query(),
+  ),
+  tool('memory_mono_methods', (t) =>
+    t
+      .desc(
+        'Inspect method count for a Mono class in a Unity/Mono process. ' +
+          'Full method name enumeration requires walking the MonoMethod table from MonoImage ' +
+          '(not yet implemented — returns methodCount from the type definition table).',
+      )
+      .number('pid', 'Target process ID (optional when a browser session is attached)')
+      .string('assemblyName', 'Assembly name substring to match')
+      .string('className', 'Class name substring to match within the assembly')
+      .required('assemblyName', 'className')
+      .query(),
   ),
 ];

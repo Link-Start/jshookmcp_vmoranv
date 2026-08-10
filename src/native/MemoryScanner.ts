@@ -24,7 +24,12 @@ import {
 import type { NativeMemoryManager } from './NativeMemoryManager.impl';
 import { nativeMemoryManager } from './NativeMemoryManager.impl';
 import { scanSessionManager } from './MemoryScanSession';
-import { compareScanValues, getValueSize, getDefaultAlignment } from './ScanComparators';
+import {
+  compareScanValues,
+  getValueSize,
+  getDefaultAlignment,
+  readTypedValue,
+} from './ScanComparators';
 import { parsePattern } from './NativeMemoryManager.utils';
 import type { ScanOptions, ScanCompareMode, ScanValueType } from './NativeMemoryManager.types';
 import { createPlatformProvider } from './platform/factory.js';
@@ -41,6 +46,8 @@ export interface ScanResult {
   totalMatches: number;
   truncated: boolean;
   elapsed: string;
+  /** Per-address deltas for changed_by_variable mode (address hex -> delta). */
+  deltas?: Record<string, number>;
 }
 
 export class MemoryScanner {
@@ -176,6 +183,8 @@ export class MemoryScanner {
     mode: ScanCompareMode,
     value?: string,
     value2?: string,
+    delta?: number,
+    tolerance?: number,
   ): Promise<ScanResult> {
     const start = performance.now();
     const session = scanSessionManager.getSession(sessionId);
@@ -205,6 +214,7 @@ export class MemoryScanner {
 
     const newAddresses: bigint[] = [];
     const newValues = new Map<bigint, Buffer>();
+    const deltasByAddress = new Map<bigint, number>();
 
     const handle = this.provider.openProcess(pid, false);
     try {
@@ -218,9 +228,31 @@ export class MemoryScanner {
 
         const prevBuf = previousValues.get(addr) ?? null;
 
-        if (compareScanValues(currentBuf, prevBuf, targetBuf, target2Buf, mode, valueType)) {
+        if (
+          compareScanValues(
+            currentBuf,
+            prevBuf,
+            targetBuf,
+            target2Buf,
+            mode,
+            valueType,
+            delta,
+            tolerance,
+          )
+        ) {
           newAddresses.push(addr);
           newValues.set(addr, Buffer.from(currentBuf));
+
+          // For changed_by_variable, compute per-address delta
+          if (mode === 'changed_by_variable' && prevBuf) {
+            const curVal = readTypedValue(currentBuf, valueType);
+            const prevVal = readTypedValue(prevBuf, valueType);
+            const diff =
+              typeof curVal === 'bigint' && typeof prevVal === 'bigint'
+                ? Number(curVal - prevVal)
+                : Number(curVal) - Number(prevVal);
+            deltasByAddress.set(addr, diff);
+          }
         }
       }
     } finally {
@@ -231,7 +263,7 @@ export class MemoryScanner {
     const elapsed = `${(performance.now() - start).toFixed(1)}ms`;
     const displayAddresses = newAddresses.slice(0, SCAN_DISPLAY_RESULTS_LIMIT).map(formatAddress);
 
-    return {
+    const result: ScanResult = {
       sessionId,
       matchCount: newAddresses.length,
       scanNumber: session.scanCount,
@@ -240,6 +272,16 @@ export class MemoryScanner {
       truncated: newAddresses.length > SCAN_DISPLAY_RESULTS_LIMIT,
       elapsed,
     };
+
+    if (mode === 'changed_by_variable' && deltasByAddress.size > 0) {
+      const deltas: Record<string, number> = {};
+      for (const [addr, d] of deltasByAddress) {
+        deltas[formatAddress(addr)] = d;
+      }
+      result.deltas = deltas;
+    }
+
+    return result;
   }
 
   /**

@@ -18,6 +18,7 @@ import type { MemoryScanner } from '@native/MemoryScanner';
 import type { MemoryScanSessionManager } from '@native/MemoryScanSession';
 import type { PointerChainEngine } from '@native/PointerChainEngine';
 import type { HardwareBreakpointEngine } from '@native/HardwareBreakpoint';
+import type { SoftwareBreakpointEngine } from '@native/SoftwareBreakpoint';
 import type { CodeInjector } from '@native/CodeInjector';
 import type { MemoryController } from '@native/MemoryController';
 import type { Speedhack } from '@native/Speedhack';
@@ -42,6 +43,7 @@ import {
 } from './handlers/find-accesses';
 import { RegionHandlers } from './handlers/region-enumerate';
 import { MinidumpHandlers } from './handlers/minidump-parse';
+import { MonoHandlers } from './handlers/mono';
 import { MemoryAuditTrail } from '@modules/process/memory/AuditTrail';
 import { logger } from '@utils/logger';
 
@@ -56,6 +58,7 @@ export class MemoryScanHandlers {
   private readonly regions: RegionHandlers;
   private readonly findAccesses: FindAccessesHandlers;
   private readonly minidump: MinidumpHandlers;
+  private readonly mono: MonoHandlers;
   /** Shared audit trail for destructive operations (write/freeze/patch). */
   readonly auditTrail = new MemoryAuditTrail();
 
@@ -66,6 +69,7 @@ export class MemoryScanHandlers {
     structAnalyzer: import('@native/StructureAnalyzer').StructureAnalyzer,
     bpEngine: HardwareBreakpointEngine | null,
     vehEngine: import('@native/VehDebugger').VehDebuggerEngine | null,
+    softBpEngine: SoftwareBreakpointEngine | null,
     injector: CodeInjector,
     memCtrl: MemoryController,
     speedhackEngine: Speedhack | null,
@@ -83,6 +87,7 @@ export class MemoryScanHandlers {
     this.hooks = new HookHandlers(
       bpEngine,
       vehEngine,
+      softBpEngine,
       injector,
       processManager,
       ctx,
@@ -107,6 +112,7 @@ export class MemoryScanHandlers {
       ctx,
     );
     this.minidump = new MinidumpHandlers();
+    this.mono = new MonoHandlers(processManager, ctx);
   }
 
   // ── Session ──
@@ -209,6 +215,10 @@ export class MemoryScanHandlers {
   handlePatchNop = (args: Record<string, unknown>) => this.hooks.handlePatchNop(args);
   handlePatchUndo = (args: Record<string, unknown>) => this.hooks.handlePatchUndo(args);
   handleCodeCaves = (args: Record<string, unknown>) => this.hooks.handleCodeCaves(args);
+  handleMemoryAllocate = (args: Record<string, unknown>) => this.hooks.handleMemoryAllocate(args);
+  handleMemoryFree = (args: Record<string, unknown>) => this.hooks.handleMemoryFree(args);
+  handleInjectShellcode = (args: Record<string, unknown>) => this.hooks.handleInjectShellcode(args);
+  handleInjectDll = (args: Record<string, unknown>) => this.hooks.handleInjectDll(args);
 
   // ── Read / Write ──
 
@@ -270,6 +280,15 @@ export class MemoryScanHandlers {
 
   handleMemoryParseDump = (args: Record<string, unknown>) =>
     this.minidump.handleMemoryParseDump(args);
+
+  // ── Mono / .NET Runtime ──
+
+  handleMonoDetect = (args: Record<string, unknown>) => this.mono.handleMonoDetect(args);
+  handleMonoAssemblies = (args: Record<string, unknown>) => this.mono.handleMonoAssemblies(args);
+  handleMonoClasses = (args: Record<string, unknown>) => this.mono.handleMonoClasses(args);
+  handleMonoObjects = (args: Record<string, unknown>) => this.mono.handleMonoObjects(args);
+  handleMonoFields = (args: Record<string, unknown>) => this.mono.handleMonoFields(args);
+  handleMonoMethods = (args: Record<string, unknown>) => this.mono.handleMonoMethods(args);
 }
 
 // ── FindAccessesHandlers dependency adapters ──
