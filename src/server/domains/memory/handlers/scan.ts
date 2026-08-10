@@ -20,6 +20,11 @@ import {
 import { logger } from '@utils/logger';
 import { MemoryAuditTrail } from '@modules/process/memory/AuditTrail';
 import { validateHexAddress, requireStringArg, validateValueForType } from './validation';
+import {
+  createDiskScanSession,
+  appendToDiskScan,
+  MAX_DISK_SCAN_ADDRESSES,
+} from './scan-persistence';
 
 // ── AOB operator types ──
 
@@ -105,11 +110,7 @@ const SCAN_COMPARE_MODES = new Set<string>([
   'not_equal_to',
 ]);
 
-const DELTA_REQUIRED_MODES = new Set<string>([
-  'changed_by',
-  'increased_by',
-  'decreased_by',
-]);
+const DELTA_REQUIRED_MODES = new Set<string>(['changed_by', 'increased_by', 'decreased_by']);
 
 const NON_NEGATIVE_DELTA_MODES = new Set<string>(['increased_by', 'decreased_by']);
 
@@ -227,14 +228,60 @@ export class ScanHandlers {
       const encCount = encryptedAddresses?.length ?? 0;
       const mergedTotal = (result.totalMatches ?? 0) + encCount;
 
+      // ── Disk-Based Scan Persistence (CrySearch parity) ──
+      const persistToDisk = argBool(args, 'persistToDisk', false);
+      let diskSession: ReturnType<typeof createDiskScanSession> | undefined;
+      if (persistToDisk) {
+        // Create a disk-backed session to stream results
+        diskSession = createDiskScanSession(result.sessionId, valueType);
+        const totalMatches = result.totalMatches ?? 0;
+        if (totalMatches > MAX_DISK_SCAN_ADDRESSES) {
+          throw new Error(
+            `${TOOL_FIRST_SCAN}: scan returned ${totalMatches.toLocaleString()} matches, ` +
+              `which exceeds the disk persistence cap of ${MAX_DISK_SCAN_ADDRESSES.toLocaleString()}. ` +
+              `Narrow the scan (stricter value, smaller region filter) before persisting to disk.`,
+          );
+        }
+
+        // Stream results to disk if addresses are available
+        if (result.results && result.results.length > 0) {
+          const records: Array<{ address: bigint; value: bigint }> = [];
+          const batchSize = 10000;
+          for (let i = 0; i < result.results.length; i += 1) {
+            const r = result.results[i]!;
+            try {
+              const addr = BigInt(r.address.replace(/^0x/i, '0x') || '0x0');
+              const valStr = typeof r.value === 'string' ? r.value : String(r.value ?? '0');
+              const val = BigInt(valStr.replace(/^0x/i, '0x') || '0x0');
+              records.push({ address: addr, value: val });
+            } catch {
+              // Skip unparseable entries
+            }
+            if (records.length >= batchSize || i === result.results.length - 1) {
+              if (records.length > 0) {
+                appendToDiskScan(result.sessionId, records);
+                records.length = 0;
+              }
+            }
+          }
+        }
+      }
+
       return {
         ...result,
         encryptedAddresses: encryptedAddresses || undefined,
         encryptedScan: encrypted || undefined,
         xorKey: encrypted ? xorKey : undefined,
+        diskPersisted: persistToDisk || undefined,
+        ...(diskSession
+          ? {
+              diskFile: diskSession.filePath,
+              diskRecords: diskSession.totalRecords,
+            }
+          : {}),
         hint:
           mergedTotal > 0
-            ? `Found ${mergedTotal} matches${encCount > 0 ? ` (${encCount} encrypted)` : ''}. Use memory_next_scan with sessionId "${result.sessionId}" to narrow down.`
+            ? `Found ${mergedTotal} matches${encCount > 0 ? ` (${encCount} encrypted)` : ''}${persistToDisk ? ` — persisted to ${diskSession!.filePath}` : ''}. Use memory_next_scan with sessionId "${result.sessionId}" to narrow down.`
             : 'No matches found. Try a different value or type.',
       };
     });
