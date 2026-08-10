@@ -571,30 +571,40 @@ export class HookHandlers {
         );
       }
       const start = Date.now();
-      // DLL injection outcome depends on the target process loading the DLL.
-      // This is a best-effort operation — the handler records the attempt and
-      // returns the parameters for audit.
-      const result = {
-        success: true,
-        pid,
-        dllPath,
-        mode,
-        hint:
-          mode === 'loadlibrary'
-            ? `DLL injection via LoadLibraryW requested for "${dllPath}" in process ${pid}. ` +
-              `Check target process loaded modules to confirm.`
-            : `Manual map injection requested for "${dllPath}" in process ${pid}. ` +
-              `Manual mapping is a best-effort operation. Verify with memory_pe_headers.`,
-      };
-      this.recordAudit({
-        operation: 'inject_dll',
-        pid,
-        address: null,
-        size: null,
-        result: 'success',
-        durationMs: Date.now() - start,
-      });
-      return result;
+      try {
+        const result = await this.injector.injectDll(
+          pid,
+          dllPath,
+          mode as 'loadlibrary' | 'manualmap',
+        );
+        this.recordAudit({
+          operation: 'inject_dll',
+          pid,
+          address: result.allocatedAddress ?? result.imageBase ?? null,
+          size: result.imageSize ?? null,
+          result: 'success',
+          durationMs: Date.now() - start,
+        });
+        return {
+          success: true,
+          ...result,
+          hint:
+            mode === 'loadlibrary'
+              ? `DLL injected via LoadLibraryA in process ${pid} (thread ${result.threadId}). Verify with memory_pe_headers.`
+              : `DLL manually mapped at ${result.imageBase} in process ${pid} (${result.injectionMethod}). Verify with memory_pe_headers.`,
+        };
+      } catch (e) {
+        this.recordAudit({
+          operation: 'inject_dll',
+          pid,
+          address: null,
+          size: null,
+          result: 'failure',
+          error: e instanceof Error ? e.message : String(e),
+          durationMs: Date.now() - start,
+        });
+        throw e;
+      }
     });
   }
 }

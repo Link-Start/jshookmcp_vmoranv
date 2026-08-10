@@ -246,7 +246,14 @@ describe('HookHandlers — code injection tools', () => {
   // ── memory_inject_dll ──
 
   describe('handleInjectDll', () => {
-    it('returns success with dll path', async () => {
+    it('calls injector.injectDll and returns result on success', async () => {
+      mockInjector.injectDll = vi.fn().mockResolvedValue({
+        method: 'loadlibrary',
+        mode: 'loadlibrary',
+        dllPath: 'C:\\Windows\\System32\\test.dll',
+        threadId: 12345,
+        allocatedAddress: '0x30000',
+      });
       const response = await handlers.handleInjectDll({
         pid: 1234,
         dllPath: 'C:\\Windows\\System32\\test.dll',
@@ -255,9 +262,26 @@ describe('HookHandlers — code injection tools', () => {
       expect(parsed.success).toBe(true);
       expect(parsed.dllPath).toBe('C:\\Windows\\System32\\test.dll');
       expect(parsed.mode).toBe('loadlibrary');
+      expect(parsed.threadId).toBe(12345);
+      expect(parsed.allocatedAddress).toBe('0x30000');
+      expect(mockInjector.injectDll).toHaveBeenCalledWith(
+        1234,
+        'C:\\Windows\\System32\\test.dll',
+        'loadlibrary',
+      );
     });
 
     it('accepts manualmap mode', async () => {
+      mockInjector.injectDll = vi.fn().mockResolvedValue({
+        method: 'manualmap',
+        mode: 'manualmap',
+        dllPath: 'C:\\test.dll',
+        imageBase: '0x7FFE0000',
+        imageSize: 4096,
+        entryPoint: '0x7FFE1000',
+        threadId: 6789,
+        injectionMethod: 'NtCreateThreadEx',
+      });
       const response = await handlers.handleInjectDll({
         pid: 1234,
         dllPath: 'C:\\test.dll',
@@ -266,6 +290,19 @@ describe('HookHandlers — code injection tools', () => {
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);
       expect(parsed.mode).toBe('manualmap');
+      expect(parsed.imageBase).toBe('0x7FFE0000');
+      expect(mockInjector.injectDll).toHaveBeenCalledWith(1234, 'C:\\test.dll', 'manualmap');
+    });
+
+    it('handles injection failure and records audit trail', async () => {
+      mockInjector.injectDll = vi.fn().mockRejectedValue(new Error('Injection failed'));
+      const response = await handlers.handleInjectDll({
+        pid: 1234,
+        dllPath: 'C:\\test.dll',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error).toContain('Injection failed');
     });
 
     it('rejects invalid mode', async () => {

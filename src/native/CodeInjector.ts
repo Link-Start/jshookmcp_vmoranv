@@ -12,7 +12,7 @@ import {
   NOP_OPCODE,
 } from '@src/constants';
 import { ToolError } from '@errors/ToolError';
-import type { PatchOperation, CodeCave } from './CodeInjector.types';
+import type { PatchOperation, CodeCave, DllInjectionResult } from './CodeInjector.types';
 import {
   openProcessForMemory,
   CloseHandle,
@@ -239,6 +239,98 @@ export class CodeInjector {
       return VirtualFreeEx(handle, addr, 0, MEM.RELEASE);
     } finally {
       CloseHandle(handle);
+    }
+  }
+
+  /**
+   * Inject a DLL into a target process.
+   *
+   * - `mode: 'loadlibrary'` — classic LoadLibraryA injection via CreateRemoteThread.
+   * - `mode: 'manualmap'` — stealthy manual map injection (bypasses LdrLoadDll).
+   *
+   * Both modes require Windows and admin-elevated access to the target process.
+   */
+  async injectDll(
+    pid: number,
+    dllPath: string,
+    mode: 'loadlibrary' | 'manualmap' = 'loadlibrary',
+  ): Promise<DllInjectionResult> {
+    if (process.platform !== 'win32') {
+      throw new ToolError('PREREQUISITE', 'DLL injection is only supported on Windows');
+    }
+
+    if (mode === 'manualmap') {
+      const { manualMapInjector } = await import('./ManualMapInjector');
+      const result = await manualMapInjector.inject({ pid, dllPath });
+      return {
+        method: 'manualmap',
+        mode: 'manualmap',
+        dllPath,
+        imageBase: result.imageBase,
+        imageSize: result.imageSize,
+        entryPoint: result.entryPoint,
+        threadId: result.threadId,
+        injectionMethod: result.injectionMethod,
+      };
+    }
+
+    // LoadLibrary mode
+    const {
+      openProcessForMemory: openProcForMemory,
+      CloseHandle: closeHandle,
+      WriteProcessMemory: writeProcMem,
+      VirtualAllocEx: virtualAllocEx,
+      CreateRemoteThread: createRemoteThread,
+      GetModuleHandle: getModuleHandle,
+      GetProcAddress: getProcAddress,
+      PAGE: page,
+      MEM: mem,
+    } = await import('./Win32API');
+
+    const handle = openProcForMemory(pid, true);
+    try {
+      const kernel32Handle = getModuleHandle('kernel32.dll');
+      const loadLibraryAddr = getProcAddress(kernel32Handle, 'LoadLibraryA');
+      if (!loadLibraryAddr) {
+        throw new ToolError('RUNTIME', 'Failed to resolve LoadLibraryA address in kernel32.dll');
+      }
+
+      const pathBuffer = Buffer.from(dllPath + '\0', 'ascii');
+      const remoteMem = virtualAllocEx(
+        handle,
+        0n,
+        pathBuffer.length,
+        mem.COMMIT | mem.RESERVE,
+        page.READWRITE,
+      );
+      if (!remoteMem) {
+        throw new ToolError(
+          'RUNTIME',
+          'VirtualAllocEx failed to allocate remote memory for DLL path',
+        );
+      }
+
+      writeProcMem(handle, remoteMem, pathBuffer);
+
+      const { handle: threadHandle, threadId } = createRemoteThread(
+        handle,
+        loadLibraryAddr,
+        remoteMem,
+      );
+      if (!threadHandle) {
+        throw new ToolError('RUNTIME', 'CreateRemoteThread failed');
+      }
+
+      closeHandle(threadHandle);
+      return {
+        method: 'loadlibrary',
+        mode: 'loadlibrary',
+        dllPath,
+        threadId,
+        allocatedAddress: `0x${remoteMem.toString(16).toUpperCase()}`,
+      };
+    } finally {
+      closeHandle(handle);
     }
   }
 
