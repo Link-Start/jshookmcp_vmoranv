@@ -867,39 +867,27 @@ export const nativeEmulatorTools: Tool[] = [
       .number('maxMessageBytes', 'Max inbound message bytes (default: 1 MiB)')
       .required('action'),
   ),
-  // ── GDBServer Protocol Stub ─────────────────────────────────────
+  // ── GDBServer ───────────────────────────────────────────────
   tool('nemu_gdbserver', (t) =>
     t
       .desc(
-        'GDB Remote Serial Protocol (RSP) stub over a user-provided TCP listener. ' +
-          'This is a protocol-stub layer — you must provide your own TCP socket (e.g. netcat, ' +
-          'a Python socket script, or custom bridge). The tool receives raw RSP packets and ' +
-          'dispatches them to the emulator, returning RSP responses. ' +
+        'GDB Remote Serial Protocol (RSP) TCP server. ' +
+          'Starts a real TCP server on host:port that GDB clients can connect to. ' +
+          'Provides full register read/write, memory read/write, step, continue, ' +
+          'software breakpoints (Z0/z0), vCont extended step/continue, qXfer target ' +
+          'description, thread listing, and feature negotiation (qSupported). ' +
+          'The server dispatches commands to the nemu emulator session in real-time. ' +
           'Packet format: $data#checksum (RFC 5.1 GDB Remote Serial Protocol). ' +
-          'Supported commands: ? (halt reason), g (read registers), G (write registers), ' +
-          'm addr,len (read memory), M addr,len:data (write memory), s (step), c (continue), ' +
-          'Z0,z0 (set/clear software breakpoint). ' +
-          'Actions: packet (process a single RSP packet — returns the response for the caller ' +
-          'to send back over the wire), status (report session readiness). ' +
-          'This is a CE 7.6+ / x64dbg gdbserver-compatible minimal implementation.',
+          'Actions: start (launch TCP server), stop (shut down), status (server + clients).',
       )
       .enum(
         'action',
-        ['packet', 'status'],
-        'packet=process an RSP packet, status=report session readiness',
+        ['start', 'stop', 'status'],
+        'start=launch TCP GDB server, stop=shut down, status=server info + connected clients',
       )
-      .string('sessionId', 'Session id with a loaded library (action=packet)')
-      .string('packet', 'Raw RSP packet string (e.g. "$g#67") to process (action=packet)')
-      .string(
-        'host',
-        'Documentation-only: the host the caller is listening on (default: localhost). Used only in status response.',
-        { default: 'localhost' },
-      )
-      .number(
-        'port',
-        'Documentation-only: the TCP port (default: 1234). Used only in status response.',
-        { default: 1234 },
-      )
+      .string('sessionId', 'Session id with a loaded library (required for start)')
+      .string('host', 'TCP host to listen on (default: 127.0.0.1)', { default: '127.0.0.1' })
+      .number('port', 'TCP port to listen on (default: 1234)', { default: 1234 })
       .required('action'),
   ),
 ];

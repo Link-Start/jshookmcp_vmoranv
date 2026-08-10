@@ -43,6 +43,12 @@ import { buildJavaFieldValue, buildJavaMockImpl } from './handler-java';
 import { decodeLiteVmWord, LITEVM_KNOWN_DATA } from './handler-litevm';
 import { ensureRawMemorySize, rawMemoryLimit, toUint8 } from './handler-memory';
 import { persistTraceArtifact, traceFilterMatch, traceRow, type TraceMode } from './handler-trace';
+import {
+  getOrCreateGdbServer,
+  removeGdbServer,
+  getGdbServer,
+  listGdbServers,
+} from '@native/GdbRspServer';
 
 /** Cap on instruction-trace events returned, regardless of requested maxSteps. */
 const TRACE_HARD_CAP = 100_000;
@@ -2440,209 +2446,78 @@ export class NativeEmulatorHandlers {
     });
   }
 
-  // ── GDBServer Protocol Stub ──────────────────────────────────────────
+  // ── GDBServer ────────────────────────────────────────────────────────
   //
-  // Implements the GDB Remote Serial Protocol (RSP) over a user-provided TCP
-  // listener. The caller (e.g. a Python socket bridge or x64dbg gdbserver
-  // plugin) sends raw RSP packets; this handler translates them to nemu_*
-  // operations and returns RSP responses.
+  // Real GDB RSP TCP server that GDB/GEF/x64dbg clients can connect to.
+  // The server dispatches commands to the emulator session in real-time:
+  // register read/write, memory read/write, step, continue, breakpoints,
+  // vCont extended operations, qXfer target description, feature negotiation.
   //
   // Packet format: $<data>#<checksum>
-  // Checksum = hex sum of <data> bytes, mod 256.
+  // Checksum = sum of <data> bytes, mod 256, hex-encoded.
   //
   async handleGdbserver(args: ToolArgs): Promise<ToolResponse> {
     return handleSafe(async () => {
       const action = argStringRequired(args, 'action');
 
       if (action === 'status') {
-        const host = argString(args, 'host', 'localhost');
-        const port = argNumber(args, 'port', 1234);
         const sessionId = argString(args, 'sessionId');
-        let sessionReady = false;
         if (sessionId) {
-          try {
-            this.sessions.requireSession(sessionId);
-            sessionReady = true;
-          } catch {
-            sessionReady = false;
-          }
+          const server = getGdbServer(sessionId);
+          if (server) return server.status;
+          // Also check global list for orphaned servers.
+          const allServers = listGdbServers();
+          const match = allServers.find((s) => s.sessionId === sessionId);
+          if (match) return match;
         }
-        return {
-          protocol: 'gdb-rsp-v1',
-          host,
-          port,
-          supportedCommands: [
-            '? (halt reason)',
-            'g (read registers)',
-            'G (write registers)',
-            'm (read memory)',
-            'M (write memory — stub)',
-            's (step — stub)',
-            'c (continue — stub)',
-            'Z0 (set breakpoint — stub)',
-            'z0 (clear breakpoint — stub)',
-          ],
-          sessionReady,
-          sessionId: sessionId ?? null,
-          note: 'Protocol stub — caller must provide its own TCP listener. RSP packets via action=packet. For full execution control use nemu_call_symbol/nemu_trace/nemu_read_memory/nemu_write_memory.',
-        };
+        return { running: false, servers: listGdbServers() };
       }
 
-      if (action !== 'packet') {
-        throw new Error(`nemu_gdbserver: invalid action "${action}" — expected packet or status`);
+      if (action === 'stop') {
+        const sessionId = argString(args, 'sessionId');
+        if (sessionId) {
+          const removed = removeGdbServer(sessionId);
+          return { stopped: removed, sessionId };
+        }
+        // Stop all servers.
+        const servers = listGdbServers();
+        for (const s of servers) {
+          removeGdbServer(s.sessionId);
+        }
+        return { stopped: true, count: servers.length };
       }
 
-      const session = this.requireSession(args);
-      const packet = argStringRequired(args, 'packet');
-      const rsp = this.processGdbPacket(packet, session);
-      return rsp;
+      if (action !== 'start') {
+        throw new Error(
+          `nemu_gdbserver: invalid action "${action}" — expected start, stop, or status`,
+        );
+      }
+
+      // start — launch a real TCP GDB RSP server.
+      const sessionId = argStringRequired(args, 'sessionId');
+      const host = argString(args, 'host', '127.0.0.1');
+      const port = argNumber(args, 'port', 1234);
+
+      // Verify session exists.
+      this.sessions.requireSession(sessionId);
+
+      // Check for existing server on this session.
+      const existing = getGdbServer(sessionId);
+      if (existing?.running) {
+        return existing.status;
+      }
+
+      // Create and start the server.
+      const server = getOrCreateGdbServer(sessionId, {
+        host,
+        port,
+        sessionId,
+        getSession: (sid) => this.sessions.requireSession(sid),
+      });
+
+      await server.start();
+      return server.status;
     });
-  }
-
-  /**
-   * Process a single GDB RSP packet and return the response.
-   * The caller is responsible for sending the response over the wire.
-   *
-   * This is a protocol-stub layer bridging RSP to the nemu engine's
-   * readRegister/writeRegister/readMemory API. For full execution
-   * control (step/continue/breakpoints), use the native nemu_* tools.
-   */
-  private processGdbPacket(
-    packet: string,
-    session: EmulatorSession,
-  ): { response: string; command: string; handled: boolean } {
-    const { data, valid } = decodeRspPacket(packet);
-    if (!valid) {
-      return { response: encodeRspPacket('E01'), command: '?', handled: false };
-    }
-
-    const fields = parseRspFields(data);
-    if (fields.length === 0) {
-      return { response: encodeRspPacket(''), command: '', handled: false };
-    }
-
-    const cmd = fields[0]!;
-    const eng = session.emulator.engine;
-
-    // ? — halt reason (always SIGTRAP)
-    if (cmd === '?') {
-      return { response: encodeRspPacket('S05'), command: cmd, handled: true };
-    }
-
-    // g — read all registers (x0-x30 + sp + pc, each 64-bit → 16 hex chars)
-    if (cmd === 'g') {
-      try {
-        const regHex = GDB_REG_NAMES.map((name) => {
-          try {
-            const val = eng.readRegister(name);
-            return val.toString(16).padStart(16, '0');
-          } catch {
-            return '0000000000000000';
-          }
-        }).join('');
-        return { response: encodeRspPacket(regHex), command: cmd, handled: true };
-      } catch {
-        return { response: encodeRspPacket('E01'), command: cmd, handled: false };
-      }
-    }
-
-    // G — write all registers (best-effort: parse hex and write back)
-    if (cmd === 'G') {
-      try {
-        const hexData = fields.slice(1).join('').trim();
-        for (let i = 0; i < GDB_REG_NAMES.length && i * 16 + 16 <= hexData.length; i++) {
-          const chunk = hexData.substring(i * 16, i * 16 + 16);
-          try {
-            const val = parseInt(chunk, 16);
-            if (!Number.isNaN(val)) {
-              eng.writeRegister(GDB_REG_NAMES[i]!, val);
-            }
-          } catch {
-            /* skip invalid chunks */
-          }
-        }
-        return { response: encodeRspPacket('OK'), command: cmd, handled: true };
-      } catch {
-        return { response: encodeRspPacket('E02'), command: cmd, handled: false };
-      }
-    }
-
-    // m addr,len — read memory
-    if (cmd === 'm') {
-      try {
-        const addrStr = fields[1];
-        const lenStr = fields[2];
-        if (!addrStr || !lenStr) {
-          return { response: encodeRspPacket('E03'), command: cmd, handled: false };
-        }
-        const addr = parseInt(addrStr, 16);
-        const len = parseInt(lenStr, 16);
-        if (Number.isNaN(addr) || Number.isNaN(len) || len > 4096) {
-          return { response: encodeRspPacket('E03'), command: cmd, handled: false };
-        }
-        const bytes = eng.readMemory(addr, len);
-        const hex = bytesToHex(bytes);
-        return { response: encodeRspPacket(hex), command: cmd, handled: true };
-      } catch {
-        return { response: encodeRspPacket('E03'), command: cmd, handled: false };
-      }
-    }
-
-    // M addr,len:data — write memory (stub: read-then-patch via memory regions, best-effort)
-    if (cmd === 'M') {
-      try {
-        const addrStr = fields[1];
-        const lenStr = fields[2];
-        const hexData = fields.slice(3).join('');
-        if (!addrStr || !lenStr) {
-          return { response: encodeRspPacket('E04'), command: cmd, handled: false };
-        }
-        const addr = parseInt(addrStr, 16);
-        const len = parseInt(lenStr, 16);
-        if (Number.isNaN(addr) || Number.isNaN(len) || len > 4096) {
-          return { response: encodeRspPacket('E04'), command: cmd, handled: false };
-        }
-        // For write-memory, we read the existing region and patch in-place.
-        // This is limited — full write support requires nemu_write_memory.
-        const patch = hexToBytes(hexData);
-        // Read existing to verify region exists; write-back is best-effort
-        eng.readMemory(addr, Math.min(len, patch.length));
-        return { response: encodeRspPacket('OK'), command: cmd, handled: true };
-      } catch {
-        return { response: encodeRspPacket('E04'), command: cmd, handled: false };
-      }
-    }
-
-    // s — step (stub: not supported directly; use nemu_call_symbol or nemu_trace)
-    if (cmd === 's') {
-      return {
-        response: encodeRspPacket(''),
-        command: cmd,
-        handled: false,
-      };
-    }
-
-    // c — continue (stub: not supported; use nemu_call_symbol)
-    if (cmd === 'c') {
-      return {
-        response: encodeRspPacket('S05'),
-        command: cmd,
-        handled: true,
-      };
-    }
-
-    // Z0 addr,kind — set software breakpoint (stub)
-    if (cmd === 'Z0') {
-      return { response: encodeRspPacket('OK'), command: cmd, handled: true };
-    }
-
-    // z0 addr,kind — clear software breakpoint (stub)
-    if (cmd === 'z0') {
-      return { response: encodeRspPacket('OK'), command: cmd, handled: true };
-    }
-
-    // Unsupported command — return empty response (GDB convention)
-    return { response: encodeRspPacket(''), command: cmd, handled: false };
   }
 
   private requireSession(args: ToolArgs): EmulatorSession {
@@ -2677,64 +2552,8 @@ function pct(count: number, total: number): number {
   return total === 0 ? 0 : Math.round((count / total) * 100000) / 1000;
 }
 
-/**
- * Decode a raw GDB RSP packet: strip $ prefix and #checksum suffix.
- * Returns {data, valid} — valid=false when the packet is malformed.
- */
-function decodeRspPacket(packet: string): { data: string; valid: boolean } {
-  const trimmed = packet.trim();
-  if (!trimmed.startsWith('$')) return { data: '', valid: false };
-  const hashIdx = trimmed.lastIndexOf('#');
-  if (hashIdx < 0) return { data: '', valid: false };
-  const data = trimmed.slice(1, hashIdx);
-  // Verify checksum
-  const expectedCheck = trimmed.slice(hashIdx + 1);
-  let sum = 0;
-  for (let i = 0; i < data.length; i++) sum = (sum + data.charCodeAt(i)) & 0xff;
-  const actualCheck = sum.toString(16).padStart(2, '0').toLowerCase();
-  if (actualCheck !== expectedCheck.toLowerCase()) {
-    // Lenient: accept even if checksum mismatches (some clients send bad checksums)
-  }
-  return { data, valid: true };
-}
-
-/** Encode a response string into an RSP packet: $<data>#<checksum>. */
-function encodeRspPacket(data: string): string {
-  let sum = 0;
-  for (let i = 0; i < data.length; i++) sum = (sum + data.charCodeAt(i)) & 0xff;
-  const checksum = sum.toString(16).padStart(2, '0');
-  return `$${data}#${checksum}`;
-}
-
-/** Split RSP comma/colon/space-separated fields. */
-function parseRspFields(data: string): string[] {
-  // For 'm' commands: "maddr,len" → ["m", "addr", "len"]
-  // For 'M' commands: "Maddr,len:data" → ["M", "addr", "len", "data"]
-  // For 'Z0' commands: "Z0,addr,kind" → ["Z0", "addr", "kind"]
-  return data.split(/[,:]/g);
-}
-
-/** Convert Uint8Array to hex string. */
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-/** Convert hex string to Uint8Array. */
-function hexToBytes(hex: string): Uint8Array {
-  const len = hex.length;
-  const result = new Uint8Array(len >> 1);
-  for (let i = 0; i < len; i += 2) {
-    result[i >> 1] = parseInt(hex.substring(i, i + 2), 16) || 0;
-  }
-  return result;
-}
-
-/** GDB 'g'/'G' register order: x0..x30 (31 GPRs) + sp + pc = 33 registers. */
-const GDB_REG_NAMES: readonly string[] = Object.freeze(
-  Array.from({ length: 31 }, (_, i) => `x${i}`).concat(['sp', 'pc']),
-) as readonly string[];
+// RSP helpers (decodeRspPacket, encodeRspPacket, parseRspFields, bytesToHex,
+// hexToBytes, GDB_REG_NAMES) are now imported from @native/GdbRspProtocol.
 
 function decodeBionicOptions(
   filesValue: unknown,
