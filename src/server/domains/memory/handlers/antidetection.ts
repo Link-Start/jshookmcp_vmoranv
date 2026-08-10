@@ -222,25 +222,8 @@ export class AntiDetectionHandlers {
       };
     }
 
-    // 2. Apply process masquerade
-    try {
-      const { applyProcessMasquerade } = await import('@src/native/syscall/ProcessMasquerade');
-      const masqResult = applyProcessMasquerade();
-      results.masquerade = {
-        applied: masqResult.applied,
-        details: includeDetails ? masqResult.results : Object.keys(masqResult.results),
-      };
-      if (!masqResult.applied) {
-        warnings.push('Process masquerade: no measures applied');
-      }
-    } catch (err) {
-      results.masquerade = {
-        applied: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-
-    // 3. Apply self-defense
+    // 2. Apply self-defense (MUST run before masquerade — masquerade obfuscates
+    //    env vars, and self-defense reads JSHOOK_SELFDEFENSE from process.env)
     try {
       const { applySelfDefense } = await import('@src/native/syscall/SelfDefense');
       const defenseReport = applySelfDefense();
@@ -260,6 +243,25 @@ export class AntiDetectionHandlers {
       }
     } catch (err) {
       results.selfDefense = {
+        applied: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+
+    // 3. Apply process masquerade (safe: runs AFTER self-defense so env vars
+    //    are already read by the time masquerade obfuscates them)
+    try {
+      const { applyProcessMasquerade } = await import('@src/native/syscall/ProcessMasquerade');
+      const masqResult = applyProcessMasquerade();
+      results.masquerade = {
+        applied: masqResult.applied,
+        details: includeDetails ? masqResult.results : Object.keys(masqResult.results),
+      };
+      if (!masqResult.applied) {
+        warnings.push('Process masquerade: no measures applied');
+      }
+    } catch (err) {
+      results.masquerade = {
         applied: false,
         error: err instanceof Error ? err.message : String(err),
       };
