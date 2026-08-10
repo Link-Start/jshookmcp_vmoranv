@@ -466,10 +466,16 @@ export class GdbRspServer extends EventEmitter {
     }
   }
 
+  /**
+   * Simulated single-step.
+   *
+   * Simulated execution: this increments PC by 4 and returns SIGTRAP.
+   * Real instruction-level execution control requires CpuEngine.runUntilBreakpoint()
+   * which is not yet exposed. GDB clients that need accurate step/continue
+   * should treat this as a stub.
+   */
   private handleStep(): string {
-    // Delegate single-step to the emulator: call with 1-step trace.
-    // The CpuEngine doesn't expose step(), so we simulate by returning
-    // a stop reply with current PC advanced by 4 (ARM64 fixed-width).
+    // Simulate by advancing PC by 4 (ARM64 fixed-width instruction).
     const session = this.config.getSession(this.config.sessionId);
     try {
       const eng = session.emulator.engine;
@@ -482,6 +488,14 @@ export class GdbRspServer extends EventEmitter {
     }
   }
 
+  /**
+   * Simulated continue.
+   *
+   * Simulated execution: writes the optional target address to PC and returns
+   * SIGTRAP immediately. Real instruction-level execution control requires
+   * CpuEngine.runUntilBreakpoint() which is not yet exposed. GDB clients that
+   * need accurate step/continue should treat this as a stub.
+   */
   private handleContinue(data: string): string {
     // c [addr] — continue from current PC or optional addr.
     const session = this.config.getSession(this.config.sessionId);

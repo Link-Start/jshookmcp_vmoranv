@@ -39,7 +39,7 @@ afterEach(async () => {
 describe('GdbRspServer lifecycle', () => {
   it('starts and stops a TCP server', async () => {
     const srv = new GdbRspServer({
-      host: '0.0.0.0',
+      host: '127.0.0.1',
       port: 0,
       sessionId: 'test-session',
       getSession: () => mockSession,
@@ -55,7 +55,7 @@ describe('GdbRspServer lifecycle', () => {
 
   it('does not double-start', async () => {
     const srv = new GdbRspServer({
-      host: '0.0.0.0',
+      host: '127.0.0.1',
       port: 0,
       sessionId: 'test-session',
       getSession: () => mockSession,
@@ -68,7 +68,7 @@ describe('GdbRspServer lifecycle', () => {
 
   it('status reports server info when running', async () => {
     const srv = new GdbRspServer({
-      host: '0.0.0.0',
+      host: '127.0.0.1',
       port: 0,
       sessionId: 'test-session',
       getSession: () => mockSession,
@@ -76,7 +76,7 @@ describe('GdbRspServer lifecycle', () => {
     await srv.start();
     const s = srv.status;
     expect(s.running).toBe(true);
-    expect(s.host).toBe('0.0.0.0');
+    expect(s.host).toBe('127.0.0.1');
     expect(s.sessionId).toBe('test-session');
     expect(s.totalConnections).toBeGreaterThanOrEqual(0);
     await srv.stop();
@@ -84,7 +84,7 @@ describe('GdbRspServer lifecycle', () => {
 
   it('reports bound port (not 0) when started on port 0', async () => {
     const srv = new GdbRspServer({
-      host: '0.0.0.0',
+      host: '127.0.0.1',
       port: 0,
       sessionId: 'test-session',
       getSession: () => mockSession,
@@ -98,13 +98,13 @@ describe('GdbRspServer lifecycle', () => {
 describe('getOrCreateGdbServer / removeGdbServer / listGdbServers', () => {
   it('getOrCreate returns same instance', () => {
     const a = getOrCreateGdbServer('test-key', {
-      host: '0.0.0.0',
+      host: '127.0.0.1',
       port: 0,
       sessionId: 'test-key',
       getSession: () => mockSession,
     });
     const b = getOrCreateGdbServer('test-key', {
-      host: '0.0.0.0',
+      host: '127.0.0.1',
       port: 9999,
       sessionId: 'test-key',
       getSession: () => mockSession,
@@ -118,7 +118,7 @@ describe('getOrCreateGdbServer / removeGdbServer / listGdbServers', () => {
 
   it('removeGdbServer returns true for known key, false for unknown', () => {
     getOrCreateGdbServer('test-remove', {
-      host: '0.0.0.0',
+      host: '127.0.0.1',
       port: 0,
       sessionId: 'test-remove',
       getSession: () => mockSession,

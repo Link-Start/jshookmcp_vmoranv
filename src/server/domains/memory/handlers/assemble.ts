@@ -46,14 +46,15 @@ interface KeystoneEngine {
 let keystoneInstance: KeystoneEngine | null = null;
 let keystoneLoadAttempted = false;
 
-function tryLoadKeystone(): KeystoneEngine | null {
+async function tryLoadKeystone(): Promise<KeystoneEngine | null> {
   if (keystoneLoadAttempted) return keystoneInstance;
   keystoneLoadAttempted = true;
 
   try {
-    // Attempt to load koffi and bind to keystone.dll
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const koffi = require('koffi') as {
+    // koffi is a CJS native addon; dynamic import() returns
+    // { default: module.exports } for CJS modules in ESM context.
+    const koffiModule = await import('koffi');
+    const koffi = ((koffiModule as { default?: unknown }).default ?? koffiModule) as {
       load: (lib: string) => Record<string, unknown>;
     };
     const lib = koffi.load('keystone.dll');
@@ -305,7 +306,7 @@ export interface AssembleResult {
   warnings?: string[];
 }
 
-export function assembleAsm(code: string, address?: number): AssembleResult {
+export async function assembleAsm(code: string, address?: number): Promise<AssembleResult> {
   // Split instructions by semicolon or newline
   const instructions = code
     .split(/[;\n]/)
@@ -323,7 +324,7 @@ export function assembleAsm(code: string, address?: number): AssembleResult {
   }
 
   // Try Keystone first
-  const ks = tryLoadKeystone();
+  const ks = await tryLoadKeystone();
   if (ks) {
     return assembleWithKeystone(ks, instructions, address ?? 0);
   }
@@ -498,7 +499,7 @@ export class AssembleHandlers {
     const code = requireStringArg(args.code, 'code', TOOL_NAME);
     const address = typeof args.address === 'number' ? args.address : undefined;
 
-    const result = assembleAsm(code, address);
+    const result = await assembleAsm(code, address);
 
     return {
       success: true,
@@ -515,7 +516,7 @@ export class AssembleHandlers {
     const code = requireStringArg(args.code, 'code', TOOL_NAME);
     const dryRun = argBool(args, 'dryRun', false);
 
-    const result = assembleAsm(code, parseInt(targetAddress.replace(/^0x/i, ''), 16));
+    const result = await assembleAsm(code, parseInt(targetAddress.replace(/^0x/i, ''), 16));
 
     if (dryRun) {
       return {

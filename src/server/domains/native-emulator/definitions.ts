@@ -878,7 +878,9 @@ export const nativeEmulatorTools: Tool[] = [
           'description, thread listing, and feature negotiation (qSupported). ' +
           'The server dispatches commands to the nemu emulator session in real-time. ' +
           'Packet format: $data#checksum (RFC 5.1 GDB Remote Serial Protocol). ' +
-          'Actions: start (launch TCP server), stop (shut down), status (server + clients).',
+          'Actions: start (launch TCP server), stop (shut down), status (server + clients). ' +
+          'Note: step/continue are simulated (PC += 4, immediate SIGTRAP); ' +
+          'real execution control requires CpuEngine.runUntilBreakpoint() which is not yet exposed.',
       )
       .enum(
         'action',
@@ -886,7 +888,11 @@ export const nativeEmulatorTools: Tool[] = [
         'start=launch TCP GDB server, stop=shut down, status=server info + connected clients',
       )
       .string('sessionId', 'Session id with a loaded library (required for start)')
-      .string('host', 'TCP host to listen on (default: 127.0.0.1)', { default: '127.0.0.1' })
+      .string(
+        'host',
+        'TCP host to listen on (default: 127.0.0.1). Change to 0.0.0.0 only for remote debugging on trusted networks.',
+        { default: '127.0.0.1' },
+      )
       .number('port', 'TCP port to listen on (default: 1234)', { default: 1234 })
       .required('action'),
   ),
