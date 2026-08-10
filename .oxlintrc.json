@@ -94,7 +94,17 @@
           "_CreateToolhelp32Snapshot",
           "_Thread32First",
           "_Thread32Next",
-          "_CloseHandle"
+          "_CloseHandle",
+          "_OpenProcess",
+          "_kernel32",
+          "_THREADENTRY32",
+          "_MODULEENTRY32W",
+          "_Module32FirstW",
+          "_Module32NextW",
+          "_SuspendThread",
+          "_ResumeThread",
+          "_GetThreadContext",
+          "_ReadProcessMemory"
         ]
       }
     ],

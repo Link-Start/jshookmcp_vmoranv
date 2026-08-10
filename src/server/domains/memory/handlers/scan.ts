@@ -105,13 +105,13 @@ const SCAN_COMPARE_MODES = new Set<string>([
   'not_equal_to',
 ]);
 
-const DELTA_REQUIRED_MODES = new Set<ScanCompareMode>([
+const DELTA_REQUIRED_MODES = new Set<string>([
   'changed_by',
   'increased_by',
   'decreased_by',
 ]);
 
-const NON_NEGATIVE_DELTA_MODES = new Set<ScanCompareMode>(['increased_by', 'decreased_by']);
+const NON_NEGATIVE_DELTA_MODES = new Set<string>(['increased_by', 'decreased_by']);
 
 const FLOAT_TYPES = new Set<ScanValueType>(['float', 'double']);
 

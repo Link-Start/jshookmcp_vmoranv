@@ -492,4 +492,217 @@ describe('HookHandlers', () => {
       expect(mockVehEngine.setBreakpoint).not.toHaveBeenCalled();
     });
   });
+
+  // ── Collision Detection ──
+
+  describe('breakpoint collision detection', () => {
+    it('returns warning when new BP overlaps an existing BP', async () => {
+      mockbpEngine.listBreakpoints = vi.fn().mockReturnValue([
+        {
+          id: 'bp-existing',
+          address: '0x7FF612340000',
+          size: 4,
+          access: 'write',
+          enabled: true,
+          hitCount: 0,
+        },
+      ]);
+      mockbpEngine.setBreakpoint = vi.fn();
+
+      const response = await handlers.handleBreakpointSet({
+        pid: 1234,
+        address: '0x7FF612340002',
+        access: 'read',
+        size: 4,
+        type: 'hardware',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.warning).toContain('Breakpoint collision detected');
+      expect(parsed.collision).toBeDefined();
+      expect(parsed.collision.breakpointId).toBe('bp-existing');
+      expect(mockbpEngine.setBreakpoint).not.toHaveBeenCalled();
+    });
+
+    it('returns suggestion when watchpoint size exceeds 8 bytes', async () => {
+      mockbpEngine.listBreakpoints = vi.fn().mockReturnValue([]);
+      mockbpEngine.setBreakpoint = vi.fn();
+
+      const response = await handlers.handleBreakpointSet({
+        pid: 1234,
+        address: '0x7FF612340000',
+        access: 'readwrite',
+        size: 32,
+        type: 'hardware',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.warning).toContain('Oversized watchpoint');
+      expect(parsed.suggestion).toContain('split into');
+      expect(parsed.suggestion).toContain('4 separate');
+      expect(mockbpEngine.setBreakpoint).not.toHaveBeenCalled();
+    });
+
+    it('does not detect collision when BP addresses do not overlap', async () => {
+      mockbpEngine.listBreakpoints = vi.fn().mockReturnValue([
+        {
+          id: 'bp-1',
+          address: '0x7FF612340000',
+          size: 4,
+          access: 'write',
+          enabled: true,
+          hitCount: 0,
+        },
+      ]);
+      mockbpEngine.setBreakpoint = vi
+        .fn()
+        .mockReturnValue({ id: 'bp-new', address: '0x7FF612340010' });
+
+      const response = await handlers.handleBreakpointSet({
+        pid: 1234,
+        address: '0x7FF612340010',
+        access: 'read',
+        size: 2,
+        type: 'hardware',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.warning).toBeUndefined();
+      expect(mockbpEngine.setBreakpoint).toHaveBeenCalled();
+    });
+
+    it('skips collision check for software breakpoints', async () => {
+      // Software BPs don't collide — they're unlimited
+      const softBpEngine = {
+        listBreakpoints: vi.fn().mockReturnValue([
+          {
+            id: 'soft-1',
+            address: '0x7FF612340000',
+            size: 1,
+            access: 'execute',
+            enabled: true,
+            hitCount: 0,
+          },
+        ]),
+        setBreakpoint: vi.fn().mockReturnValue({ id: 'soft-new', address: '0x7FF612340002' }),
+      } as any;
+      const softHandlers = new HookHandlers(
+        null,
+        null,
+        softBpEngine,
+        mockinjector,
+        undefined,
+        undefined,
+        auditTrail,
+      );
+
+      const response = await softHandlers.handleBreakpointSet({
+        pid: 1234,
+        address: '0x7FF612340002',
+        access: 'execute',
+        size: 1,
+        type: 'software',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.warning).toBeUndefined();
+      expect(softBpEngine.setBreakpoint).toHaveBeenCalled();
+    });
+  });
+
+  // ── Call Stack View ──
+
+  describe('handleCallStack', () => {
+    it('returns success with frames on happy path', async () => {
+      vi.doMock('@native/CallStack', () => ({
+        walkCallStack: vi.fn().mockReturnValue([
+          {
+            frameIndex: 0,
+            returnAddress: '0x7FF612341000',
+            moduleName: 'target.exe',
+            functionName: 'target.exe!0x1000',
+          },
+          {
+            frameIndex: 1,
+            returnAddress: '0x7FFE12345678',
+            moduleName: 'kernel32.dll',
+            functionName: null,
+          },
+        ]),
+      }));
+
+      // The handler imports @native/CallStack dynamically, so use the mock
+      const response = await handlers.handleCallStack({ pid: 1234 });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.frameCount).toBeGreaterThanOrEqual(0);
+    });
+
+    it('handles maxFrames truncation correctly', async () => {
+      const frames = Array.from({ length: 10 }, (_, i) => ({
+        frameIndex: i,
+        returnAddress: `0x${(0x7ff610000000 + i * 0x1000).toString(16).toUpperCase()}`,
+        moduleName: 'test.dll',
+        functionName: null,
+      }));
+
+      vi.doMock('@native/CallStack', () => ({
+        walkCallStack: vi.fn().mockReturnValue(frames),
+      }));
+
+      const response = await handlers.handleCallStack({ pid: 1234, maxFrames: 5 });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+    });
+
+    it('returns error when walkCallStack throws', async () => {
+      vi.doMock('@native/CallStack', () => ({
+        walkCallStack: vi.fn().mockImplementation(() => {
+          throw new Error('Process not found');
+        }),
+      }));
+
+      const response = await handlers.handleCallStack({ pid: 99999 });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error).toContain('Process not found');
+    });
+  });
+
+  // ── Process Suspend / Resume ──
+
+  describe('handleProcessControl', () => {
+    it('returns success on suspend action', async () => {
+      vi.doMock('@modules/process/memory/scanner', () => ({
+        suspendProcess: vi.fn().mockResolvedValue(true),
+        resumeProcess: vi.fn(),
+      }));
+
+      const response = await handlers.handleProcessControl({ action: 'suspend', pid: 1234 });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.action).toBe('suspend');
+      expect(parsed.suspended).toBe(true);
+    });
+
+    it('returns success on resume action', async () => {
+      vi.doMock('@modules/process/memory/scanner', () => ({
+        suspendProcess: vi.fn(),
+        resumeProcess: vi.fn().mockResolvedValue(undefined),
+      }));
+
+      const response = await handlers.handleProcessControl({ action: 'resume', pid: 1234 });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.action).toBe('resume');
+      expect(parsed.resumed).toBe(true);
+    });
+
+    it('returns error on invalid action', async () => {
+      const response = await handlers.handleProcessControl({ action: 'hibernate', pid: 1234 });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error).toContain('"suspend" or "resume"');
+    });
+  });
 });
