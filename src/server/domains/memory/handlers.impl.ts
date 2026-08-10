@@ -56,6 +56,8 @@ import { PointerMapHandlers } from './handlers/pointer-map';
 import { AssembleHandlers } from './handlers/assemble';
 import { AutoAssemblerHandlers } from './handlers/auto-assembler';
 import { HypervisorHandlers } from './handlers/hypervisor';
+import { AntiDetectionHandlers } from './handlers/antidetection';
+import { AntiDetectionCheckHandlers } from './handlers/antidetection-check';
 
 import { logger } from '@utils/logger';
 
@@ -82,6 +84,8 @@ export class MemoryScanHandlers {
   private readonly assembler: AssembleHandlers;
   private readonly aa: AutoAssemblerHandlers;
   private readonly hypervisor: HypervisorHandlers;
+  private readonly antidetection: AntiDetectionHandlers;
+  private readonly antidetectionCheck: AntiDetectionCheckHandlers;
 
   /** Shared audit trail for destructive operations (write/freeze/patch). */
   readonly auditTrail = new MemoryAuditTrail();
@@ -148,6 +152,8 @@ export class MemoryScanHandlers {
     this.assembler = new AssembleHandlers(processManager, ctx, this.auditTrail);
     this.aa = new AutoAssemblerHandlers(injector, scanner, memCtrl, processManager);
     this.hypervisor = new HypervisorHandlers();
+    this.antidetection = new AntiDetectionHandlers();
+    this.antidetectionCheck = new AntiDetectionCheckHandlers();
   }
 
   // ── Session ──
@@ -416,6 +422,14 @@ export class MemoryScanHandlers {
   handleBookmarkDispatch(args: Record<string, unknown>) {
     return this.bookmarks.handleBookmarkDispatch(args);
   }
+
+  // ── Anti-Detection ──
+
+  handleAntiDetection = (args: Record<string, unknown>) =>
+    this.antidetection.handleAntiDetection(args);
+
+  handleAntiDetectionCheck = (args: Record<string, unknown>) =>
+    this.antidetectionCheck.handleCheck(args);
 
   // ── EPT Hypervisor ──
 

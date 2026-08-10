@@ -1456,4 +1456,25 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .required()
       .query(),
   ),
+
+  // ── Anti-Detection Check (read-only pre-flight audit) ──
+  tool('memory_antidetection_check', (t) =>
+    t
+      .desc(
+        'Pre-flight anti-detection security audit. READ-ONLY — no patches or modifications. ' +
+          'Checks: (1) ETW/AMSI patch status, (2) debugger attached to self via IsDebuggerPresent, ' +
+          '(3) HVCI (Hypervisor-protected Code Integrity) and VBS (Virtualization-Based Security) ' +
+          'status via registry, (4) known anti-cheat/EDR/AV/debugger processes via process enumeration. ' +
+          'Returns a pass/warn/fail verdict with a 0-100 score, per-check results, and actionable ' +
+          'recommendations. All checks are safe, user-mode, read-only operations. ' +
+          'For actual hardening, use memory_antidetection action=harden.',
+      )
+      .boolean(
+        'includeDetails',
+        'Include detailed per-check results including patch details, ETW monitoring summary, ' +
+          'and process info (default: false).',
+      )
+      .required()
+      .query(),
+  ),
 ];

@@ -560,6 +560,18 @@ const allRegistrations = [
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleHypervisor(a)),
   },
+  // ── Anti-Detection ──
+  {
+    tool: toolByName('memory_antidetection'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleAntiDetection(a)),
+  },
+  // ── Anti-Detection Check (read-only pre-flight) ──
+  {
+    tool: toolByName('memory_antidetection_check'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleAntiDetectionCheck(a)),
+  },
   // ── Session Export (structured data dump) ──
   {
     tool: toolByName('memory_session_export'),
