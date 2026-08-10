@@ -18,7 +18,7 @@ import type { UnifiedProcessManager } from '@server/domains/shared/modules/nativ
 import type { MCPServerContext } from '@server/MCPServer.context';
 
 const TOOL_NAME = 'memory_bookmark';
-const ACTION_OPTIONS = new Set(['add', 'remove', 'list', 'clear'] as const);
+const ACTION_OPTIONS = new Set(['add', 'remove', 'list', 'clear', 'export'] as const);
 
 interface Bookmark {
   address: string;
@@ -73,6 +73,8 @@ export class BookmarkHandlers {
           return this.handleList(args);
         case 'clear':
           return this.handleClear(args);
+        case 'export':
+          return this.handleExport(args);
         default:
           throw new Error(`${TOOL_NAME}: unknown action "${action}"`);
       }
@@ -205,6 +207,48 @@ export class BookmarkHandlers {
         count > 0
           ? `Cleared ${count} bookmarks for PID ${pid}.`
           : `No bookmarks to clear for PID ${pid}.`,
+    };
+  }
+
+  /**
+   * Export all bookmarks for a PID as a JSON string.
+   *
+   * Pure data export — no workflow, no replay, no orchestration.
+   * The JSON string is suitable for file save or state_board_io import.
+   * Returns the full bookmark list with address, label, color, and createdAt.
+   */
+  private async handleExport(args: Record<string, unknown>) {
+    const pid = await this.resolvePid(args.pid);
+
+    const store = bookmarkStore.get(pid);
+    if (!store || store.size === 0) {
+      return {
+        success: true,
+        action: 'export',
+        pid,
+        bookmarksJson: '[]',
+        totalBookmarks: 0,
+        hint: `No bookmarks for PID ${pid}. Use action='add' to create one.`,
+      };
+    }
+
+    const bookmarks = [...store.values()]
+      .map((b) => ({
+        address: b.address,
+        label: b.label || null,
+        color: b.color,
+        createdAt: b.createdAt,
+      }))
+      .toSorted((a, b) => a.address.localeCompare(b.address));
+
+    return {
+      success: true,
+      action: 'export',
+      pid,
+      bookmarks,
+      bookmarksJson: JSON.stringify(bookmarks),
+      totalBookmarks: bookmarks.length,
+      hint: `Exported ${bookmarks.length} bookmarks for PID ${pid}.`,
     };
   }
 }

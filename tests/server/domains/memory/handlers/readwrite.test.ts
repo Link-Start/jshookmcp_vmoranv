@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ReadWriteHandlers } from '../../../../../src/server/domains/memory/handlers/readwrite';
 import { MemoryAuditTrail } from '../../../../../src/modules/process/memory/AuditTrail';
 
@@ -413,6 +413,88 @@ describe('ReadWriteHandlers', () => {
       expect(parsed.success).toBe(true);
       expect(parsed.changed).toBe(false);
       expect(parsed.value).toBe('64000000');
+    });
+  });
+
+  describe('handleFreezeExport', () => {
+    it('exports all active freezes as structured JSON', async () => {
+      mockmemCtrl.listFreezes = vi.fn().mockReturnValue([
+        {
+          id: 'f1',
+          pid: 1234,
+          address: '0x7FF612340000',
+          value: [100, 0, 0, 0],
+          valueType: 'int32',
+          intervalMs: 50,
+          isActive: true,
+        },
+        {
+          id: 'f2',
+          pid: 1234,
+          address: '0x7FF612340008',
+          value: [200, 0, 0, 0],
+          valueType: 'int32',
+          intervalMs: 100,
+          isActive: true,
+        },
+      ]);
+
+      const response = await handlers.handleFreezeExport({});
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.count).toBe(2);
+      expect(parsed.filtered).toBe(false);
+      expect(parsed.freezes).toEqual([
+        {
+          freezeId: 'f1',
+          pid: 1234,
+          address: '0x7FF612340000',
+          value: [100, 0, 0, 0],
+          valueType: 'int32',
+          intervalMs: 50,
+          active: true,
+        },
+        {
+          freezeId: 'f2',
+          pid: 1234,
+          address: '0x7FF612340008',
+          value: [200, 0, 0, 0],
+          valueType: 'int32',
+          intervalMs: 100,
+          active: true,
+        },
+      ]);
+    });
+
+    it('filters by pid when pid argument is provided', async () => {
+      mockmemCtrl.listFreezes = vi.fn().mockReturnValue([
+        {
+          id: 'f1',
+          pid: 1234,
+          address: '0x1000',
+          value: [1],
+          valueType: 'byte',
+          intervalMs: 50,
+          isActive: true,
+        },
+        {
+          id: 'f2',
+          pid: 5678,
+          address: '0x2000',
+          value: [2],
+          valueType: 'byte',
+          intervalMs: 100,
+          isActive: true,
+        },
+      ]);
+
+      const response = await handlers.handleFreezeExport({ pid: 1234 });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.count).toBe(1);
+      expect(parsed.filtered).toBe(true);
+      expect(parsed.freezes[0].freezeId).toBe('f1');
+      expect(parsed.freezes[0].pid).toBe(1234);
     });
   });
 });

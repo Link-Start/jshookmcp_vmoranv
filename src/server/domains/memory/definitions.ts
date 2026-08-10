@@ -1269,7 +1269,7 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
           'Labels help categorize findings; colors use hex format (e.g. "#FF0000"). Bookmarks are scoped per PID. ' +
           'For long-term persistence, export via state_board_io with namespace "memory_bookmarks:<pid>".',
       )
-      .enum('action', ['add', 'remove', 'list', 'clear'], 'Bookmark operation')
+      .enum('action', ['add', 'remove', 'list', 'clear', 'export'], 'Bookmark operation')
       .number('pid', 'Target process ID (optional when a browser session is attached)')
       .string('address', 'Address to bookmark (hex, required for add/remove)')
       .string('label', 'User-defined label for the bookmark (optional)')
@@ -1405,5 +1405,33 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .object('toolArgs', {}, 'Tool arguments object to forward. Required for forward.')
       .string('proxyId', 'Proxy identifier for reconnecting to an existing session')
       .required('action'),
+  ),
+
+  // ── Session Export (structured data dump) ──
+  tool('memory_session_export', (t) =>
+    t
+      .desc(
+        "Export a scan session's complete state as structured JSON. " +
+          'Returns sessionId, pid, valueType, addresses[], values{}, and metadata. ' +
+          'Pure data export — no workflow, no replay. ' +
+          'Addresses are capped at 100K with a truncated flag when the cap is hit.',
+      )
+      .string('sessionId', 'Scan session ID to export')
+      .required('sessionId')
+      .query(),
+  ),
+
+  // ── Freeze Export (structured data dump) ──
+  tool('memory_freeze_export', (t) =>
+    t
+      .desc(
+        'Export all active freeze entries as structured JSON. ' +
+          'Returns an array of freeze entries with freezeId, pid, address, value, valueType, intervalMs, and active flag. ' +
+          'Optional pid filter to scope the export to a single process. ' +
+          'Pure data export — no workflow, no replay.',
+      )
+      .number('pid', 'Target process ID filter (optional — exports all freezes if omitted)')
+      .required()
+      .query(),
   ),
 ];

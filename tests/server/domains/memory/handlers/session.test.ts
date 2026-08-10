@@ -115,4 +115,71 @@ describe('SessionHandlers', () => {
       expect(mocksessionManager.exportSession).not.toHaveBeenCalled();
     });
   });
+
+  describe('handleSessionExportData', () => {
+    it('exports a session as structured JSON with addresses and values', async () => {
+      const addrBig1 = BigInt(0x7ff612340000);
+      const addrBig2 = BigInt(0x7ff612340008);
+      mocksessionManager.getSession = vi.fn().mockReturnValue({
+        id: 'test-session',
+        pid: 1234,
+        valueType: 'int32',
+        scanCount: 3,
+        addresses: [addrBig1, addrBig2],
+        previousValues: new Map([
+          [addrBig1, Buffer.from([0x64, 0x00, 0x00, 0x00])],
+          [addrBig2, Buffer.from([0xc8, 0x00, 0x00, 0x00])],
+        ]),
+        createdAt: 1700000000000,
+        lastScanAt: 1700000001000,
+        alignment: 4,
+      });
+
+      const response = await handlers.handleSessionExportData({
+        sessionId: 'test-session',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.sessionId).toBe('test-session');
+      expect(parsed.pid).toBe(1234);
+      expect(parsed.valueType).toBe('int32');
+      expect(parsed.scanCount).toBe(3);
+      expect(parsed.addresses).toEqual(['0x7FF612340000', '0x7FF612340008']);
+      expect(parsed.values).toBeTypeOf('object');
+      expect(parsed.metadata.totalAddresses).toBe(2);
+      expect(parsed.metadata.truncated).toBe(false);
+      expect(mocksessionManager.getSession).toHaveBeenCalledWith('test-session');
+    });
+
+    it('sets truncated flag when address count exceeds 100K cap', async () => {
+      const addrBig = BigInt(0x1000);
+      const addrs: bigint[] = [];
+      const vals = new Map<bigint, Buffer>();
+      for (let i = 0; i < 150_000; i++) {
+        const a = addrBig + BigInt(i * 8);
+        addrs.push(a);
+        vals.set(a, Buffer.from([0x00, 0x00, 0x00, 0x00]));
+      }
+      mocksessionManager.getSession = vi.fn().mockReturnValue({
+        id: 'big-session',
+        pid: 5678,
+        valueType: 'int64',
+        scanCount: 1,
+        addresses: addrs,
+        previousValues: vals,
+        createdAt: 1700000000000,
+        lastScanAt: 1700000001000,
+        alignment: 8,
+      });
+
+      const response = await handlers.handleSessionExportData({
+        sessionId: 'big-session',
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.metadata.totalAddresses).toBe(150_000);
+      expect(parsed.metadata.truncated).toBe(true);
+      expect(parsed.addresses.length).toBe(100_000);
+    });
+  });
 });

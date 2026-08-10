@@ -474,4 +474,46 @@ export class ReadWriteHandlers {
       };
     });
   }
+
+  /**
+   * Export all active freeze entries as structured JSON.
+   *
+   * Pure data export — no workflow, no replay, no orchestration.
+   * Optionally filtered by pid. Returns freeze entries with their
+   * current state (id, pid, address, value, valueType, intervalMs, active).
+   */
+  async handleFreezeExport(args: Record<string, unknown>) {
+    return handleSafe(async () => {
+      const allFreezes = this.memCtrl.listFreezes();
+
+      // Optional PID filter
+      let freezes = allFreezes;
+      if (args.pid !== undefined) {
+        const pid = await this.resolvePid(args.pid);
+        freezes = allFreezes.filter((f) => f.pid === pid);
+      }
+
+      const entries = freezes.map((f) => ({
+        freezeId: f.id,
+        pid: f.pid,
+        address: f.address,
+        value: f.value,
+        valueType: f.valueType,
+        intervalMs: f.intervalMs,
+        active: f.isActive,
+      }));
+
+      return {
+        success: true,
+        freezes: entries,
+        count: entries.length,
+        totalActive: allFreezes.length,
+        filtered: args.pid !== undefined,
+        hint:
+          entries.length > 0
+            ? `Exported ${entries.length} freeze entries${args.pid !== undefined ? ` for PID ${freezes[0]?.pid ?? '?'}` : ''}.`
+            : 'No active freeze entries.',
+      };
+    });
+  }
 }

@@ -166,6 +166,8 @@ export class MemoryScanHandlers {
   handleScanList = (args: Record<string, unknown>) => this.sessions.handleScanList(args);
   handleScanDelete = (args: Record<string, unknown>) => this.sessions.handleScanDelete(args);
   handleScanExport = (args: Record<string, unknown>) => this.sessions.handleScanExport(args);
+  handleSessionExportData = (args: Record<string, unknown>) =>
+    this.sessions.handleSessionExportData(args);
 
   // ── Scan ──
 
@@ -282,6 +284,7 @@ export class MemoryScanHandlers {
   handleWriteRedo = (args: Record<string, unknown>) => this.readwrite.handleWriteRedo(args);
   handleBatchEdit = (args: Record<string, unknown>) => this.readwrite.handleBatchEdit(args);
   handleWatch = (args: Record<string, unknown>) => this.readwrite.handleWatch(args);
+  handleFreezeExport = (args: Record<string, unknown>) => this.readwrite.handleFreezeExport(args);
 
   // ── Integrity (speedhack + heap + PE + anti-cheat) ──
 

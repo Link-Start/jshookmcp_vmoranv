@@ -560,6 +560,18 @@ const allRegistrations = [
     domain: DOMAIN,
     bind: bindByKey((h, a) => h.handleHypervisor(a)),
   },
+  // ── Session Export (structured data dump) ──
+  {
+    tool: toolByName('memory_session_export'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleSessionExportData(a)),
+  },
+  // ── Freeze Export (structured data dump) ──
+  {
+    tool: toolByName('memory_freeze_export'),
+    domain: DOMAIN,
+    bind: bindByKey((h, a) => h.handleFreezeExport(a)),
+  },
 ] as const;
 
 // Filter: on non-Windows platforms, exclude Win32-only tools
