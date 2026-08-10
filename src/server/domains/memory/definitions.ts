@@ -658,6 +658,28 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .required()
       .query(),
   ),
+  tool('memory_antidetection', (t) =>
+    t
+      .desc(
+        'Anti-detection hardening toolkit. Actions: check (run all detectors — kernel callbacks, ' +
+          'instrumentation callback, AMSI/ETW status, chaos mode, platform info), ' +
+          'harden (apply AMSI/ETW patches + process masquerade + self-defense — destructive), ' +
+          'status (read-only current protection state). ' +
+          'WARNING: harden action modifies process memory and mitigation policies. ' +
+          'ProcessBreakOnTermination is PERMANENTLY DISABLED (stub — no BSOD risk). ' +
+          'On non-Windows, returns platform info only.',
+      )
+      .enum('action', ['check', 'harden', 'status'], 'Operation mode (default: check)', {
+        default: 'check',
+      })
+      .boolean(
+        'includeDetails',
+        'Include detailed per-detector results and limitations (default: false). ' +
+          'When true, returns full driver lists, handle details, ETW sessions, and honest boundary notes.',
+      )
+      .required()
+      .query(),
+  ),
   tool('memory_guard_pages', (t) =>
     t
       .desc(
