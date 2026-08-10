@@ -249,7 +249,7 @@ function detectDriversByModuleList(): { drivers: DetectedDriver[]; error?: strin
     }
 
     return { drivers };
-  } catch (err) {
+  } catch {
     // koffi not available — fall back to driverquery
     return fallbackDriverEnumeration();
   }
@@ -284,7 +284,7 @@ function fallbackDriverEnumeration(): { drivers: DetectedDriver[]; error?: strin
     }
 
     return { drivers };
-  } catch (err) {
+  } catch {
     const msg = err instanceof Error ? err.message : String(err);
     return { drivers: [], error: `Driver enumeration failed: ${msg}` };
   }
