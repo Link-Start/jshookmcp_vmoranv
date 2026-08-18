@@ -789,6 +789,28 @@ describe('MCPServer.transport', () => {
     );
   });
 
+  it('disposes browserSessionCoordinator via getDomainInstance on closeServer', async () => {
+    const ctx = createCtx();
+    const dispose = vi.fn();
+    ctx.getDomainInstance = vi.fn((key: string) =>
+      key === 'browserSessionCoordinator' ? { dispose } : undefined,
+    );
+
+    await closeServer(ctx);
+
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips browserSessionCoordinator dispose when the instance is absent', async () => {
+    const ctx = createCtx();
+    const getDomainInstance = vi.fn().mockReturnValue(undefined);
+    ctx.getDomainInstance = getDomainInstance;
+
+    await closeServer(ctx);
+
+    expect(getDomainInstance).toHaveBeenCalledWith('browserSessionCoordinator');
+  });
+
   it('forces socket destruction after MCP_HTTP_FORCE_CLOSE_TIMEOUT_MS', async () => {
     vi.useFakeTimers();
     const ctx = createCtx();

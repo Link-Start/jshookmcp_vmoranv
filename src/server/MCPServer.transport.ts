@@ -404,6 +404,9 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
       // Lazy domain — undefined when never activated (or in a partial context),
       // skipped by the guard below.
       ['nativeEmulatorHandlers', getInst?.('nativeEmulatorHandlers'), 'dispose'],
+      // Stops the browser session sweep timer (idempotent). Wired here so
+      // embedded/multi-instance deployments don't leak an interval on shutdown.
+      ['browserSessionCoordinator', getInst?.('browserSessionCoordinator'), 'dispose'],
     ];
 
     for (const [name, instance, method] of closables) {
