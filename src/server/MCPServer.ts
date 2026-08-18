@@ -24,6 +24,7 @@ import type { DomainTtlEntry } from '@server/MCPServer.activation.ttl';
 import { closeServer, startHttpTransport, startStdioTransport } from '@server/MCPServer.transport';
 import { startArtifactRetentionScheduler } from '@utils/artifactRetention';
 import { createLoopLagSampler } from '@utils/loopLag';
+import { createToolLatencyTracker } from '@utils/toolLatency';
 import { McpLogTransport } from '@server/transport/McpLogTransport';
 import type { McpLogLevel } from '@server/transport/McpLogTransport';
 import {
@@ -120,6 +121,13 @@ export class MCPServer implements MCPServerContext {
    */
   loopLagSampler: import('@utils/loopLag').LoopLagSampler | null = null;
   loopLagStop: (() => void) | null = null;
+  /**
+   * Per-tool latency tracker + its eventBus unsubscribe handle, wired in start()
+   * and released by closeServer() — mirrors the loopLagSampler lifecycle pattern.
+   * The tracker exposes top-N slow tools through the /health verbose branch (r1-2).
+   */
+  toolLatencyTracker: import('@utils/toolLatency').ToolLatencyTracker | null = null;
+  toolLatencyStop: (() => void) | null = null;
   /** Structured log transport for MCP `notifications/message`. */
   public readonly mcpLog = new McpLogTransport();
   public readonly baseTier: ToolProfile;
@@ -684,6 +692,16 @@ export class MCPServer implements MCPServerContext {
     const loopLagSampler = createLoopLagSampler();
     this.loopLagSampler = loopLagSampler;
     this.loopLagStop = loopLagSampler.enable();
+    // r1-2: per-tool latency histograms — always on (synchronous ring-buffer push
+    // on the 'tool:called' eventBus path, no timers), so /health verbose can report
+    // top-N slow tools regardless of E2E env gating. Unsubscribed in closeServer().
+    const toolLatencyTracker = createToolLatencyTracker();
+    this.toolLatencyTracker = toolLatencyTracker;
+    this.toolLatencyStop = this.eventBus.on('tool:called', (payload) => {
+      if (typeof payload.durationMs === 'number') {
+        toolLatencyTracker.record(payload.toolName, payload.durationMs);
+      }
+    });
     const transportMode = MCP_TRANSPORT.toLowerCase();
     if (transportMode === 'http') {
       await startHttpTransport(this);

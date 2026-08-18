@@ -100,7 +100,10 @@ export async function executeToolWithTracking(ctx: MCPServerContext, name: strin
   const timeoutMs = TOOL_EXEC_HANG_WATCHDOG_MS;
   const collectExecutionMetrics = shouldCollectExecutionMetrics();
   const executionStartedAt = collectExecutionMetrics ? new Date().toISOString() : null;
-  const executionStartTime = collectExecutionMetrics ? performance.now() : 0;
+  // Always record the wall-clock start — durationMs feeds the per-tool latency
+  // histogram via the 'tool:called' event (r1-2). Two performance.now() calls per
+  // tool call is negligible, unlike the E2E-gated CPU/memory snapshots below.
+  const executionStartTime = performance.now();
   const executionCpuStart = collectExecutionMetrics ? process.cpuUsage() : null;
   const executionMemoryBefore = collectExecutionMetrics ? captureExecutionMetricMemory() : null;
   try {
@@ -264,6 +267,7 @@ export async function executeToolWithTracking(ctx: MCPServerContext, name: strin
           : (getToolRequestContext()?.sessionId ?? null),
       timestamp: new Date().toISOString(),
       success: toolResultSuccess,
+      durationMs: Number((performance.now() - executionStartTime).toFixed(2)),
       args,
       result: {
         success: toolResultSuccess,

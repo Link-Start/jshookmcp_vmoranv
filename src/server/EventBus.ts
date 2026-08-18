@@ -20,6 +20,8 @@ export interface ServerEventMap {
     sessionId?: string | null;
     timestamp: string;
     success: boolean;
+    /** Wall-clock duration of the completed call (ms). Absent on pre-duration emitters. */
+    durationMs?: number;
     args?: Record<string, unknown>;
     result?: {
       success?: boolean;

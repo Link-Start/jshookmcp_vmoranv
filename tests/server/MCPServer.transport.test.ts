@@ -441,6 +441,61 @@ describe('MCPServer.transport', () => {
     });
   });
 
+  it('includes toolLatency in /health verbose when a tracker is active', async () => {
+    const constantsMod = await import('@src/constants');
+    (constantsMod as any).MCP_HEALTH_VERBOSE = true;
+    const ctx = createCtx({
+      toolLatencyTracker: {
+        getSummary: () => ({
+          top: [
+            { toolName: 'page_navigate', p50Ms: 400, p90Ms: 900, p99Ms: 1200, samples: 180 },
+            { toolName: 'debugger_evaluate', p50Ms: 5, p90Ms: 12, p99Ms: 30, samples: 500 },
+          ],
+          trackedTools: 42,
+        }),
+      },
+    });
+    await startHttpTransport(ctx);
+
+    const server = mocks.httpServers[0];
+    const res = createRes();
+    server.requestHandlerForTest({ url: '/health', method: 'GET' }, res);
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).toolLatency).toEqual({
+      top: [
+        { toolName: 'page_navigate', p50Ms: 400, p90Ms: 900, p99Ms: 1200, samples: 180 },
+        { toolName: 'debugger_evaluate', p50Ms: 5, p90Ms: 12, p99Ms: 30, samples: 500 },
+      ],
+      trackedTools: 42,
+    });
+  });
+
+  it('omits toolLatency from /health when verbose is disabled', async () => {
+    const constantsMod = await import('@src/constants');
+    (constantsMod as any).MCP_HEALTH_VERBOSE = false;
+    // Even with a live tracker, non-verbose responses stay minimal (no toolLatency).
+    const ctx = createCtx({
+      toolLatencyTracker: {
+        getSummary: () => ({
+          top: [{ toolName: 't', p50Ms: 1, p90Ms: 1, p99Ms: 1, samples: 1 }],
+          trackedTools: 1,
+        }),
+      },
+    });
+    await startHttpTransport(ctx);
+
+    const server = mocks.httpServers[0];
+    const res = createRes();
+    server.requestHandlerForTest({ url: '/health', method: 'GET' }, res);
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({
+      status: 'ok',
+      uptime: expect.any(Number),
+    });
+  });
+
   it('returns 404 for non-MCP paths', async () => {
     const ctx = createCtx();
     await startHttpTransport(ctx);

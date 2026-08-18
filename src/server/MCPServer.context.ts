@@ -110,6 +110,15 @@ export interface TransportState {
   loopLagSampler?: import('@utils/loopLag').LoopLagSampler | null;
   /** Stop handle for the loop lag sampler (returned by `enable()`). */
   loopLagStop?: (() => void) | null;
+  /**
+   * Per-tool latency tracker, wired in MCPServer.start() via an eventBus
+   * 'tool:called' subscription and released in closeServer(). Exposes top-N
+   * slow tools (p50/p90/p99 + sample count) through the /health verbose branch
+   * (r1-2, 2026-08-18).
+   */
+  toolLatencyTracker?: import('@utils/toolLatency').ToolLatencyTracker | null;
+  /** Unsubscribe handle for the tool-latency eventBus subscription. */
+  toolLatencyStop?: (() => void) | null;
 }
 
 /** Runtime-loaded plugins/workflows/tools from external directories. */

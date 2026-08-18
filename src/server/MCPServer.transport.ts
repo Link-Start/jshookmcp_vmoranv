@@ -280,6 +280,12 @@ function handleHealthCheck(ctx: MCPServerContext, res: HttpServerResponse): void
     if (loopLag) {
       body.loopLag = loopLag;
     }
+    // r1-2: top-N slow tools by p99 (lazy ring-buffer histograms), only present
+    // when a tracker is wired (start() has run). Non-verbose stays minimal.
+    const toolLatency = ctx.toolLatencyTracker?.getSummary();
+    if (toolLatency) {
+      body.toolLatency = toolLatency;
+    }
   }
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -305,6 +311,12 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
     ctx.loopLagStop?.();
     ctx.loopLagStop = null;
     ctx.loopLagSampler = null;
+
+    // Stop the per-tool latency tracker (idempotent; a later start() re-arms it).
+    ctx.toolLatencyStop?.();
+    ctx.toolLatencyStop = null;
+    ctx.toolLatencyTracker?.dispose();
+    ctx.toolLatencyTracker = null;
 
     // Flush snapshots before any other cleanup
     const getInst =

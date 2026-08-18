@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
     detailedShutdown: vi.fn(),
     startArtifactRetentionScheduler: vi.fn(),
     createLoopLagSampler: vi.fn(),
+    createToolLatencyTracker: vi.fn(),
     sendLoggingMessage: vi.fn(async () => undefined),
     logListener: null as null | ((level: string, message: string, args: unknown[]) => void),
   };
@@ -39,6 +40,10 @@ vi.mock('@utils/artifactRetention', () => ({
 
 vi.mock('@utils/loopLag', () => ({
   createLoopLagSampler: mocks.createLoopLagSampler,
+}));
+
+vi.mock('@utils/toolLatency', () => ({
+  createToolLatencyTracker: mocks.createToolLatencyTracker,
 }));
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {
@@ -239,6 +244,13 @@ describe('MCPServer', () => {
     mocks.createLoopLagSampler.mockReturnValue({
       enable: () => vi.fn(),
       getSummary: () => ({ p50Ms: 0, p90Ms: 0, p99Ms: 0, samples: 0 }),
+    });
+    // Default tool-latency tracker: start() always creates + subscribes one, so
+    // every start() test needs a benign implementation (dispose is a no-op fn).
+    mocks.createToolLatencyTracker.mockReturnValue({
+      record: vi.fn(),
+      getSummary: vi.fn(() => ({ top: [], trackedTools: 0 })),
+      dispose: vi.fn(),
     });
 
     process.env.MCP_TRANSPORT = 'stdio';
@@ -646,6 +658,46 @@ describe('MCPServer', () => {
     expect(server.loopLagSampler).toBeNull();
   });
 
+  it('wires the tool latency tracker in start() and disposes it on close()', async () => {
+    // r1-2: the per-tool latency tracker must be created by the server lifecycle,
+    // subscribed to 'tool:called' (side-channel collection), and released on close.
+    const tracker = {
+      record: vi.fn(),
+      getSummary: vi.fn(() => ({ top: [], trackedTools: 0 })),
+      dispose: vi.fn(),
+    };
+    mocks.createToolLatencyTracker.mockReturnValue(tracker);
+
+    const server = new MCPServer(baseConfig);
+    await server.start();
+
+    expect(mocks.createToolLatencyTracker).toHaveBeenCalledOnce();
+    expect(server.toolLatencyTracker).toBe(tracker);
+
+    // A 'tool:called' event with a durationMs must be recorded on the tracker.
+    await server.eventBus.emit('tool:called', {
+      toolName: 'tool_alpha',
+      domain: 'browser',
+      timestamp: new Date().toISOString(),
+      success: true,
+      durationMs: 42.5,
+    });
+    expect(tracker.record).toHaveBeenCalledWith('tool_alpha', 42.5);
+
+    // A 'tool:called' event without durationMs is skipped (no record call).
+    await server.eventBus.emit('tool:called', {
+      toolName: 'tool_beta',
+      domain: 'browser',
+      timestamp: new Date().toISOString(),
+      success: true,
+    });
+    expect(tracker.record).toHaveBeenCalledTimes(1);
+
+    await server.close();
+    expect(tracker.dispose).toHaveBeenCalledOnce();
+    expect(server.toolLatencyTracker).toBeNull();
+  });
+
   it('enterDegradedMode disables tracking only once', () => {
     const server = new MCPServer(baseConfig);
 
@@ -852,6 +904,7 @@ describe('MCPServer', () => {
       sessionId: null,
       timestamp: expect.any(String),
       success: true,
+      durationMs: expect.any(Number),
       args: { x: 7 },
       result: {
         success: true,
@@ -877,6 +930,7 @@ describe('MCPServer', () => {
       sessionId: null,
       timestamp: expect.any(String),
       success: true,
+      durationMs: expect.any(Number),
       args: {},
       result: {
         success: true,
