@@ -64,6 +64,33 @@ describe('RingBuffer', () => {
     expect(buffer.length).toBe(0);
   });
 
+  it('peek() returns the oldest element without removing it', () => {
+    const buffer = new RingBuffer<number>(3);
+    buffer.push(1);
+    buffer.push(2);
+    buffer.push(3);
+
+    expect(buffer.peek()).toBe(1);
+    // Peek is a read-only O(1) lookup: the logical contents and length are
+    // unchanged.
+    expect(buffer.length).toBe(3);
+    expect(buffer.toArray()).toEqual([1, 2, 3]);
+  });
+
+  it('peek() returns undefined when empty', () => {
+    expect(new RingBuffer<number>(3).peek()).toBeUndefined();
+  });
+
+  it('peek() reflects the overwrite of the oldest slot at capacity', () => {
+    const buffer = new RingBuffer<number>(3);
+    buffer.push(1);
+    buffer.push(2);
+    buffer.push(3);
+    buffer.push(4); // overwrites 1
+
+    expect(buffer.peek()).toBe(2);
+  });
+
   it('iterates over a snapshot even when the buffer is mutated mid-iteration', () => {
     const buffer = new RingBuffer<number>(4);
     buffer.push(1);

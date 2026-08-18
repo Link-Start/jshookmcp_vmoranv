@@ -2,6 +2,7 @@ import type { ChildProcess } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { SYSCALL_TRACE_SPAWN_TIMEOUT_MS } from '@src/constants';
+import { RingBuffer } from '@utils/RingBuffer';
 
 export type SyscallBackend = 'etw' | 'strace' | 'dtrace';
 
@@ -483,7 +484,7 @@ function parseDTraceLine(
 
 export class SyscallMonitor {
   private activeState?: MonitorState;
-  private readonly capturedEvents: SyscallEvent[] = [];
+  private readonly capturedEvents = new RingBuffer<SyscallEvent>(MAX_CAPTURED_EVENTS);
   private droppedEvents = 0;
   private lastBackend: SyscallBackend = chooseDefaultBackend();
   private subprocessError?: string;
@@ -585,7 +586,10 @@ export class SyscallMonitor {
       this.generateSyntheticEvents();
     }
 
-    return this.capturedEvents.filter((event) => matchesFilter(event, filter)).map(cloneEvent);
+    return this.capturedEvents
+      .toArray()
+      .filter((event) => matchesFilter(event, filter))
+      .map(cloneEvent);
   }
 
   getStats(): {
@@ -860,12 +864,12 @@ export class SyscallMonitor {
 
   /**
    * Append an event while enforcing the {@link MAX_CAPTURED_EVENTS} ring cap:
-   * beyond the cap the oldest event is shifted out and counted in
-   * `droppedEvents` (surfaced via getStats) so silent loss stays visible.
+   * beyond the cap the oldest event is overwritten (O(1) ring-buffer drop) and
+   * counted in `droppedEvents` (surfaced via getStats) so silent loss stays
+   * visible.
    */
   private pushCapturedEvent(event: SyscallEvent): void {
     if (this.capturedEvents.length >= MAX_CAPTURED_EVENTS) {
-      this.capturedEvents.shift();
       this.droppedEvents += 1;
     }
     this.capturedEvents.push(event);
@@ -873,7 +877,7 @@ export class SyscallMonitor {
 
   /** Clear retained events and the drop counter for a fresh session. */
   private resetCapture(): void {
-    this.capturedEvents.length = 0;
+    this.capturedEvents.clear();
     this.droppedEvents = 0;
   }
 

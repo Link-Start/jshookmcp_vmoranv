@@ -48,6 +48,12 @@ export class RingBuffer<T> {
     return item;
   }
 
+  /** Return the oldest element without removing it (O(1)). */
+  peek(): T | undefined {
+    if (this.count === 0) return undefined;
+    return this.buf[this.head];
+  }
+
   clear(): void {
     this.buf = Array.from<T | undefined>({ length: Math.min(64, this.capacity) });
     this.head = 0;

@@ -80,9 +80,15 @@ export interface LoopLagSamplerOptions {
   resolution?: number;
   /** Summary window length in ms — `getSummary()` resets once this elapses. */
   windowMs?: number;
-  /** Test seam: inject a histogram instead of `monitorEventLoopDelay`. */
+  /**
+   * Test seam: inject a histogram instead of `monitorEventLoopDelay`.
+   * @internal
+   */
   histogram?: ResettableLoopLagHistogram & { enable(): void; disable(): void };
-  /** Test seam: inject a clock. */
+  /**
+   * Test seam: inject a clock.
+   * @internal
+   */
   now?: () => number;
 }
 
@@ -119,13 +125,17 @@ export function createLoopLagSampler(options: LoopLagSamplerOptions = {}): LoopL
     },
     getSummary() {
       const summary = summarizeLoopLag(histogram);
-      const cumulativeSamples = closedWindowSamples + summary.samples;
       if (now() - lastResetAt >= windowMs) {
         closedWindowSamples += summary.samples;
         histogram.reset();
         lastResetAt = now();
       }
-      return { ...summary, cumulativeSamples };
+      // Compute the cumulative total from the post-reset histogram state: a
+      // re-entrant getSummary that closes the window mid-read (two /health
+      // requests crossing a window boundary) would otherwise add the closing
+      // window's samples twice — once into `closedWindowSamples` and once from
+      // the pre-reset snapshot above.
+      return { ...summary, cumulativeSamples: closedWindowSamples + histogram.count };
     },
   };
 }

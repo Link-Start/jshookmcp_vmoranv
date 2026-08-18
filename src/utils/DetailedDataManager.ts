@@ -118,6 +118,10 @@ export class DetailedDataManager {
   private pendingPersistCount = 0;
   /** Serializes whole-file metadata rewrites so concurrent rebuilds cannot interleave. */
   private metadataRebuildChain: Promise<void> = Promise.resolve();
+  /** Set when a rebuild is requested but not yet flushed (coalesces same-tick bursts). */
+  private metadataDirty = false;
+  /** Guards against appending more than one flush per synchronous burst. */
+  private metadataRebuildScheduled = false;
 
   private readonly DEFAULT_TTL = DETAILED_DATA_DEFAULT_TTL_MS;
   private readonly MAX_TTL = DETAILED_DATA_MAX_TTL_MS;
@@ -268,12 +272,30 @@ export class DetailedDataManager {
    * removal (periodic cleanup, LRU eviction) goes through this so concurrent
    * rebuilds cannot interleave their whole-file writes, and a failed rebuild
    * never poisons the chain.
+   *
+   * High-eviction bursts (many `discardPersistedEntries` calls in one tick)
+   * are coalesced via a dirty flag + a single scheduled flush, so N removals
+   * produce one whole-file rewrite instead of N consecutive rewrites.
    */
   private queueRebuildMetadata(): Promise<void> {
-    this.metadataRebuildChain = this.metadataRebuildChain
-      .catch(() => {})
-      .then(() => this.rebuildMetadata())
-      .catch((error) => logger.warn('Failed to rebuild detailed-data metadata', error));
+    this.metadataDirty = true;
+    if (!this.metadataRebuildScheduled) {
+      this.metadataRebuildScheduled = true;
+      this.metadataRebuildChain = this.metadataRebuildChain
+        .catch(() => {})
+        .then(async () => {
+          // Reset the schedule flag before checking dirty: a burst arriving
+          // while this flush's rebuild is in flight must schedule its own
+          // (serialized) flush rather than being silently dropped.
+          this.metadataRebuildScheduled = false;
+          if (!this.metadataDirty) {
+            return;
+          }
+          this.metadataDirty = false;
+          await this.rebuildMetadata();
+        })
+        .catch((error) => logger.warn('Failed to rebuild detailed-data metadata', error));
+    }
     return this.metadataRebuildChain;
   }
 

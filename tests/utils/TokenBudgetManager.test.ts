@@ -133,6 +133,21 @@ describe('TokenBudgetManager', () => {
     expect(stats.currentUsage).toBe(10_000_000);
   });
 
+  it('advances the stale-prune head to the new oldest record after cap eviction', () => {
+    const manager = TokenBudgetManager.getInstance();
+    // 2005 pushes evict the first 5 records via the hard cap; the 6th becomes
+    // the oldest retained record and must drive future stale-pruning.
+    for (let i = 0; i < 2005; i++) {
+      manager.recordToolCall(`tool_${i}`, { i }, null);
+    }
+
+    const oldest = (
+      manager as unknown as { toolCallHistory: { peek(): { timestamp: number } | undefined } }
+    ).toolCallHistory.peek()?.timestamp;
+    const headTimestamp = (manager as unknown as { headTimestamp: number | null }).headTimestamp;
+    expect(headTimestamp).toBe(oldest);
+  });
+
   it('handles errors gracefully in recordToolCall', () => {
     const manager = TokenBudgetManager.getInstance();
     const toxic: Record<string, unknown> = { detailId: 'x' };

@@ -153,6 +153,32 @@ describe('DetailedDataManager – v8 ignore branch coverage', () => {
     expect(manager.retrieve(id2)).toEqual({ b: 2 });
   });
 
+  // ── queueRebuildMetadata coalescing ──────────────────────────────────────
+
+  it('coalesces multiple eviction-triggered metadata rebuilds in one tick', async () => {
+    const rebuildSpy = vi.spyOn(manager as any, 'rebuildMetadata').mockResolvedValue(undefined);
+
+    // No persistPath → discardPersistedEntries skips the unlink and only queues
+    // a metadata rebuild, so this exercises the coalescing path in isolation.
+    const entry = {
+      data: { a: 1 },
+      expiresAt: Date.now() + 60_000,
+      createdAt: Date.now(),
+      lastAccessedAt: Date.now(),
+      accessCount: 0,
+      size: 10,
+    };
+
+    // Three synchronous discards in the same tick must collapse into a single
+    // whole-file metadata rewrite rather than three consecutive rewrites.
+    const p1 = (manager as any).discardPersistedEntries([entry]);
+    const p2 = (manager as any).discardPersistedEntries([entry]);
+    const p3 = (manager as any).discardPersistedEntries([entry]);
+    await Promise.all([p1, p2, p3]);
+
+    expect(rebuildSpy).toHaveBeenCalledTimes(1);
+  });
+
   // ── evictLRU ─────────────────────────────────────────────────────────────
 
   it('evictLRU removes least recently accessed entry', async () => {

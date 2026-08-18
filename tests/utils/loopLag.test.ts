@@ -166,4 +166,44 @@ describe('createLoopLagSampler windowing', () => {
 
     expect(summary.cumulativeSamples).toBe(125);
   });
+
+  it('does not double-count cumulative when a re-entrant getSummary closes the window mid-read', () => {
+    let samples = 100;
+    let reentered = false;
+    // The histogram's `count` getter re-enters getSummary() before the outer
+    // call finishes reading its summary, modelling two /health requests that
+    // cross a window boundary. `sampler` is referenced lazily by the getter,
+    // so it is declared after the histogram it captures.
+    const histogram = {
+      percentile: () => 1_000_000,
+      get count() {
+        // Snapshot before the re-entrant call so the outer read observes the
+        // pre-reset count even though the nested call resets the histogram.
+        const snapshot = samples;
+        if (!reentered) {
+          reentered = true;
+          sampler.getSummary();
+        }
+        return snapshot;
+      },
+      reset: () => {
+        samples = 0;
+      },
+      enable: () => {},
+      disable: () => {},
+    };
+
+    let nowMs = 0;
+    const sampler = createLoopLagSampler({
+      histogram: histogram as never,
+      now: () => nowMs,
+      windowMs: 30_000,
+    });
+    nowMs = 30_000; // cross the window boundary
+
+    const summary = sampler.getSummary();
+    // The nested call closed the window (100 samples); the outer call must not
+    // add that same window a second time.
+    expect(summary.cumulativeSamples).toBe(100);
+  });
 });

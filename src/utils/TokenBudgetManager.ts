@@ -452,7 +452,7 @@ export class TokenBudgetManager {
     if (evicted) {
       this.currentUsage -= evicted.estimatedTokens;
     }
-    this.headTimestamp = this.toolCallHistory.toArray()[0]?.timestamp ?? null;
+    this.headTimestamp = this.toolCallHistory.peek()?.timestamp ?? null;
   }
 
   private recalculateUsage(): void {

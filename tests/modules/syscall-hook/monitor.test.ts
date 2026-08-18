@@ -5,6 +5,7 @@ import {
   SYSCALL_TRACE_KILL_GRACE_MS,
   SyscallMonitor,
 } from '@modules/syscall-hook/SyscallMonitor';
+import { RingBuffer } from '@utils/RingBuffer';
 
 type EventHandler = (...args: any[]) => void;
 
@@ -559,6 +560,13 @@ describe('SyscallMonitor', () => {
     });
     expect(monitor.getStats().droppedEvents).toBe(0);
     expect(monitor.getStats().eventsCaptured).toBeGreaterThan(0);
+  });
+
+  it('stores captured events in a bounded ring buffer so dropping the oldest is O(1)', () => {
+    // The event store must be a RingBuffer (bounded, O(1) overwrite of the
+    // oldest), not a plain array whose shift() memmoves 100K elements per drop.
+    expect((monitor as any).capturedEvents).toBeInstanceOf(RingBuffer);
+    expect((monitor as any).capturedEvents.length).toBe(0);
   });
 
   // ── b3-13: restarting must terminate the previous subprocess ──────────────
