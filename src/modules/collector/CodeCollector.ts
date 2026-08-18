@@ -243,9 +243,17 @@ export class CodeCollector {
       logger.warn(`Collected URLs exceeded ${this.MAX_COLLECTED_URLS}, clearing...`);
       const urls = Array.from(this.collectedUrls);
       this.collectedUrls.clear();
-      urls
-        .slice(-Math.floor(this.MAX_COLLECTED_URLS / 2))
-        .forEach((url) => this.collectedUrls.add(url));
+      const retained = new Set(urls.slice(-Math.floor(this.MAX_COLLECTED_URLS / 2)));
+      retained.forEach((url) => this.collectedUrls.add(url));
+
+      // The files cache is keyed by the same URL strings and previously grew
+      // unbounded alongside the URL set — 256 scopes × unbounded files. Prune
+      // it to the same retained set so the two views stay in lockstep (b1-05).
+      for (const fileUrl of this.collectedFilesCache.keys()) {
+        if (!retained.has(fileUrl)) {
+          this.collectedFilesCache.delete(fileUrl);
+        }
+      }
     }
   }
   private initGuard: Promise<void> | null = null;

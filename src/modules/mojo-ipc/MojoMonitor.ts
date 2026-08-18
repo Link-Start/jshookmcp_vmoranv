@@ -2,6 +2,18 @@ import { spawn } from 'node:child_process';
 import { MOJO_MONITOR_TIMEOUT_MS, MOJO_FRIDA_PROBE_TIMEOUT_MS } from '@src/constants';
 
 /**
+ * Hard cap on buffered Mojo messages. The monitor is a domain-level singleton
+ * shared across every MCP session, so an unbounded buffer OOMs the process over
+ * hours of live capture. When the ring is full the oldest message is evicted
+ * and counted in `droppedMessages` (surfaced via `getMessages().dropped` and
+ * `getDroppedMessageCount()`) (b6-01).
+ */
+export const MOJO_MAX_MESSAGES = (() => {
+  const envVal = parseInt(process.env.JSHOOK_MOJO_MAX_MESSAGES ?? '', 10);
+  return Number.isFinite(envVal) && envVal > 0 ? envVal : 10_000;
+})();
+
+/**
  * Best-effort message direction inferred from the header flags byte
  * (offset 1 of a Mojo message header). The wire layout is build-specific;
  * this helper only fires when the payload looks like a header and otherwise
@@ -312,6 +324,7 @@ export class MojoMonitor {
   private deviceId?: string;
   private fridaChild?: import('node:child_process').ChildProcess;
   private readonly messages: MojoMessage[] = [];
+  private droppedMessages = 0;
   private readonly interfaces = new Map<string, MojoInterfaceState>();
   private readonly observedInterfaceNames = new Set<string>();
   private availability: MojoMonitorAvailability = {
@@ -443,6 +456,11 @@ export class MojoMonitor {
     return this.observedInterfaceNames.size;
   }
 
+  /** Number of messages evicted by the bounded buffer (see MOJO_MAX_MESSAGES). */
+  getDroppedMessageCount(): number {
+    return this.droppedMessages;
+  }
+
   getInterfaceCatalogSource(): MojoInterfaceCatalogSource {
     if (this.observedInterfaceNames.size === 0) {
       return 'seeded-defaults';
@@ -467,6 +485,7 @@ export class MojoMonitor {
     totalAvailable: number;
     filtered: boolean;
     simulation: boolean;
+    dropped: number;
   }> {
     if (!this.active) {
       return {
@@ -474,6 +493,7 @@ export class MojoMonitor {
         totalAvailable: 0,
         filtered: false,
         simulation: this.simulationMode,
+        dropped: this.droppedMessages,
       };
     }
 
@@ -486,6 +506,7 @@ export class MojoMonitor {
       totalAvailable: allMessages.length,
       filtered: this.filterIsApplied(options),
       simulation: this.simulationMode,
+      dropped: this.droppedMessages,
     };
   }
 
@@ -673,6 +694,10 @@ export class MojoMonitor {
       message.direction === undefined
         ? { ...message, direction: deriveDirectionFromPayload(message.payload) }
         : { ...message };
+    if (this.messages.length >= MOJO_MAX_MESSAGES) {
+      this.messages.shift();
+      this.droppedMessages += 1;
+    }
     this.messages.push(normalized);
     this.observedInterfaceNames.add(normalized.interfaceName);
     const existing = this.interfaces.get(normalized.interfaceName);
@@ -791,6 +816,7 @@ export class MojoMonitor {
 
   private resetInterfaces(): void {
     this.messages.length = 0;
+    this.droppedMessages = 0;
     this.interfaces.clear();
     this.observedInterfaceNames.clear();
     for (const item of getDefaultInterfaces()) {
