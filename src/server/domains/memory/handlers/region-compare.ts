@@ -71,8 +71,8 @@ export class RegionCompareHandlers {
       const handle = api.openProcess(pid, false);
       try {
         // Read both regions
-        const result1 = api.readMemory(handle, addr1BigInt, size);
-        const result2 = api.readMemory(handle, addr2BigInt, size);
+        const result1 = await api.readMemory(handle, addr1BigInt, size);
+        const result2 = await api.readMemory(handle, addr2BigInt, size);
 
         const buf1 = result1.data;
         const buf2 = result2.data;

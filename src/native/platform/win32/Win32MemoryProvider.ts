@@ -15,8 +15,8 @@ import {
 import {
   openProcessForMemory,
   CloseHandle,
-  ReadProcessMemory,
-  WriteProcessMemory,
+  ReadProcessMemoryAsync,
+  WriteProcessMemoryAsync,
   VirtualQueryEx,
   VirtualProtectEx,
   VirtualAllocEx,
@@ -121,15 +121,23 @@ export class Win32MemoryProvider implements PlatformMemoryAPI {
     // WeakMap will auto-clean once ProcessHandle is GC'd
   }
 
-  readMemory(handle: ProcessHandle, address: bigint, size: number): MemoryReadResult {
+  async readMemory(
+    handle: ProcessHandle,
+    address: bigint,
+    size: number,
+  ): Promise<MemoryReadResult> {
     const h = getWin32Handle(handle);
-    const buffer = ReadProcessMemory(h, address, size);
+    const buffer = await ReadProcessMemoryAsync(h, address, size);
     return { data: buffer, bytesRead: buffer.length };
   }
 
-  writeMemory(handle: ProcessHandle, address: bigint, data: Buffer): MemoryWriteResult {
+  async writeMemory(
+    handle: ProcessHandle,
+    address: bigint,
+    data: Buffer,
+  ): Promise<MemoryWriteResult> {
     const h = getWin32Handle(handle);
-    const bytesWritten = WriteProcessMemory(h, address, data);
+    const bytesWritten = await WriteProcessMemoryAsync(h, address, data);
     return { bytesWritten };
   }
 

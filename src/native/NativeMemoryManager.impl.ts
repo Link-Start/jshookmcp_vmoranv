@@ -42,13 +42,13 @@ export type {
 const execAsync = promisify(exec);
 const SCAN_CHUNK_SIZE = 16 * 1024 * 1024;
 
-export function scanRegionInChunks(
+export async function scanRegionInChunks(
   region: { baseAddress: bigint; regionSize: number },
   patternBytes: number[],
   mask: number[],
-  readChunk: (address: bigint, size: number) => Buffer<ArrayBufferLike>,
+  readChunk: (address: bigint, size: number) => Promise<Buffer<ArrayBufferLike>>,
   chunkSize = SCAN_CHUNK_SIZE,
-): bigint[] {
+): Promise<bigint[]> {
   if (patternBytes.length === 0 || region.regionSize < patternBytes.length || chunkSize <= 0) {
     return [];
   }
@@ -60,7 +60,7 @@ export function scanRegionInChunks(
   for (let chunkOffset = 0; chunkOffset < region.regionSize; chunkOffset += chunkSize) {
     const readSize = Math.min(chunkSize, region.regionSize - chunkOffset);
     const chunkAddress = region.baseAddress + BigInt(chunkOffset);
-    const chunk = readChunk(chunkAddress, readSize);
+    const chunk = await readChunk(chunkAddress, readSize);
     const scanBuffer = carryOver.length > 0 ? Buffer.concat([carryOver, chunk]) : chunk;
     const chunkMatches = findPatternInBuffer(scanBuffer, patternBytes, mask);
 
@@ -115,7 +115,7 @@ export class NativeMemoryManager {
 
       const handle = this.provider.openProcess(pid, false);
       try {
-        const { data: buffer } = this.provider.readMemory(handle, addrNum, size);
+        const { data: buffer } = await this.provider.readMemory(handle, addrNum, size);
         return {
           success: true,
           data: buffer.toString('hex').toUpperCase().match(/.{2}/g)?.join(' ') || '',
@@ -157,7 +157,7 @@ export class NativeMemoryManager {
 
       const handle = this.provider.openProcess(pid, true);
       try {
-        const { bytesWritten } = this.provider.writeMemory(handle, addrNum, buffer);
+        const { bytesWritten } = await this.provider.writeMemory(handle, addrNum, buffer);
         return {
           success: true,
           bytesWritten,
@@ -318,11 +318,11 @@ export class NativeMemoryManager {
           readableRegions.map((region) =>
             cpuLimit(async () => {
               try {
-                return scanRegionInChunks(
+                return await scanRegionInChunks(
                   region,
                   patternBytes,
                   mask,
-                  (addr, size) => providerRef.readMemory(handle, addr, size).data,
+                  async (addr, size) => (await providerRef.readMemory(handle, addr, size)).data,
                 );
               } catch {
                 // Skip unreadable regions

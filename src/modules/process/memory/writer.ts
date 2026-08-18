@@ -143,7 +143,7 @@ async function writeMemoryLinux(
     if (provider) {
       const handle = provider.openProcess(pid, true);
       try {
-        const result = provider.writeMemory(handle, BigInt(address), data);
+        const result = await provider.writeMemory(handle, BigInt(address), data);
         logger.debug('Native Linux memory write succeeded');
         return { success: true, bytesWritten: result.bytesWritten };
       } finally {
@@ -212,7 +212,7 @@ async function writeMemoryMac(
     if (avail.available) {
       const handle = provider.openProcess(pid, true);
       try {
-        const result = provider.writeMemory(handle, BigInt(address), data);
+        const result = await provider.writeMemory(handle, BigInt(address), data);
         logger.debug('Native Mach memory write succeeded (zero-pause)');
         return { success: true, bytesWritten: result.bytesWritten };
       } finally {

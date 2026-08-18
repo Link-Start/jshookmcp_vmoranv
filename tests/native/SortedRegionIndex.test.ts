@@ -189,25 +189,25 @@ describe('SortedRegionIndex', () => {
   });
 
   describe('chunk cache', () => {
-    it('should return cached data on repeated reads', () => {
+    it('should return cached data on repeated reads', async () => {
       const data = Buffer.alloc(64, 0xab);
       const { provider, handle } = makeMockProvider(new Map([[0x1000n, data]]));
       const idx = new SortedRegionIndex();
       idx.build([makeRegion({ baseAddress: 0x1000n, size: 64 })]);
 
       // First read calls provider
-      const r1 = idx.readChunk(provider, handle, 0x1000n, 64);
+      const r1 = await idx.readChunk(provider, handle, 0x1000n, 64);
       expect(r1[0]).toBe(0xab);
       expect(provider.readMemory).toHaveBeenCalledTimes(1);
 
       // Second read hits cache
-      const r2 = idx.readChunk(provider, handle, 0x1000n, 32);
+      const r2 = await idx.readChunk(provider, handle, 0x1000n, 32);
       expect(r2[0]).toBe(0xab);
       expect(r2.length).toBe(32);
       expect(provider.readMemory).toHaveBeenCalledTimes(1); // No additional call
     });
 
-    it('should call provider on cache miss (different address)', () => {
+    it('should call provider on cache miss (different address)', async () => {
       const data1 = Buffer.alloc(64, 0xab);
       const data2 = Buffer.alloc(64, 0xcd);
       const { provider, handle } = makeMockProvider(
@@ -218,14 +218,14 @@ describe('SortedRegionIndex', () => {
       );
       const idx = new SortedRegionIndex();
 
-      idx.readChunk(provider, handle, 0x1000n, 64);
+      await idx.readChunk(provider, handle, 0x1000n, 64);
       expect(provider.readMemory).toHaveBeenCalledTimes(1);
 
-      idx.readChunk(provider, handle, 0x2000n, 64);
+      await idx.readChunk(provider, handle, 0x2000n, 64);
       expect(provider.readMemory).toHaveBeenCalledTimes(2);
     });
 
-    it('should evict LRU entry when cache is full', () => {
+    it('should evict LRU entry when cache is full', async () => {
       const { provider, handle } = makeMockProvider(
         new Map([
           [0x1000n, Buffer.alloc(64, 0x11)],
@@ -238,26 +238,26 @@ describe('SortedRegionIndex', () => {
       const idx = new SortedRegionIndex(3);
 
       // Fill cache: 0x1000, 0x2000, 0x3000
-      idx.readChunk(provider, handle, 0x1000n, 64);
-      idx.readChunk(provider, handle, 0x2000n, 64);
-      idx.readChunk(provider, handle, 0x3000n, 64);
+      await idx.readChunk(provider, handle, 0x1000n, 64);
+      await idx.readChunk(provider, handle, 0x2000n, 64);
+      await idx.readChunk(provider, handle, 0x3000n, 64);
       expect(idx.cacheSize).toBe(3);
 
       // Read 0x4000 — evicts 0x1000 (LRU), cache stays at 3
-      idx.readChunk(provider, handle, 0x4000n, 64);
+      await idx.readChunk(provider, handle, 0x4000n, 64);
       expect(idx.cacheSize).toBe(3);
       // 0x4000 was fetched via provider
       expect(provider.readMemory).toHaveBeenCalledTimes(4);
 
       // 0x1000 should now be a miss (was evicted)
       const callCountBefore = (provider.readMemory as ReturnType<typeof vi.fn>).mock.calls.length;
-      idx.readChunk(provider, handle, 0x1000n, 64);
+      await idx.readChunk(provider, handle, 0x1000n, 64);
       expect((provider.readMemory as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
         callCountBefore + 1,
       ); // re-fetched
     });
 
-    it('should promote recently accessed entries (LRU)', () => {
+    it('should promote recently accessed entries (LRU)', async () => {
       const { provider, handle } = makeMockProvider(
         new Map([
           [0x1000n, Buffer.alloc(64, 0x11)],
@@ -269,24 +269,24 @@ describe('SortedRegionIndex', () => {
       const idx = new SortedRegionIndex(3);
 
       // Fill: 0x1000, 0x2000, 0x3000 (0x1000 is LRU)
-      idx.readChunk(provider, handle, 0x1000n, 64);
-      idx.readChunk(provider, handle, 0x2000n, 64);
-      idx.readChunk(provider, handle, 0x3000n, 64);
+      await idx.readChunk(provider, handle, 0x1000n, 64);
+      await idx.readChunk(provider, handle, 0x2000n, 64);
+      await idx.readChunk(provider, handle, 0x3000n, 64);
 
       // Access 0x1000 again — promotes it to MRU, 0x2000 becomes LRU
-      idx.readChunk(provider, handle, 0x1000n, 64);
+      await idx.readChunk(provider, handle, 0x1000n, 64);
 
       // Add 0x4000 — evicts 0x2000 (now LRU), not 0x1000
-      idx.readChunk(provider, handle, 0x4000n, 64);
+      await idx.readChunk(provider, handle, 0x4000n, 64);
       expect(idx.cacheSize).toBe(3);
 
       // 0x1000 should be a cache hit (was promoted)
       const callCount = (provider.readMemory as ReturnType<typeof vi.fn>).mock.calls.length;
-      idx.readChunk(provider, handle, 0x1000n, 64);
+      await idx.readChunk(provider, handle, 0x1000n, 64);
       expect((provider.readMemory as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callCount); // No additional call — cache hit
     });
 
-    it('should re-fetch when cached chunk is smaller than requested', () => {
+    it('should re-fetch when cached chunk is smaller than requested', async () => {
       const handle = { pid: 9999, writeAccess: false };
       // Create a mock provider that returns data sized to the request,
       // with a sequence number marker at offset 0 to distinguish calls.
@@ -300,28 +300,28 @@ describe('SortedRegionIndex', () => {
       const idx = new SortedRegionIndex(8);
 
       // First read: 32 bytes
-      const r1 = idx.readChunk(provider as any, handle, 0x1000n, 32);
+      const r1 = await idx.readChunk(provider as any, handle, 0x1000n, 32);
       expect(r1.length).toBe(32);
       expect(provider.readMemory).toHaveBeenCalledTimes(1);
 
       // Second read: 64 bytes on same address but larger → cache miss
-      const r2 = idx.readChunk(provider as any, handle, 0x1000n, 64);
+      const r2 = await idx.readChunk(provider as any, handle, 0x1000n, 64);
       expect(r2.length).toBe(64);
       expect(provider.readMemory).toHaveBeenCalledTimes(2);
 
       // Third read: 32 bytes on same address → cache hit (64 ≥ 32)
-      const r3 = idx.readChunk(provider as any, handle, 0x1000n, 32);
+      const r3 = await idx.readChunk(provider as any, handle, 0x1000n, 32);
       expect(r3.length).toBe(32);
       expect(provider.readMemory).toHaveBeenCalledTimes(2); // Hit
     });
 
-    it('should clear cache without affecting regions', () => {
+    it('should clear cache without affecting regions', async () => {
       const data = Buffer.alloc(64, 0xff);
       const { provider, handle } = makeMockProvider(new Map([[0x1000n, data]]));
       const idx = new SortedRegionIndex();
       idx.build([makeRegion({ baseAddress: 0x1000n, size: 64 })]);
 
-      idx.readChunk(provider, handle, 0x1000n, 64);
+      await idx.readChunk(provider, handle, 0x1000n, 64);
       expect(idx.cacheSize).toBe(1);
 
       idx.clearCache();
@@ -329,7 +329,7 @@ describe('SortedRegionIndex', () => {
       expect(idx.size).toBe(1); // Regions unaffected
 
       // Subsequent read is a miss
-      idx.readChunk(provider, handle, 0x1000n, 64);
+      await idx.readChunk(provider, handle, 0x1000n, 64);
       expect(provider.readMemory).toHaveBeenCalledTimes(2);
     });
   });

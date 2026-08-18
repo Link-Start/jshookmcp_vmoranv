@@ -108,7 +108,13 @@ export class PointerChainEngine {
       for (let depth = 0; depth < maxDepth; depth++) {
         if (currentTargets.size === 0) break;
 
-        const matches = this.scanLevel(handle, currentTargets, maxOffset, alignment, regionIndex);
+        const matches = await this.scanLevel(
+          handle,
+          currentTargets,
+          maxOffset,
+          alignment,
+          regionIndex,
+        );
 
         if (matches.length === 0) break;
 
@@ -246,7 +252,7 @@ export class PointerChainEngine {
   ): Promise<void> {
     if (depth >= maxDepth || targets.size === 0) return;
 
-    const matches = this.scanLevel(handle, targets, maxOffset, alignment, regionIndex);
+    const matches = await this.scanLevel(handle, targets, maxOffset, alignment, regionIndex);
     if (matches.length === 0) return;
 
     levelResults.push(matches);
@@ -275,7 +281,7 @@ export class PointerChainEngine {
   async validateChain(pid: number, chain: PointerChain): Promise<ChainValidationResult> {
     const handle = this.provider.openProcess(pid, false);
     try {
-      const resolved = this.resolveChainInternal(handle, chain);
+      const resolved = await this.resolveChainInternal(handle, chain);
       if (resolved.brokenAt !== undefined) {
         return {
           chainId: chain.id,
@@ -318,7 +324,7 @@ export class PointerChainEngine {
   async resolveChain(pid: number, chain: PointerChain): Promise<string | null> {
     const handle = this.provider.openProcess(pid, false);
     try {
-      const resolved = this.resolveChainInternal(handle, chain);
+      const resolved = await this.resolveChainInternal(handle, chain);
       return resolved.brokenAt === undefined ? formatAddress(resolved.currentAddr) : null;
     } finally {
       this.provider.closeProcess(handle);
@@ -331,17 +337,17 @@ export class PointerChainEngine {
    * the whole chain resolved). Shared by {@link validateChain} and
    * {@link resolveChain} — previously two verbatim copies of this loop.
    */
-  private resolveChainInternal(
+  private async resolveChainInternal(
     handle: ProcessHandle,
     chain: PointerChain,
-  ): { currentAddr: bigint; brokenAt?: number } {
+  ): Promise<{ currentAddr: bigint; brokenAt?: number }> {
     let currentAddr = parseAddress(chain.baseAddress);
 
     for (let i = 0; i < chain.links.length; i++) {
       const link = chain.links[i]!;
       let ptrValue: bigint;
       try {
-        const buf = this.provider.readMemory(handle, currentAddr, 8).data;
+        const buf = (await this.provider.readMemory(handle, currentAddr, 8)).data;
         ptrValue = buf.readBigUInt64LE(0);
       } catch {
         return { currentAddr, brokenAt: i };
@@ -438,13 +444,13 @@ export class PointerChainEngine {
    * sorted target list (TypedArray = 8 bytes per entry vs ~32 bytes for JS
    * BigInt objects — 87.5% RAM reduction).
    */
-  private scanLevel(
+  private async scanLevel(
     handle: ProcessHandle,
     targetAddresses: Set<bigint>,
     maxOffset: number,
     alignment: number,
     regionIndex: SortedRegionIndex,
-  ): LevelMatch[] {
+  ): Promise<LevelMatch[]> {
     const matches: LevelMatch[] = [];
     const chunkSize = POINTER_CHAIN_SCAN_CHUNK_SIZE;
 
@@ -484,7 +490,7 @@ export class PointerChainEngine {
         let chunk: Buffer;
         try {
           // LRU-cached read — avoids re-reading same region across BFS levels
-          chunk = regionIndex.readChunk(this.provider, handle, chunkAddr, readSize);
+          chunk = await regionIndex.readChunk(this.provider, handle, chunkAddr, readSize);
         } catch {
           break;
         }

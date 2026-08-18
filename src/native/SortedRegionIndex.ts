@@ -143,12 +143,12 @@ export class SortedRegionIndex {
    * @returns Buffer containing the requested bytes.
    * @throws If the underlying readMemory call fails.
    */
-  readChunk(
+  async readChunk(
     provider: PlatformMemoryAPI,
     handle: ProcessHandle,
     address: bigint,
     size: number,
-  ): Buffer {
+  ): Promise<Buffer> {
     const key = address.toString(16);
     const cached = this.cache.get(key);
 
@@ -160,7 +160,7 @@ export class SortedRegionIndex {
     }
 
     // Cache miss — fetch from provider
-    const result = provider.readMemory(handle, address, size);
+    const result = await provider.readMemory(handle, address, size);
     const data = Buffer.from(result.data);
 
     // Evict oldest entry when at capacity

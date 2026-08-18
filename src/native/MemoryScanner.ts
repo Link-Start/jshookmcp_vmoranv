@@ -38,6 +38,19 @@ import type { ProcessHandle } from './platform/types.js';
 import { formatAddress, parseAddress } from './formatAddress';
 import { ToolError } from '@errors/ToolError';
 
+/**
+ * Number of chunks processed between event-loop yields inside scan loops.
+ * The FFI read is already async (awaited), but the per-chunk `Buffer.indexOf`
+ * scan is CPU-bound; yielding every N chunks keeps long first-scans from
+ * starving concurrent requests (b3-09).
+ */
+const SCAN_YIELD_CHUNK_INTERVAL = 8;
+
+/** Yield to the event loop (macrotask) without a fixed delay. */
+async function yieldToEventLoop(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
 export interface ScanResult {
   sessionId: string;
   matchCount: number;
@@ -100,6 +113,7 @@ export class MemoryScanner {
       const regions = this.getFilteredRegions(handle, options);
       const totalRegions = regions.length;
       let regionsProcessed = 0;
+      let chunksProcessed = 0;
 
       for (const region of regions) {
         if (options.onProgress) options.onProgress(regionsProcessed, totalRegions);
@@ -121,7 +135,7 @@ export class MemoryScanner {
 
           let chunk: Buffer;
           try {
-            chunk = this.provider.readMemory(handle, chunkAddr, readSize).data;
+            chunk = (await this.provider.readMemory(handle, chunkAddr, readSize)).data;
           } catch {
             break; // Skip unreadable chunks
           }
@@ -153,6 +167,11 @@ export class MemoryScanner {
                 if (addresses.length >= maxResults) break;
               }
             }
+          }
+
+          chunksProcessed++;
+          if (chunksProcessed % SCAN_YIELD_CHUNK_INTERVAL === 0) {
+            await yieldToEventLoop();
           }
         }
       }
@@ -221,7 +240,7 @@ export class MemoryScanner {
       for (const addr of prevAddresses) {
         let currentBuf: Buffer;
         try {
-          currentBuf = this.provider.readMemory(handle, addr, valueSize).data;
+          currentBuf = (await this.provider.readMemory(handle, addr, valueSize)).data;
         } catch {
           continue; // Address no longer readable
         }
@@ -311,6 +330,7 @@ export class MemoryScanner {
       const regions = this.getFilteredRegions(handle, options);
       const totalRegions = regions.length;
       let regionsProcessed = 0;
+      let chunksProcessed = 0;
 
       for (const region of regions) {
         if (options.onProgress) options.onProgress(regionsProcessed, totalRegions);
@@ -331,7 +351,7 @@ export class MemoryScanner {
 
           let chunk: Buffer;
           try {
-            chunk = this.provider.readMemory(handle, chunkAddr, readSize).data;
+            chunk = (await this.provider.readMemory(handle, chunkAddr, readSize)).data;
           } catch {
             break;
           }
@@ -344,6 +364,11 @@ export class MemoryScanner {
             values.set(addr, Buffer.from(chunk.subarray(i, i + valueSize)));
 
             if (addresses.length >= maxAddresses) break;
+          }
+
+          chunksProcessed++;
+          if (chunksProcessed % SCAN_YIELD_CHUNK_INTERVAL === 0) {
+            await yieldToEventLoop();
           }
         }
       }
@@ -398,6 +423,7 @@ export class MemoryScanner {
     const handle = this.provider.openProcess(pid, false);
     try {
       const regions = this.getFilteredRegions(handle, scanOptions);
+      let chunksProcessed = 0;
 
       for (const region of regions) {
         if (pointers.length >= maxResults) break;
@@ -416,7 +442,7 @@ export class MemoryScanner {
 
           let chunk: Buffer;
           try {
-            chunk = this.provider.readMemory(handle, chunkAddr, readSize).data;
+            chunk = (await this.provider.readMemory(handle, chunkAddr, readSize)).data;
           } catch {
             break;
           }
@@ -443,6 +469,11 @@ export class MemoryScanner {
 
               if (pointers.length >= maxResults) break;
             }
+          }
+
+          chunksProcessed++;
+          if (chunksProcessed % SCAN_YIELD_CHUNK_INTERVAL === 0) {
+            await yieldToEventLoop();
           }
         }
       }
@@ -507,6 +538,7 @@ export class MemoryScanner {
     const handle = this.provider.openProcess(pid, false);
     try {
       const regions = this.getFilteredRegions(handle, scanOptions);
+      let chunksProcessed = 0;
 
       for (const region of regions) {
         // we'd emit here if we exposed onProgress
@@ -528,7 +560,7 @@ export class MemoryScanner {
 
           let chunk: Buffer;
           try {
-            chunk = this.provider.readMemory(handle, chunkAddr, readSize).data;
+            chunk = (await this.provider.readMemory(handle, chunkAddr, readSize)).data;
           } catch {
             break;
           }
@@ -548,6 +580,11 @@ export class MemoryScanner {
               addresses.push(addr);
               if (addresses.length >= maxResults) break;
             }
+          }
+
+          chunksProcessed++;
+          if (chunksProcessed % SCAN_YIELD_CHUNK_INTERVAL === 0) {
+            await yieldToEventLoop();
           }
         }
       }
@@ -641,6 +678,7 @@ export class MemoryScanner {
       });
 
       const patternLen = parsed.length;
+      let chunksProcessed = 0;
       for (const region of regions) {
         if (matches.length >= maxResults) break;
 
@@ -655,7 +693,7 @@ export class MemoryScanner {
 
           let chunk: Buffer;
           try {
-            chunk = this.provider.readMemory(handle, chunkAddr, readSize).data;
+            chunk = (await this.provider.readMemory(handle, chunkAddr, readSize)).data;
           } catch {
             break;
           }
@@ -672,6 +710,11 @@ export class MemoryScanner {
             if (matched) {
               matches.push(chunkAddr + BigInt(i));
             }
+          }
+
+          chunksProcessed++;
+          if (chunksProcessed % SCAN_YIELD_CHUNK_INTERVAL === 0) {
+            await yieldToEventLoop();
           }
         }
       }

@@ -32,7 +32,11 @@ export function demangleMsvcName(name: string): string {
 export class RttiParser {
   constructor(
     private provider: PlatformMemoryAPI,
-    private readCString: (handle: ProcessHandle, address: bigint, maxLen: number) => string | null,
+    private readCString: (
+      handle: ProcessHandle,
+      address: bigint,
+      maxLen: number,
+    ) => Promise<string | null>,
     private isValidReadablePointer: (handle: ProcessHandle, address: bigint) => boolean,
   ) {}
 
@@ -58,13 +62,13 @@ export class RttiParser {
   ): Promise<{ className: string; baseClasses: string[] } | null> {
     try {
       // Read vtable[-1]: pointer to COL
-      const colPtrBuf = this.provider.readMemory(handle, vtableAddress - 8n, 8).data;
+      const colPtrBuf = (await this.provider.readMemory(handle, vtableAddress - 8n, 8)).data;
       const colAddr = colPtrBuf.readBigUInt64LE(0);
 
       // Validate COL pointer
       if (!this.isValidReadablePointer(handle, colAddr)) return null;
 
-      const col = this.readCompleteObjectLocator(handle, colAddr);
+      const col = await this.readCompleteObjectLocator(handle, colAddr);
       if (!col) return null;
 
       // Calculate module base from objectLocatorRVA:
@@ -73,7 +77,7 @@ export class RttiParser {
 
       // Read TypeDescriptor
       const typeDescAddr = moduleBase + BigInt(col.typeDescRVA);
-      const className = this.readTypeDescriptor(handle, typeDescAddr);
+      const className = await this.readTypeDescriptor(handle, typeDescAddr);
       if (!className) return null;
 
       // Try to read class hierarchy
@@ -85,17 +89,17 @@ export class RttiParser {
     }
   }
 
-  private readCompleteObjectLocator(
+  private async readCompleteObjectLocator(
     handle: ProcessHandle,
     colAddr: bigint,
-  ): {
+  ): Promise<{
     signature: number;
     typeDescRVA: number;
     classDescRVA: number;
     objectLocRVA: number;
-  } | null {
+  } | null> {
     try {
-      const colBuf = this.provider.readMemory(handle, colAddr, 0x18).data;
+      const colBuf = (await this.provider.readMemory(handle, colAddr, 0x18)).data;
       const signature = colBuf.readUInt32LE(0);
 
       // Signature must be 1 for x64
@@ -112,8 +116,15 @@ export class RttiParser {
     }
   }
 
-  private readTypeDescriptor(handle: ProcessHandle, typeDescAddr: bigint): string | null {
-    const className = this.readCString(handle, typeDescAddr + 0x10n, STRUCT_RTTI_MAX_STRING_LEN);
+  private async readTypeDescriptor(
+    handle: ProcessHandle,
+    typeDescAddr: bigint,
+  ): Promise<string | null> {
+    const className = await this.readCString(
+      handle,
+      typeDescAddr + 0x10n,
+      STRUCT_RTTI_MAX_STRING_LEN,
+    );
     if (!className) return null;
 
     // Demangle basic MSVC names: ".?AVClassName@@" → "ClassName"
@@ -128,16 +139,14 @@ export class RttiParser {
     const baseClasses: string[] = [];
     try {
       const classDescAddr = moduleBase + BigInt(classDescRVA);
-      const classDescBuf = this.provider.readMemory(handle, classDescAddr, 0x10).data;
+      const classDescBuf = (await this.provider.readMemory(handle, classDescAddr, 0x10)).data;
       const numBaseClasses = classDescBuf.readUInt32LE(0x08);
       const baseClassArrayRVA = classDescBuf.readUInt32LE(0x0c);
 
       if (numBaseClasses > 0 && numBaseClasses < 20) {
         const baseArrayAddr = moduleBase + BigInt(baseClassArrayRVA);
-        const baseArrayBuf = this.provider.readMemory(
-          handle,
-          baseArrayAddr,
-          numBaseClasses * 4,
+        const baseArrayBuf = (
+          await this.provider.readMemory(handle, baseArrayAddr, numBaseClasses * 4)
         ).data;
 
         for (let i = 1; i < numBaseClasses; i++) {
@@ -146,10 +155,10 @@ export class RttiParser {
           const baseDescAddr = moduleBase + BigInt(baseDescRVA);
 
           try {
-            const baseDescBuf = this.provider.readMemory(handle, baseDescAddr, 0x08).data;
+            const baseDescBuf = (await this.provider.readMemory(handle, baseDescAddr, 0x08)).data;
             const baseTypeDescRVA = baseDescBuf.readUInt32LE(0);
             const baseTypeDescAddr = moduleBase + BigInt(baseTypeDescRVA);
-            const baseName = this.readCString(
+            const baseName = await this.readCString(
               handle,
               baseTypeDescAddr + 0x10n,
               STRUCT_RTTI_MAX_STRING_LEN,

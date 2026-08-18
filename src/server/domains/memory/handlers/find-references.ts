@@ -277,7 +277,7 @@ export class FindReferencesHandlers {
             ) {
               const readSize = Math.min(Number(regionSize), MAX_REGION_SCAN_BYTES);
               try {
-                const readResult = api.readMemory(handle, regionBase, readSize);
+                const readResult = await api.readMemory(handle, regionBase, readSize);
                 const bytes = Buffer.from(readResult.data.subarray(0, readResult.bytesRead));
 
                 const hits = scanForReferences(

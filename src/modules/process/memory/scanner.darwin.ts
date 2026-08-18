@@ -74,7 +74,7 @@ async function scanMemoryMacNative(
 
       if (region.isReadable && region.size > 0 && region.size <= maxRegionSize) {
         try {
-          const result = provider.readMemory(handle, region.baseAddress, region.size);
+          const result = await provider.readMemory(handle, region.baseAddress, region.size);
           const matches = findPatternInBuffer(result.data, patternBytes, patternMask);
           for (const offset of matches) {
             foundAddresses.push(`0x${(region.baseAddress + BigInt(offset)).toString(16)}`);

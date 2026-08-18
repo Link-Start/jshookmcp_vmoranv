@@ -146,7 +146,7 @@ async function readMemoryLinux(
     if (provider) {
       const handle = provider.openProcess(pid, false);
       try {
-        const result = provider.readMemory(handle, BigInt(address), size);
+        const result = await provider.readMemory(handle, BigInt(address), size);
         logger.debug('Native Linux memory read succeeded');
         return { success: true, data: bufferToHex(result.data, result.bytesRead).trim() };
       } finally {
@@ -215,7 +215,7 @@ async function readMemoryMac(
     if (avail.available) {
       const handle = provider.openProcess(pid, false);
       try {
-        const result = provider.readMemory(handle, BigInt(address), size);
+        const result = await provider.readMemory(handle, BigInt(address), size);
         const hex = Array.from(result.data.subarray(0, result.bytesRead))
           .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
           .join(' ');

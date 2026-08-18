@@ -459,7 +459,7 @@ export class IntegrityHandlers {
       }
       const handle = api.openProcess(pid, false);
       try {
-        const memResult = api.readMemory(handle, startAddr, size);
+        const memResult = await api.readMemory(handle, startAddr, size);
         const matches = scanRangeForHooks(new Uint8Array(memResult.data), startAddr);
         const inlineHooks = matches.map((m) => ({
           address: m.address,

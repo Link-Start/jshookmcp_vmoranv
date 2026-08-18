@@ -123,7 +123,7 @@ export async function scanIntegrity(
             stats.skippedSections += 1;
             continue;
           }
-          const memResult = api.readMemory(handle, mod.baseAddress + sec.addr, sec.size);
+          const memResult = await api.readMemory(handle, mod.baseAddress + sec.addr, sec.size);
           const diskSlice = diskData.subarray(sec.fileOffset, sec.fileOffset + sec.size);
 
           const memHash = createHash('sha256').update(memResult.data).digest('hex');

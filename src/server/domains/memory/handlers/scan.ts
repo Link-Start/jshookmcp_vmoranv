@@ -773,7 +773,7 @@ export class ScanHandlers {
       const handle = provider.openProcess(pid, false);
       try {
         const addrBig = BigInt(address.replace(/^0x/i, '0x'));
-        const buf = provider.readMemory(handle, addrBig, size).data;
+        const buf = (await provider.readMemory(handle, addrBig, size)).data;
 
         const result = generateSignature(buf, { wildcardRelOffsets });
         return {
@@ -939,7 +939,7 @@ async function readByteAtAddress(pid: number, address: number): Promise<number |
     const provider = createPlatformProvider();
     const handle = provider.openProcess(pid, false);
     try {
-      const result = provider.readMemory(handle, BigInt(address), 1);
+      const result = await provider.readMemory(handle, BigInt(address), 1);
       return result.data[0] ?? null;
     } finally {
       provider.closeProcess(handle);

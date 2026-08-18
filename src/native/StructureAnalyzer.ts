@@ -83,7 +83,7 @@ export class StructureAnalyzer {
 
     const handle = this.provider.openProcess(pid, false);
     try {
-      const buf = this.provider.readMemory(handle, baseAddr, size).data;
+      const buf = (await this.provider.readMemory(handle, baseAddr, size)).data;
       const fields: InferredField[] = [];
       let offset = 0;
 
@@ -91,7 +91,7 @@ export class StructureAnalyzer {
         const remaining = size - offset;
         if (remaining < 1) break;
 
-        const classification = this.classifier!.classifyValue(buf, handle, offset, remaining);
+        const classification = await this.classifier!.classifyValue(buf, handle, offset, remaining);
         fields.push({
           offset,
           size: classification.size,
@@ -162,7 +162,7 @@ export class StructureAnalyzer {
         const ptrAddr = vtableAddr + BigInt(i * 8);
         let funcPtr: bigint;
         try {
-          const buf = this.provider.readMemory(handle, ptrAddr, 8).data;
+          const buf = (await this.provider.readMemory(handle, ptrAddr, 8)).data;
           funcPtr = buf.readBigUInt64LE(0);
         } catch {
           break;
@@ -365,13 +365,13 @@ export class StructureAnalyzer {
    * @internal
    */
   // @ts-expect-error - Private method only used in tests via `(analyzer as any).classifyValue`
-  private classifyValue(
+  private async classifyValue(
     buf: Buffer,
     handle: ProcessHandle,
     _baseAddrOrOffset: bigint | number,
     offsetOrRemaining: number,
     remaining?: number,
-  ): { type: FieldType; size: number; value: string; confidence: number; notes?: string } {
+  ): Promise<{ type: FieldType; size: number; value: string; confidence: number; notes?: string }> {
     this.ensureComponents();
     // Support both old 5-arg signature (buf, handle, baseAddr, offset, remaining)
     // and new 4-arg signature (buf, handle, offset, remaining)
