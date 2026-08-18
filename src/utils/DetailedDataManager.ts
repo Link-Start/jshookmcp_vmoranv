@@ -431,6 +431,16 @@ export class DetailedDataManager {
           .then((bytesWritten) => {
             this.metrics.diskWriteCount++;
             this.metrics.totalBytesWritten += bytesWritten;
+            // NIT-5: the entry may have been evicted (LRU/expiry cleanup) while
+            // the write was in flight. Appending metadata for a removed entry
+            // would leave a ghost line in .metadata.jsonl that rebuilds into an
+            // orphaned reference on the next startup.
+            if (!this.cache.has(detailId)) {
+              logger.debug(
+                `Skipped metadata append for evicted entry ${detailId} (persist completed after eviction)`,
+              );
+              return;
+            }
             return this.appendMetadata({
               detailId,
               expiresAt,

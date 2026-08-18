@@ -55,6 +55,7 @@ describe('DetailedDataManager disk lifecycle', () => {
 
   afterEach(async () => {
     manager.shutdown();
+    vi.restoreAllMocks();
     await rm(TEST_DIR, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -185,5 +186,38 @@ describe('DetailedDataManager disk lifecycle', () => {
     ]);
     // The file survives: the disposed guard must skip the unlink.
     expect(existsSync(join(PERSIST_DIR, `${id}.json`))).toBe(true);
+  });
+
+  it('skips the metadata append when the entry is evicted mid-persist (NIT-5 ghost row)', async () => {
+    // Gate the disk write so the persist completes only after we evict the
+    // entry, reproducing the "persist in flight while cleanup evicts" interleave.
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+
+    const realPersistToDisk = (manager as any).persistToDisk.bind(manager);
+    vi.spyOn(manager as any, 'persistToDisk').mockImplementation(
+      async (filePath: unknown, json: unknown, compress: unknown) => {
+        await writeGate;
+        return realPersistToDisk(filePath as string, json as string, compress as boolean);
+      },
+    );
+
+    const id = await manager.store({ ghost: true });
+    // Entry is cached and the write is in flight (gated).
+    expect(manager.getStats().cacheSize).toBe(1);
+
+    // Evict the entry while the write is still pending.
+    (manager as any).cache.delete(id);
+
+    // Release the write; the persist .then() must observe the entry is gone
+    // and skip appendMetadata instead of appending a ghost metadata line.
+    releaseWrite();
+    await waitFor(() => (manager as any).pendingPersistCount === 0);
+    await sleep(100); // let the persist .then() (append or skip) settle
+
+    const meta = existsSync(METADATA_PATH) ? readFileSync(METADATA_PATH, 'utf-8') : '';
+    expect(meta.includes(id)).toBe(false);
   });
 });

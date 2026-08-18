@@ -113,7 +113,8 @@ export class CrossDomainOrchestratorImpl {
           : ORCHESTRATOR_STEP_TIMEOUT_MS,
       maxRetries: typeof config.maxRetries === 'number' ? config.maxRetries : 1,
       maxExecutionHistory:
-        typeof config.maxExecutionHistory === 'number'
+        typeof config.maxExecutionHistory === 'number' &&
+        Number.isFinite(config.maxExecutionHistory)
           ? Math.max(1, Math.trunc(config.maxExecutionHistory))
           : ORCHESTRATOR_MAX_EXECUTION_HISTORY,
     };
