@@ -3,12 +3,14 @@ import type { JSONRPCRequest, JSONRPCResponse } from '@modelcontextprotocol/sdk/
 
 const mocks = vi.hoisted(() => {
   const innerTransports: any[] = [];
+  const innerTransportOptions: any[] = [];
   // When true, the next inner transport construction throws — simulates an
   // inner-transport setup failure after the admission hook claimed a lease.
   let failNextConstruct = false;
 
   return {
     innerTransports,
+    innerTransportOptions,
     get failNextConstruct() {
       return failNextConstruct;
     },
@@ -40,11 +42,14 @@ vi.mock('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
       }
     });
 
-    constructor(private readonly options: { sessionIdGenerator: () => string }) {
+    constructor(
+      private readonly options: { sessionIdGenerator: () => string; enableJsonResponse?: boolean },
+    ) {
       if (mocks.failNextConstruct) {
         throw new Error('inner transport construction failed');
       }
       mocks.innerTransports.push(this);
+      mocks.innerTransportOptions.push(options);
     }
 
     private sessionIdGenerator(): string {
@@ -54,6 +59,11 @@ vi.mock('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
 }));
 
 import { MultiplexedStreamableHttpTransport } from '@server/transport/MultiplexedStreamableHttpTransport';
+
+vi.mock('@src/constants', () => ({
+  HTTP_CAPACITY_RETRY_AFTER_MS: 1_000,
+  MCP_HTTP_JSON_RESPONSE: false,
+}));
 
 function createReq(method: string, sessionId?: string) {
   return {
@@ -72,6 +82,7 @@ function createRes() {
 describe('MultiplexedStreamableHttpTransport', () => {
   beforeEach(() => {
     mocks.innerTransports.length = 0;
+    mocks.innerTransportOptions.length = 0;
   });
 
   it('rejects repeated start calls', async () => {
@@ -614,5 +625,29 @@ describe('MultiplexedStreamableHttpTransport', () => {
     expect(onSessionClosed).toHaveBeenCalledWith(session.sessionId);
     await transport.close();
     expect(onclose).toHaveBeenCalledOnce();
+  });
+
+  it('constructs inner transports with enableJsonResponse disabled by default', async () => {
+    const transport = new MultiplexedStreamableHttpTransport();
+    await transport.start();
+
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+
+    expect(mocks.innerTransportOptions[0]).toMatchObject({ enableJsonResponse: false });
+  });
+
+  it('enables JSON responses on inner transports when MCP_HTTP_JSON_RESPONSE is set', async () => {
+    const constantsMod = await import('@src/constants');
+    (constantsMod as { MCP_HTTP_JSON_RESPONSE: boolean }).MCP_HTTP_JSON_RESPONSE = true;
+    try {
+      const transport = new MultiplexedStreamableHttpTransport();
+      await transport.start();
+
+      await transport.handleRequest(createReq('POST'), createRes(), {});
+
+      expect(mocks.innerTransportOptions[0]).toMatchObject({ enableJsonResponse: true });
+    } finally {
+      (constantsMod as { MCP_HTTP_JSON_RESPONSE: boolean }).MCP_HTTP_JSON_RESPONSE = false;
+    }
   });
 });

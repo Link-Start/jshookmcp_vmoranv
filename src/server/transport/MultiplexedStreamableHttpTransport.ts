@@ -17,7 +17,7 @@ import {
   isJSONRPCResultResponse,
 } from '@modelcontextprotocol/sdk/types.js';
 import { logger } from '@utils/logger';
-import { HTTP_CAPACITY_RETRY_AFTER_MS } from '@src/constants';
+import { HTTP_CAPACITY_RETRY_AFTER_MS, MCP_HTTP_JSON_RESPONSE } from '@src/constants';
 
 // Notifications (e.g. logging messages) are broadcast to every HTTP session.
 // Skip sessions idle past this threshold to bound the O(log × sessions)
@@ -337,6 +337,19 @@ export class MultiplexedStreamableHttpTransport implements Transport {
   private createInnerTransport(sessionId: string): StreamableHTTPServerTransport {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => sessionId,
+      // MCP_HTTP_JSON_RESPONSE switches the SDK into "JSON response" mode
+      // (application/json body instead of an SSE stream). Two documented
+      // trade-offs (see the constant's JSDoc in @src/constants/server.ts):
+      //   1. In-tool-call elicitation/sampling requests (sent with a
+      //      relatedRequestId) are silently dropped by the SDK in this mode, so
+      //      ElicitationBridge / LLMSamplingBridge delegation breaks. We do NOT
+      //      degrade those messages back to SSE here: the drop happens inside
+      //      the SDK's inner transport (out of reach of this multiplexer), and
+      //      stripping their relatedRequestId would change routing semantics in
+      //      multi-session deployments. The flag therefore defaults OFF.
+      //   2. No streaming first byte: the response is buffered until all
+      //      replies are ready, so long tasks lose progressive output.
+      enableJsonResponse: MCP_HTTP_JSON_RESPONSE,
     });
 
     // eslint-disable-next-line unicorn/prefer-add-event-listener

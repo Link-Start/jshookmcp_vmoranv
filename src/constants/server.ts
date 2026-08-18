@@ -182,6 +182,35 @@ export const SSE_HEARTBEAT_MS = int('SSE_HEARTBEAT_MS', 30_000);
 /** Retry-After (ms) returned by the HTTP transport when at session capacity. */
 export const HTTP_CAPACITY_RETRY_AFTER_MS = int('HTTP_CAPACITY_RETRY_AFTER_MS', 1_000);
 
+/**
+ * Opt-in MCP Streamable HTTP "JSON response" mode: reply with an
+ * `application/json` body instead of the default `text/event-stream` stream.
+ *
+ * Latency win (mean -15%~-33%, p90 ~3.08ms → 1.71ms per the SSE-reuse survey)
+ * at two documented costs:
+ *
+ *   1. The SDK (1.29.0) silently DROPS server-initiated requests sent with a
+ *      `relatedRequestId` in JSON mode — `send()` neither writes them to the
+ *      (now-absent) response SSE stream nor buffers them into the JSON body
+ *      (webStandardStreamableHttp.js). ElicitationBridge (`elicitation/create`)
+ *      and LLMSamplingBridge (`sampling/createMessage`) attach
+ *      `relatedRequestId` when invoked from INSIDE a tool call, so those
+ *      mid-call requests are lost. The same requests sent WITHOUT a
+ *      `relatedRequestId` (e.g. from a background task) route to the
+ *      standalone GET SSE stream and are unaffected. Resolution: this flag
+ *      defaults OFF; enabling it disables in-tool-call elicitation/sampling
+ *      delegation (the common CAPTCHA-pause / LLM-delegate path).
+ *
+ *   2. No streaming first byte: the SDK buffers until every response for the
+ *      POST is ready before resolving the JSON body, so long-running tools get
+ *      no progressive output (no progress notifications over the response, no
+ *      early partial results).
+ *
+ * @env MCP_HTTP_JSON_RESPONSE
+ * @default false
+ */
+export const MCP_HTTP_JSON_RESPONSE = bool('MCP_HTTP_JSON_RESPONSE', false);
+
 /* ================================================================== */
 /*  MCP structured logging                                             */
 /* ================================================================== */
