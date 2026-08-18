@@ -7,7 +7,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { replayRequest } from '@server/domains/network/replay';
+import { replayRequest, clearHttp2SessionCache } from '@server/domains/network/replay';
 import type { ReplayArgs } from '@server/domains/network/replay';
 
 const lookupMock = vi.fn();
@@ -56,6 +56,7 @@ describe('replayRequest - HTTP/2 redirect handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requestCalls.value = [];
+    clearHttp2SessionCache();
   });
 
   it('follows HTTP/2 301 redirects and converts method/body to GET', async () => {

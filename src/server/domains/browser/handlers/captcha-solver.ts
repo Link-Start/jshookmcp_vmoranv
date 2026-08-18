@@ -7,6 +7,7 @@
 import type { CodeCollector } from '@server/domains/shared/modules/collector';
 import { argString, argNumber, argBool } from '@server/domains/shared/parse-args';
 import { logger } from '@utils/logger';
+import { fetchWithTimeout } from '@utils/network/fetch';
 import { R, type ToolResponse } from '@server/domains/shared/ResponseBuilder';
 import {
   CAPTCHA_SOLVER_BASE_URL,
@@ -186,15 +187,18 @@ async function solveWithJsonTaskApi(
           websiteKey: params.siteKey,
         };
 
-  const createRes = await fetch(`${baseUrl}/createTask`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      clientKey: apiKey,
-      task,
-    }),
-    signal: AbortSignal.timeout(CAPTCHA_SUBMIT_TIMEOUT_MS),
-  });
+  const createRes = await fetchWithTimeout(
+    `${baseUrl}/createTask`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientKey: apiKey,
+        task,
+      }),
+    },
+    CAPTCHA_SUBMIT_TIMEOUT_MS,
+  );
   const createData = (await createRes.json()) as Record<string, unknown>;
   if ((createData.errorId as number | undefined) && createData.errorId !== 0) {
     throw new Error(
@@ -212,15 +216,18 @@ async function solveWithJsonTaskApi(
     if (elapsed >= timeoutMs) break;
     await sleep(Math.min(CAPTCHA_POLL_INTERVAL_MS, timeoutMs - elapsed));
 
-    const resultRes = await fetch(`${baseUrl}/getTaskResult`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        clientKey: apiKey,
-        taskId,
-      }),
-      signal: AbortSignal.timeout(CAPTCHA_RESULT_TIMEOUT_MS),
-    });
+    const resultRes = await fetchWithTimeout(
+      `${baseUrl}/getTaskResult`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientKey: apiKey,
+          taskId,
+        }),
+      },
+      CAPTCHA_RESULT_TIMEOUT_MS,
+    );
     const resultData = (await resultRes.json()) as Record<string, unknown>;
     if ((resultData.errorId as number | undefined) && resultData.errorId !== 0) {
       throw new Error(
@@ -389,12 +396,15 @@ async function solveWith2Captcha(
     submitBody.body = params.imageBase64;
   }
 
-  const submitRes = await fetch(`${baseUrl}/in.php`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(submitBody),
-    signal: AbortSignal.timeout(CAPTCHA_SUBMIT_TIMEOUT_MS),
-  });
+  const submitRes = await fetchWithTimeout(
+    `${baseUrl}/in.php`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(submitBody),
+    },
+    CAPTCHA_SUBMIT_TIMEOUT_MS,
+  );
   const submitData = (await submitRes.json()) as Record<string, unknown>;
 
   if (submitData.status !== 1) {
@@ -415,9 +425,7 @@ async function solveWith2Captcha(
     resultUrl.searchParams.set('action', 'get');
     resultUrl.searchParams.set('id', taskId);
     resultUrl.searchParams.set('json', '1');
-    const resultRes = await fetch(resultUrl.toString(), {
-      signal: AbortSignal.timeout(CAPTCHA_RESULT_TIMEOUT_MS),
-    });
+    const resultRes = await fetchWithTimeout(resultUrl.toString(), {}, CAPTCHA_RESULT_TIMEOUT_MS);
     const resultData = (await resultRes.json()) as Record<string, unknown>;
 
     if (resultData.status === 1) {

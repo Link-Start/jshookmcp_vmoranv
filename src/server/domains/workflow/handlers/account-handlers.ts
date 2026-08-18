@@ -9,6 +9,7 @@ import {
 } from '@src/constants';
 import { argString, argBool, argNumber } from '@server/domains/shared/parse-args';
 import { R, type ToolResponse } from '@server/domains/shared/ResponseBuilder';
+import { fetchWithTimeout } from '@utils/network/fetch';
 import type { WorkflowSharedState } from './shared';
 import { WORKFLOW_CONSTANTS, evictBundleCache } from './shared';
 import { parseWorkflowNetworkPolicy, authorizeWorkflowUrl } from './network-policy';
@@ -62,11 +63,15 @@ export class AccountHandlers {
           allowRedirectHosts: hops > 0,
           rewriteHttpHostToResolvedIp: true,
         });
-        const resp = await fetch(authorization.fetchUrl, {
-          signal,
-          redirect: 'manual',
-          headers: authorization.headers,
-        });
+        const resp = await fetchWithTimeout(
+          authorization.fetchUrl,
+          {
+            signal,
+            redirect: 'manual',
+            headers: authorization.headers,
+          },
+          WORKFLOW_JS_BUNDLE_FETCH_TIMEOUT_MS,
+        );
         if (resp.status >= 300 && resp.status < 400) {
           const location = resp.headers.get('location');
           if (!location) throw new Error(`Redirect ${resp.status} without Location header`);
