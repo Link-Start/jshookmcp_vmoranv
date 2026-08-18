@@ -51,21 +51,35 @@ import type { SessionProfile } from '@internal-types/SessionProfile';
 const HTTP2_SESSION_IDLE_TTL_MS = 30_000;
 
 interface Http2SessionCacheEntry {
+  /** Composite cache key (origin + DNS pin) this entry was stored under. */
+  key: string;
   session: http2.ClientHttp2Session;
   lastUsed: number;
   idleTimer: NodeJS.Timeout | null;
 }
 
 /**
- * Per-origin HTTP/2 session cache. Reusing `session.request()` across replays
- * avoids a full TCP+TLS+ALPN handshake per request; sessions are only closed on
- * idle expiry (unref'd timer) or when the session itself errors/closes.
+ * Per-(origin, DNS pin) HTTP/2 session cache. Reusing `session.request()` across
+ * replays avoids a full TCP+TLS+ALPN handshake per request; sessions are only
+ * closed on idle expiry (unref'd timer) or when the session itself errors/closes.
  */
 const http2SessionCache = new Map<string, Http2SessionCacheEntry>();
 
-function evictHttp2Session(origin: string, entry: Http2SessionCacheEntry): void {
-  if (http2SessionCache.get(origin) === entry) {
-    http2SessionCache.delete(origin);
+/**
+ * Build the cache key for a replay. The resolved address (DNS pin) is folded in
+ * so a connection established for one IP is never reused for a different pin of
+ * the same origin — reuse would route the replayed request to the wrong host and
+ * defeat the DNS-pinning SSRF guard. When no address was resolved the key falls
+ * back to the bare origin: in that case every replay connects to the same
+ * hostname, so sharing is safe.
+ */
+function http2SessionCacheKey(origin: string, resolvedAddress: string | null): string {
+  return resolvedAddress ? `${origin}\n${resolvedAddress}` : origin;
+}
+
+function evictHttp2Session(entry: Http2SessionCacheEntry): void {
+  if (http2SessionCache.get(entry.key) === entry) {
+    http2SessionCache.delete(entry.key);
   }
   if (entry.idleTimer) {
     clearTimeout(entry.idleTimer);
@@ -75,9 +89,11 @@ function evictHttp2Session(origin: string, entry: Http2SessionCacheEntry): void 
 
 function getOrCreateHttp2Session(
   origin: string,
+  resolvedAddress: string | null,
   createConnection: () => net.Socket,
 ): Http2SessionCacheEntry {
-  const cached = http2SessionCache.get(origin);
+  const key = http2SessionCacheKey(origin, resolvedAddress);
+  const cached = http2SessionCache.get(key);
   if (cached) {
     cached.lastUsed = Date.now();
     if (cached.idleTimer) {
@@ -88,10 +104,10 @@ function getOrCreateHttp2Session(
   }
 
   const session = http2.connect(origin, { createConnection });
-  const entry: Http2SessionCacheEntry = { session, lastUsed: Date.now(), idleTimer: null };
-  http2SessionCache.set(origin, entry);
+  const entry: Http2SessionCacheEntry = { key, session, lastUsed: Date.now(), idleTimer: null };
+  http2SessionCache.set(key, entry);
 
-  const onBroken = () => evictHttp2Session(origin, entry);
+  const onBroken = () => evictHttp2Session(entry);
   session.once('error', onBroken);
   session.once('close', onBroken);
   // A GOAWAY means the server is draining this connection — new requests must
@@ -102,15 +118,15 @@ function getOrCreateHttp2Session(
 }
 
 /** Return a completed session to the cache and (re)arm its idle reclamation timer. */
-function releaseHttp2Session(origin: string, entry: Http2SessionCacheEntry): void {
+function releaseHttp2Session(entry: Http2SessionCacheEntry): void {
   entry.lastUsed = Date.now();
   if (entry.idleTimer) {
     clearTimeout(entry.idleTimer);
   }
   entry.idleTimer = setTimeout(() => {
     entry.idleTimer = null;
-    if (http2SessionCache.get(origin) === entry) {
-      http2SessionCache.delete(origin);
+    if (http2SessionCache.get(entry.key) === entry) {
+      http2SessionCache.delete(entry.key);
     }
     entry.session.close();
   }, HTTP2_SESSION_IDLE_TTL_MS);
@@ -259,6 +275,7 @@ async function replayHttp2Request(
     let settled = false;
     let session: http2.ClientHttp2Session | null = null;
     let cacheEntry: Http2SessionCacheEntry | null = null;
+    let activeRequest: http2.ClientHttp2Stream | null = null;
     let removeSessionErrorListener: (() => void) | null = null;
     let timer: NodeJS.Timeout | null = null;
 
@@ -272,9 +289,17 @@ async function replayHttp2Request(
     };
 
     timer = setTimeout(() => {
-      // A hung request points at an unhealthy session — close it (the cache
-      // 'close' handler evicts it) so the next replay opens a fresh connection.
-      session?.close();
+      // A hung request points at an unhealthy session. Cancel only this stream
+      // (NGHTTP2_CANCEL) and evict the entry so the next replay opens a fresh
+      // connection — but do NOT close the shared session: other in-flight
+      // streams on it may still be healthy, and closing would let one slow
+      // origin interrupt every concurrent replay to it. Re-arm the idle timer
+      // so the session is still reclaimed once it goes idle (no leaked socket).
+      activeRequest?.destroy();
+      if (cacheEntry) {
+        evictHttp2Session(cacheEntry);
+        releaseHttp2Session(cacheEntry);
+      }
       settle(() => reject(new Error(`HTTP/2 request timed out after ${timeoutMs}ms`)));
     }, timeoutMs);
 
@@ -284,7 +309,7 @@ async function replayHttp2Request(
         10,
       );
 
-      const entry = getOrCreateHttp2Session(url.origin, () => {
+      const entry = getOrCreateHttp2Session(url.origin, target.resolvedAddress, () => {
         if (url.protocol === 'https:') {
           return tls.connect({
             host: target.resolvedAddress ?? target.hostname,
@@ -322,6 +347,7 @@ async function replayHttp2Request(
       }
 
       const request = session.request(normalizedHeaders);
+      activeRequest = request;
       const bodyChain = new BufferChain();
       let truncated = false;
       let responseHeaders: http2.IncomingHttpHeaders = {};
@@ -344,7 +370,7 @@ async function replayHttp2Request(
 
       request.on('end', () => {
         settle(() => {
-          releaseHttp2Session(url.origin, entry);
+          releaseHttp2Session(entry);
           const parsed = parseHttp2ResponseHeaders(responseHeaders);
           resolve({
             status: parsed.status,
@@ -358,7 +384,7 @@ async function replayHttp2Request(
 
       request.on('error', (error) => {
         settle(() => {
-          releaseHttp2Session(url.origin, entry);
+          releaseHttp2Session(entry);
           reject(error);
         });
       });
@@ -373,7 +399,7 @@ async function replayHttp2Request(
         // session) does not prove the session is broken — hand it back to the
         // cache and let its own 'error'/'close' events evict it if it is.
         if (cacheEntry) {
-          releaseHttp2Session(url.origin, cacheEntry);
+          releaseHttp2Session(cacheEntry);
         }
         reject(error);
       });

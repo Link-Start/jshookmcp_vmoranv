@@ -13,6 +13,7 @@ import type { ReplayArgs } from '@server/domains/network/replay';
 const lookupMock = vi.fn();
 const connectCount = vi.hoisted<{ value: number }>(() => ({ value: 0 }));
 const closeCount = vi.hoisted<{ value: number }>(() => ({ value: 0 }));
+const requestDestroyCount = vi.hoisted<{ value: number }>(() => ({ value: 0 }));
 const sessions = vi.hoisted<{ value: import('node:http2').ClientHttp2Session[] }>(() => ({
   value: [],
 }));
@@ -37,10 +38,17 @@ vi.mock('node:http2', async (importOriginal) => {
         closeCount.value += 1;
         session.emit('close');
       });
-      (session as any).request = vi.fn(() => {
+      (session as any).request = vi.fn((headers: { ':path'?: string }) => {
         const request = new EventEmitter() as any;
         request.write = vi.fn();
+        request.destroy = vi.fn(() => {
+          requestDestroyCount.value += 1;
+        });
         request.end = vi.fn(() => {
+          if (headers?.[':path'] === '/hang') {
+            // Simulate a slow/hung response: never emit 'end'.
+            return;
+          }
           request.emit('response', { ':status': 200, 'content-type': 'text/plain' });
           request.emit('data', Buffer.from('ok'));
           request.emit('end');
@@ -78,6 +86,7 @@ describe('replayRequest - HTTP/2 session cache', () => {
     clearHttp2SessionCache();
     connectCount.value = 0;
     closeCount.value = 0;
+    requestDestroyCount.value = 0;
     sessions.value = [];
   });
 
@@ -134,6 +143,61 @@ describe('replayRequest - HTTP/2 session cache', () => {
 
       await vi.advanceTimersByTimeAsync(30_000);
       expect(closeCount.value).toBe(1);
+
+      await replayRequest(h2Base(), h2Args());
+      expect(connectCount.value).toBe(2);
+    } finally {
+      clearHttp2SessionCache();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not reuse a session when the same origin resolves to a different pin', async () => {
+    lookupMock
+      .mockResolvedValueOnce({ address: '93.184.216.34', family: 4 })
+      .mockResolvedValueOnce({ address: '93.184.216.35', family: 4 });
+
+    await replayRequest(h2Base(), h2Args());
+    await replayRequest(h2Base(), h2Args());
+
+    expect(connectCount.value).toBe(2);
+  });
+
+  it('times out by cancelling the hung stream and evicting the session without closing it', async () => {
+    lookupMock.mockResolvedValue({ address: TEST_PUBLIC_IP, family: 4 });
+    vi.useFakeTimers();
+    try {
+      // Warm the cache with a normal, completing replay.
+      await replayRequest(h2Base(), h2Args());
+      expect(connectCount.value).toBe(1);
+      expect(closeCount.value).toBe(0);
+
+      // A second replay to the same origin+pin hangs (never emits 'end').
+      const hangPromise = replayRequest(
+        { url: 'https://example.com/hang', method: 'GET', headers: {}, protocol: 'h2' },
+        {
+          requestId: 'req-hang',
+          dryRun: false,
+          timeoutMs: 5_000,
+          authorization: { allowedHosts: ['example.com'] },
+        },
+      );
+
+      // Flush DNS resolution + request setup so the hang reuses the shared session.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(connectCount.value).toBe(1);
+
+      // Advance past the hang request's timeout. Attach the rejection
+      // assertion first so the pending promise is handled as soon as it
+      // rejects (avoids an unhandled-rejection warning).
+      const hangRejection = expect(hangPromise).rejects.toThrow(/timed out/);
+      await vi.advanceTimersByTimeAsync(5_001);
+      await hangRejection;
+
+      // The shared session must survive (no close); only the hung stream is
+      // cancelled, and the entry is evicted so the next replay reconnects.
+      expect(closeCount.value).toBe(0);
+      expect(requestDestroyCount.value).toBe(1);
 
       await replayRequest(h2Base(), h2Args());
       expect(connectCount.value).toBe(2);
