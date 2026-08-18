@@ -27,6 +27,15 @@ export const WEBHOOK_PORT = int('WEBHOOK_PORT', 18_789);
 /** Default per-step timeout for the cross-domain orchestrator. */
 export const ORCHESTRATOR_STEP_TIMEOUT_MS = int('ORCHESTRATOR_STEP_TIMEOUT_MS', 10_000);
 
+/**
+ * Maximum number of execution records retained in-memory by the cross-domain
+ * orchestrator. The oldest record is evicted once this cap is reached.
+ *
+ * @env ORCHESTRATOR_MAX_EXECUTION_HISTORY
+ * @default 500
+ */
+export const ORCHESTRATOR_MAX_EXECUTION_HISTORY = int('ORCHESTRATOR_MAX_EXECUTION_HISTORY', 500);
+
 /** Default overall macro timeout (MacroRunner). */
 export const MACRO_DEFAULT_TIMEOUT_MS = int('MACRO_DEFAULT_TIMEOUT_MS', 120_000);
 

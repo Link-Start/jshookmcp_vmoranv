@@ -151,4 +151,18 @@ describe('CrossDomainOrchestrator', () => {
       await orch.init(); // should not throw
     });
   });
+
+  describe('executionHistory bounded retention', () => {
+    it('caps retained execution records and evicts the oldest', async () => {
+      const ctx = createMockCtx({
+        executeToolWithTracking: vi.fn().mockResolvedValue({ ok: true }),
+      });
+      const orch = new CrossDomainOrchestrator(ctx, { maxExecutionHistory: 3 });
+      await orch.init();
+      for (let i = 0; i < 5; i += 1) {
+        await orch.executeWorkflow('unknown-wf', {});
+      }
+      expect(orch.getExecutionHistory()).toHaveLength(3);
+    });
+  });
 });
