@@ -38,6 +38,13 @@ interface ArtifactFileEntry {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// a4-06: retention used to default to disabled (env ?? '0'), letting artifacts
+// accumulate without bound until the disk filled and every write downstream
+// failed. The scheduler now runs by default — a 7-day age window swept every
+// 6 hours — with an unref'd timer so it never blocks process exit. Setting an
+// env var explicitly to '0' still disables the corresponding knob.
+const DEFAULT_RETENTION_DAYS = '7';
+const DEFAULT_CLEANUP_INTERVAL_MINUTES = '360';
 const MANAGED_ARTIFACT_CATEGORIES: readonly ArtifactCategory[] = Object.freeze([
   'wasm',
   'traces',
@@ -55,11 +62,15 @@ const MANAGED_ARTIFACT_CATEGORIES: readonly ArtifactCategory[] = Object.freeze([
 export function getArtifactRetentionConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): ArtifactRetentionConfig {
-  const retentionDays = Math.max(0, parseInt(env.MCP_ARTIFACT_RETENTION_DAYS ?? '0', 10) || 0);
+  const retentionDays = Math.max(
+    0,
+    parseInt(env.MCP_ARTIFACT_RETENTION_DAYS ?? DEFAULT_RETENTION_DAYS, 10) || 0,
+  );
   const maxTotalMb = Math.max(0, parseInt(env.MCP_ARTIFACT_MAX_TOTAL_MB ?? '0', 10) || 0);
   const cleanupIntervalMinutes = Math.max(
     0,
-    parseInt(env.MCP_ARTIFACT_CLEANUP_INTERVAL_MINUTES ?? '0', 10) || 0,
+    parseInt(env.MCP_ARTIFACT_CLEANUP_INTERVAL_MINUTES ?? DEFAULT_CLEANUP_INTERVAL_MINUTES, 10) ||
+      0,
   );
   const cleanupOnStart = ['1', 'true'].includes(
     (env.MCP_ARTIFACT_CLEANUP_ON_START ?? '').toLowerCase(),
@@ -217,10 +228,20 @@ async function performCleanup(options?: {
   };
 }
 
+// Idempotency guard for the sweep timer: the scheduler is wired both from the
+// server lifecycle (MCPServer.start) and from the CLI entry (index.ts); both
+// must share ONE unref'd interval instead of stacking timers. Reset on stop so
+// a restarted server re-arms.
+let activeSchedulerStop: (() => void) | null | undefined;
+
 export function startArtifactRetentionScheduler(): (() => void) | null {
   const config = getArtifactRetentionConfig();
   if (!config.enabled || config.cleanupIntervalMinutes <= 0) {
     return null;
+  }
+
+  if (activeSchedulerStop !== undefined) {
+    return activeSchedulerStop;
   }
 
   const handle = setInterval(
@@ -242,7 +263,15 @@ export function startArtifactRetentionScheduler(): (() => void) | null {
   );
 
   handle.unref();
-  return () => clearInterval(handle);
+  const stop = () => {
+    if (activeSchedulerStop !== stop) {
+      return;
+    }
+    clearInterval(handle);
+    activeSchedulerStop = undefined;
+  };
+  activeSchedulerStop = stop;
+  return stop;
 }
 
 function getManagedArtifactDirectories(options?: {

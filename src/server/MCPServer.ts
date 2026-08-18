@@ -22,6 +22,7 @@ import { createDomainProxy, resolveEnabledDomains } from '@server/MCPServer.doma
 import { getLoaderMetadata } from '@server/registry/discovery';
 import type { DomainTtlEntry } from '@server/MCPServer.activation.ttl';
 import { closeServer, startHttpTransport, startStdioTransport } from '@server/MCPServer.transport';
+import { startArtifactRetentionScheduler } from '@utils/artifactRetention';
 import { McpLogTransport } from '@server/transport/McpLogTransport';
 import type { McpLogLevel } from '@server/transport/McpLogTransport';
 import {
@@ -105,6 +106,12 @@ export class MCPServer implements MCPServerContext {
   private clientInitialized = false;
   private cacheAdaptersRegistered = false;
   private cacheRegistrationPromise?: Promise<void>;
+  /**
+   * Stop handle for the artifact retention sweep, wired in start() and
+   * released by closeServer(). The scheduler is idempotent at module level,
+   * so the CLI entry's own call shares this timer instead of stacking one.
+   */
+  artifactRetentionStop: (() => void) | null = null;
   /** Structured log transport for MCP `notifications/message`. */
   public readonly mcpLog = new McpLogTransport();
   public readonly baseTier: ToolProfile;
@@ -661,6 +668,11 @@ export class MCPServer implements MCPServerContext {
   async start(): Promise<void> {
     await this.registerCaches();
     await this.cache.init();
+    // Explicit lifecycle wiring: the artifact retention sweep is started by
+    // the server (async, unref'd, non-blocking) so every embedder path gets
+    // the default cleanup — not a module-level side effect. The scheduler is
+    // idempotent at module level, sharing one timer with the CLI entry call.
+    this.artifactRetentionStop = startArtifactRetentionScheduler();
     const transportMode = MCP_TRANSPORT.toLowerCase();
     if (transportMode === 'http') {
       await startHttpTransport(this);

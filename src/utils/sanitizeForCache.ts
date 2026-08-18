@@ -22,7 +22,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, relative, isAbsolute, sep } from 'node:path';
-import { getArtifactDir, getArtifactsRoot } from '@utils/artifacts';
+import { generateShortId, getArtifactDir, getArtifactsRoot } from '@utils/artifacts';
 import { getProjectRoot } from '@utils/outputPaths';
 import { OFFLOAD_FIELD_SANITIZE_THRESHOLD_BYTES } from '@src/constants';
 import { logger } from '@utils/logger';
@@ -88,21 +88,30 @@ function writeOffloadFile(raw: string, mimeType: string | undefined, outputDir: 
   mkdirSync(outputDir, { recursive: true });
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
-  const shortId = Math.random().toString(36).substring(2, 8);
   const ext = mimeType ? 'bin' : 'txt';
-  const filename = `offload-${ts}-${shortId}.${ext}`;
-  const absolutePath = resolve(outputDir, filename);
-
   // For a data: URI we persist the decoded bytes; otherwise the raw string.
   const dataUriMatch = mimeType ? raw.match(DATA_URI_RE) : null;
-  if (dataUriMatch) {
-    const base64 = raw.slice(dataUriMatch[0].length);
-    writeFileSync(absolutePath, Buffer.from(base64, 'base64'));
-  } else {
-    writeFileSync(absolutePath, raw, 'utf8');
-  }
+  const payload: string | Buffer = dataUriMatch
+    ? Buffer.from(raw.slice(dataUriMatch[0].length), 'base64')
+    : raw;
 
-  return relative(getProjectRoot(), absolutePath).replace(/\\/g, '/');
+  // Exclusive create ('wx', same semantics as open with O_EXCL): a colliding
+  // name fails with EEXIST instead of silently overwriting another session's
+  // file (a2-08). Regenerate the UUID-derived ID once and retry.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const absolutePath = resolve(outputDir, `offload-${ts}-${generateShortId()}.${ext}`);
+    try {
+      writeFileSync(absolutePath, payload, { encoding: 'utf8', flag: 'wx' });
+      return relative(getProjectRoot(), absolutePath).replace(/\\/g, '/');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST' && attempt === 0) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  // Unreachable: the second attempt either returns or throws.
+  throw new Error(`[sanitizeForCache] could not reserve a unique offload file in ${outputDir}`);
 }
 
 /** Build the compact placeholder for an oversized string, optionally writing the original to disk. */

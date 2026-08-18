@@ -18,8 +18,21 @@ const mocks = vi.hoisted(() => {
     },
     cacheInit: vi.fn(async () => undefined),
     detailedShutdown: vi.fn(),
+    startArtifactRetentionScheduler: vi.fn(),
   };
 });
+
+vi.mock('@utils/artifactRetention', () => ({
+  startArtifactRetentionScheduler: mocks.startArtifactRetentionScheduler,
+  getArtifactRetentionConfig: vi.fn(() => ({
+    enabled: true,
+    retentionDays: 7,
+    maxTotalBytes: 0,
+    cleanupOnStart: false,
+    cleanupIntervalMinutes: 360,
+  })),
+  cleanupArtifacts: vi.fn(),
+}));
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {
   class ResourceTemplate {
@@ -533,6 +546,21 @@ describe('MCPServer', () => {
     const mcp = mocks.mcpInstances[0];
     expect(mocks.cacheInit).toHaveBeenCalledOnce();
     expect(mcp.connect).toHaveBeenCalledOnce();
+  });
+
+  it('wires the artifact retention scheduler in start() and stops it on close()', async () => {
+    // Architecture hygiene (2026-08-18): the retention sweep must be started
+    // explicitly by the server lifecycle, not by a module-level side effect.
+    const stopRetention = vi.fn();
+    mocks.startArtifactRetentionScheduler.mockReturnValue(stopRetention);
+
+    const server = new MCPServer(baseConfig);
+    await server.start();
+
+    expect(mocks.startArtifactRetentionScheduler).toHaveBeenCalledOnce();
+
+    await server.close();
+    expect(stopRetention).toHaveBeenCalledOnce();
   });
 
   it('enterDegradedMode disables tracking only once', () => {

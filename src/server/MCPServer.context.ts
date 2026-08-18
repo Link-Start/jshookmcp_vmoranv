@@ -96,6 +96,12 @@ export interface TransportState {
   httpSockets: Set<Socket>;
   shutdownStarted?: boolean;
   shutdownPromise?: Promise<void>;
+  /**
+   * Stop handle for the artifact retention sweep, wired in MCPServer.start()
+   * and released in closeServer() — explicit lifecycle wiring instead of a
+   * module-level side effect (architecture hygiene, 2026-08-18).
+   */
+  artifactRetentionStop?: (() => void) | null;
 }
 
 /** Runtime-loaded plugins/workflows/tools from external directories. */

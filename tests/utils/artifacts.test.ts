@@ -5,14 +5,25 @@ const ROOT = `${resolve('virtual-project-root')}${sep}`;
 
 vi.mock('node:fs/promises', () => ({
   mkdir: vi.fn(async () => undefined),
+  open: vi.fn(async () => ({ close: vi.fn(async () => undefined) })),
+  realpath: vi.fn(async (p: string) => p),
 }));
 
 vi.mock('@src/utils/outputPaths', () => ({
   getProjectRoot: vi.fn(() => ROOT),
 }));
 
-import { mkdir } from 'node:fs/promises';
-import { getArtifactDir, getArtifactsRoot, resolveArtifactPath } from '@utils/artifacts';
+import { mkdir, open, realpath } from 'node:fs/promises';
+import {
+  generateShortId,
+  getArtifactDir,
+  getArtifactsRoot,
+  resolveArtifactPath,
+} from '@utils/artifacts';
+
+function eexistError(): NodeJS.ErrnoException {
+  return Object.assign(new Error('EEXIST: file already exists'), { code: 'EEXIST' });
+}
 
 describe('artifacts utils', () => {
   beforeEach(() => {
@@ -89,5 +100,59 @@ describe('artifacts utils', () => {
   it('returns artifact root helpers', () => {
     expect(getArtifactsRoot()).toBe(resolve(ROOT, 'artifacts'));
     expect(getArtifactDir('wasm')).toBe(resolve(ROOT, 'artifacts', 'wasm'));
+  });
+
+  it('generates a unique filename per call even with fixed timestamp and Math.random', async () => {
+    const first = await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt' });
+    const second = await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt' });
+    // Same fake timestamp + constant Math.random: only the random ID differs
+    // (a4-03 — the old 6-char base36 ID collided here, returning identical paths).
+    expect(second.absolutePath).not.toBe(first.absolutePath);
+  });
+
+  it('uses an 8-char hex ID derived from randomUUID, not a 6-char base36 ID', async () => {
+    const result = await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt' });
+    expect(result.displayPath).toMatch(/[0-9a-f]{8}\.txt$/);
+  });
+
+  it('generateShortId produces unique 8-char hex IDs', () => {
+    expect(generateShortId()).toMatch(/^[0-9a-f]{8}$/);
+    expect(new Set(Array.from({ length: 20 }, () => generateShortId())).size).toBe(20);
+  });
+
+  it('reserves the file exclusively and retries once on EEXIST', async () => {
+    const mockedOpen = vi.mocked(open);
+    mockedOpen.mockClear();
+    mockedOpen.mockRejectedValueOnce(eexistError());
+
+    const result = await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt' });
+    expect(result.absolutePath).toBeDefined();
+    // First attempt collided, second attempt reserved the regenerated name.
+    expect(mockedOpen).toHaveBeenCalledTimes(2);
+    for (const call of mockedOpen.mock.calls) {
+      expect(call[1]).toBe('wx');
+    }
+    expect(mockedOpen.mock.calls[1]?.[0]).not.toBe(mockedOpen.mock.calls[0]?.[0]);
+  });
+
+  it('validates and mkdirs a directory only once (process-level cache)', async () => {
+    const mockedMkdir = vi.mocked(mkdir);
+    const mockedRealpath = vi.mocked(realpath);
+    mockedMkdir.mockClear();
+    mockedRealpath.mockClear();
+
+    for (let i = 0; i < 3; i++) {
+      await resolveArtifactPath({
+        category: 'tmp',
+        toolName: 'x',
+        ext: 'txt',
+        customDir: 'cached-dir',
+      });
+    }
+
+    // First validation performs realpath(root) + realpath(dir); the other two
+    // resolutions hit the process-level cache (a4-04) with no further syscalls.
+    expect(mockedMkdir).toHaveBeenCalledTimes(1);
+    expect(mockedRealpath).toHaveBeenCalledTimes(2);
   });
 });

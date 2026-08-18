@@ -289,6 +289,12 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
 
   ctx.shutdownStarted = true;
   ctx.shutdownPromise = (async () => {
+    // Release the artifact retention sweep wired in MCPServer.start() — every
+    // shutdown path funnels through closeServer, so the unref'd timer is
+    // stopped here exactly once (idempotent stop; a later start re-arms it).
+    ctx.artifactRetentionStop?.();
+    ctx.artifactRetentionStop = null;
+
     // Flush snapshots before any other cleanup
     const getInst =
       typeof ctx.getDomainInstance === 'function' ? ctx.getDomainInstance.bind(ctx) : null;

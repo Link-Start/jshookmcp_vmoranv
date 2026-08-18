@@ -1,9 +1,17 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm, readFile, readdir } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sanitizeForCache } from '@utils/sanitizeForCache';
 import { getProjectRoot } from '@utils/outputPaths';
+
+// Call-through mock for the sync write: lets individual tests inject an EEXIST
+// on the first attempt while every other test keeps the real implementation.
+vi.mock('node:fs', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs')>();
+  return { ...original, writeFileSync: vi.fn(original.writeFileSync) };
+});
 
 const DATA_URI = 'data:image/png;base64,' + 'A'.repeat(3 * 1024 * 1024);
 
@@ -205,5 +213,42 @@ describe('sanitizeForCache', () => {
     // Clean up the file written relative to the project root.
     const abs = join(getProjectRoot(), ...out.url._offload.path.split('/'));
     await rm(abs, { force: true });
+  });
+
+  it('uses an 8-char hex ID derived from randomUUID in offload filenames', async () => {
+    const out = sanitizeForCache({ url: DATA_URI }, opts()) as unknown as {
+      url: { _offload: { path: string } };
+    };
+    // a4-03/a2-08: the old 6-char Math.random base36 ID collided at high
+    // write rates; the new ID is 8 hex chars from a v4 UUID.
+    expect(out.url._offload.path).toMatch(
+      /offload-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-[0-9a-f]{8}\.(bin|txt)$/,
+    );
+    await rm(join(getProjectRoot(), ...out.url._offload.path.split('/')), { force: true });
+  });
+
+  it('writes exclusively (wx) and retries once when the reserved name collides', async () => {
+    const mockedWrite = vi.mocked(writeFileSync);
+    mockedWrite.mockImplementationOnce(() => {
+      throw Object.assign(new Error('EEXIST: file already exists'), { code: 'EEXIST' });
+    });
+
+    const out = sanitizeForCache({ url: DATA_URI }, opts()) as unknown as {
+      url: { _offload: { path: string } };
+    };
+    try {
+      // The collision was retried with a regenerated name — the placeholder
+      // must still point at a written file (the second attempt went through).
+      expect(out.url._offload.path).toBeTruthy();
+      expect(mockedWrite).toHaveBeenCalledTimes(2);
+      for (const call of mockedWrite.mock.calls) {
+        expect(call[2]).toMatchObject({ flag: 'wx' });
+      }
+    } finally {
+      mockedWrite.mockRestore();
+      if (out.url._offload.path) {
+        await rm(join(getProjectRoot(), ...out.url._offload.path.split('/')), { force: true });
+      }
+    }
   });
 });
