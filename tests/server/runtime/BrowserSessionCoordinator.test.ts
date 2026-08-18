@@ -236,7 +236,8 @@ describe('BrowserSessionCoordinator', () => {
     );
     const settled = Promise.allSettled(queued);
 
-    expect(vi.getTimerCount()).toBe(1);
+    // One deadline timer + one idle-sweep interval.
+    expect(vi.getTimerCount()).toBe(2);
     expect(coordinator.getQueueStats()).toMatchObject({
       pending: 100,
       readySessions: 100,
@@ -477,5 +478,98 @@ describe('BrowserSessionCoordinator', () => {
         content: [{ type: 'text', text: JSON.stringify({ success: true }) }],
       }),
     ).toBeNull();
+  });
+
+  it('rejects new session ids once the session limit is reached, with retry guidance', () => {
+    const coordinator = new BrowserSessionCoordinator(() => null, { maxSessions: 2 });
+
+    coordinator.getTabRegistry('session-a');
+    coordinator.getTabRegistry('session-b');
+
+    let captured: unknown;
+    try {
+      coordinator.getTabRegistry('session-c');
+    } catch (error) {
+      captured = error;
+    }
+    expect(captured).toMatchObject({
+      name: 'BrowserSessionQueueError',
+      code: 'BROWSER_SESSION_LIMIT_REACHED',
+    });
+    expect((captured as { retryAfterMs: number }).retryAfterMs).toBeGreaterThan(0);
+    expect((captured as { queueDepth: number }).queueDepth).toBe(2);
+    expect((captured as { queueLimit: number }).queueLimit).toBe(2);
+
+    // Existing sessions stay reachable; access refreshes their idle clock.
+    expect(() => coordinator.getTabRegistry('session-a')).not.toThrow();
+    expect(coordinator.getQueueStats()).toMatchObject({ trackedSessions: 2, sessionLimit: 2 });
+  });
+
+  it('sweeps sessions idle beyond the TTL and releases their browser lease', async () => {
+    vi.useFakeTimers();
+    const coordinator = new BrowserSessionCoordinator(() => null, {
+      maxSessions: 8,
+      idleTtlMs: 1_000,
+      sweepIntervalMs: 100,
+    });
+
+    coordinator.getTabRegistry('stale');
+    coordinator.claimBrowserLease('stale');
+    coordinator.getTabRegistry('kept');
+
+    await vi.advanceTimersByTimeAsync(500);
+    coordinator.getTabRegistry('kept'); // refresh the idle clock below the TTL
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(coordinator.dropSession('stale')).toBe(false); // already swept
+    expect(coordinator.getBrowserLease('stale')).toEqual({
+      owned: false,
+      otherOwners: 0,
+      totalOwners: 0,
+    });
+    expect(coordinator.dropSession('kept')).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('skips queued and in-flight sessions during the idle sweep', async () => {
+    vi.useFakeTimers();
+    const coordinator = new BrowserSessionCoordinator(() => null, {
+      maxSessions: 8,
+      idleTtlMs: 1_000,
+      sweepIntervalMs: 100,
+      waitTimeoutMs: 60_000,
+      maxPending: 16,
+    });
+    let releaseActive!: () => void;
+    const activeGate = new Promise<void>((resolve) => {
+      releaseActive = resolve;
+    });
+    const active = coordinator.runExclusive('active', async () => await activeGate);
+    coordinator.getTabRegistry('queued');
+    const queued = coordinator.runExclusive('queued', async () => undefined);
+    coordinator.getTabRegistry('stale');
+
+    await vi.advanceTimersByTimeAsync(1_200);
+
+    // 'stale' was idle and unqueued → swept; 'active'/'queued' survive.
+    expect(coordinator.dropSession('stale')).toBe(false);
+    releaseActive();
+    await Promise.all([active, queued]);
+    expect(coordinator.dropSession('active')).toBe(true);
+    expect(coordinator.dropSession('queued')).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('stops the idle sweep timer on dispose', () => {
+    vi.useFakeTimers();
+    const coordinator = new BrowserSessionCoordinator(() => null, {
+      idleTtlMs: 1_000,
+      sweepIntervalMs: 100,
+    });
+    coordinator.getTabRegistry('stale');
+    coordinator.dispose();
+    vi.advanceTimersByTimeAsync(2_000);
+    expect(coordinator.dropSession('stale')).toBe(true); // not swept
+    vi.useRealTimers();
   });
 });

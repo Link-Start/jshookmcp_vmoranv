@@ -6,13 +6,15 @@
  * (unknown session, missing args, bad handle). A real assembler-verified .so is
  * written to a temp file because handlers read libraries by filesystem path.
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { NativeEmulatorHandlers } from '@server/domains/native-emulator/handlers.impl';
 import { SessionManager } from '@modules/native-emulator/SessionManager';
+import { getGdbServer } from '@native/GdbRspServer';
+import { NEMU_SESSION_SWEEP_MS } from '@src/constants';
 
 const EM_AARCH64 = 183;
 const PT_LOAD = 1;
@@ -640,6 +642,74 @@ describe('NativeEmulatorHandlers — isolation & errors', () => {
     const res = payload(await handlers.handleDestroySession({ sessionId: 'ghost' }));
     expect(res.success).toBe(true);
     expect(res.destroyed).toBe(false);
+  });
+
+  it('stops the GDB RSP server and drops register snapshots on destroy', async () => {
+    handlers = new NativeEmulatorHandlers();
+    const a = payload(await handlers.handleCreateSession({}));
+    const b = payload(await handlers.handleCreateSession({}));
+    const sessionId = a.sessionId as string;
+
+    const start = payload(await handlers.handleGdbserver({ action: 'start', sessionId, port: 0 }));
+    expect(start.running).toBe(true);
+    expect(getGdbServer(sessionId)).toBeDefined();
+
+    await handlers.handleRegsSave({ sessionId, name: 'before' });
+
+    const destroyed = payload(await handlers.handleDestroySession({ sessionId }));
+    expect(destroyed.destroyed).toBe(true);
+    expect(getGdbServer(sessionId)).toBeUndefined();
+
+    // Snapshots must be gone too: restoring on a surviving session reports
+    // "no snapshots" for the destroyed session instead of a stale hit.
+    const restore = payload(
+      await handlers.handleRegsRestore({
+        sessionId: b.sessionId as string,
+        snapshotId: `${sessionId}::before`,
+      }),
+    );
+    expect(restore.success).toBe(false);
+    expect(String(restore.error)).toContain('No snapshots found for session');
+  });
+
+  it('reaps the GDB server and register snapshots when the idle sweep drops a session', async () => {
+    vi.useFakeTimers();
+    handlers = new NativeEmulatorHandlers();
+    try {
+      const a = payload(await handlers.handleCreateSession({}));
+      const b = payload(await handlers.handleCreateSession({}));
+      const sessionId = a.sessionId as string;
+
+      await handlers.handleRegsSave({ sessionId, name: 'before' });
+      const start = payload(
+        await handlers.handleGdbserver({ action: 'start', sessionId, port: 0 }),
+      );
+      expect(start.running).toBe(true);
+      expect(getGdbServer(sessionId)).toBeDefined();
+
+      // Advance past the idle TTL for session A while keeping B alive by
+      // touching it mid-way (TTL = 5 × sweep interval).
+      await vi.advanceTimersByTimeAsync(NEMU_SESSION_SWEEP_MS * 3);
+      await handlers.handleSessionInfo({ sessionId: b.sessionId as string });
+      await vi.advanceTimersByTimeAsync(NEMU_SESSION_SWEEP_MS * 2);
+
+      expect(getGdbServer(sessionId)).toBeUndefined();
+      const listed = payload(await handlers.handleListSessions({}));
+      const ids = (listed.sessions as Array<{ id: string }>).map((s) => s.id);
+      expect(ids).not.toContain(sessionId);
+      expect(ids).toContain(b.sessionId);
+
+      const restore = payload(
+        await handlers.handleRegsRestore({
+          sessionId: b.sessionId as string,
+          snapshotId: `${sessionId}::before`,
+        }),
+      );
+      expect(restore.success).toBe(false);
+      expect(String(restore.error)).toContain('No snapshots found for session');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

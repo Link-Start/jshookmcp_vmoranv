@@ -3,6 +3,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { CodeCollector } from '@modules/collector/CodeCollector';
 import { TabRegistry } from '@modules/browser/TabRegistry';
 import { IndexedMinHeap } from '@server/runtime/IndexedMinHeap';
+import {
+  BROWSER_SESSION_IDLE_TTL_MS,
+  BROWSER_SESSION_MAX_SESSIONS,
+  BROWSER_SESSION_SWEEP_MS,
+} from '@src/constants/server';
 
 export interface BrowserSessionSnapshot {
   currentTabIndex: number | null;
@@ -14,6 +19,8 @@ export interface BrowserSessionSnapshot {
 
 interface BrowserSessionEntry extends BrowserSessionSnapshot {
   tabRegistry: TabRegistry;
+  /** Monotonic clock timestamp of the most recent access (idle-sweep input). */
+  lastTouchedMs: number;
 }
 
 export interface BrowserSessionSchedulerOptions {
@@ -25,6 +32,12 @@ export interface BrowserSessionSchedulerOptions {
   expectedConcurrency: number;
   reservedPendingPerSession: number;
   costEwmaAlpha: number;
+}
+
+export interface BrowserSessionLifecycleOptions {
+  maxSessions: number;
+  idleTtlMs: number;
+  sweepIntervalMs: number;
 }
 
 export interface BrowserSessionQueueStats extends BrowserSessionSchedulerOptions {
@@ -44,6 +57,8 @@ export interface BrowserSessionQueueStats extends BrowserSessionSchedulerOptions
   maxQueueWaitMs: number;
   trackedToolCosts: number;
   deadlineTimerActive: boolean;
+  trackedSessions: number;
+  sessionLimit: number;
 }
 
 export interface BrowserSessionExecutionOptions {
@@ -106,6 +121,7 @@ export class BrowserSessionQueueError extends Error {
       | 'BROWSER_SESSION_QUEUE_TIMEOUT'
       | 'BROWSER_SESSION_QUEUE_CANCELLED'
       | 'BROWSER_SESSION_CLOSED'
+      | 'BROWSER_SESSION_LIMIT_REACHED'
       | 'BROWSER_SESSION_CROSS_SESSION_REENTRY',
     public readonly retryAfterMs: number | null = null,
     public readonly queueDepth: number | null = null,
@@ -232,6 +248,8 @@ export class BrowserSessionCoordinator {
     },
   });
   private readonly schedulerOptions: BrowserSessionSchedulerOptions;
+  private readonly lifecycle: BrowserSessionLifecycleOptions;
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private readyHead: SessionScheduleState | null = null;
   private readyTail: SessionScheduleState | null = null;
   private readySessionCount = 0;
@@ -253,7 +271,7 @@ export class BrowserSessionCoordinator {
 
   constructor(
     private readonly getCollector: () => CodeCollector | null | undefined,
-    options: Partial<BrowserSessionSchedulerOptions> = {},
+    options: Partial<BrowserSessionSchedulerOptions & BrowserSessionLifecycleOptions> = {},
     private readonly now: () => number = () => performance.now(),
   ) {
     const maxPending = positiveInteger(options.maxPending, DEFAULT_SCHEDULER_OPTIONS.maxPending);
@@ -285,6 +303,14 @@ export class BrowserSessionCoordinator {
         DEFAULT_SCHEDULER_OPTIONS.costEwmaAlpha,
       ),
     };
+    this.lifecycle = {
+      maxSessions: positiveInteger(options.maxSessions, BROWSER_SESSION_MAX_SESSIONS),
+      idleTtlMs: positiveInteger(options.idleTtlMs, BROWSER_SESSION_IDLE_TTL_MS),
+      sweepIntervalMs: positiveInteger(options.sweepIntervalMs, BROWSER_SESSION_SWEEP_MS),
+    };
+    this.sweepTimer = setInterval(() => this.sweepIdleSessions(), this.lifecycle.sweepIntervalMs);
+    // Don't keep the event loop (and thus the process) alive for the sweep.
+    this.sweepTimer.unref();
   }
 
   normalizeSessionId(sessionId: string | null | undefined): string {
@@ -302,6 +328,16 @@ export class BrowserSessionCoordinator {
     const normalized = this.normalizeSessionId(sessionId);
     let entry = this.sessions.get(normalized);
     if (!entry) {
+      if (this.sessions.size >= this.lifecycle.maxSessions) {
+        throw new BrowserSessionQueueError(
+          `Browser session limit reached (${this.lifecycle.maxSessions} tracked sessions); ` +
+            'close an HTTP session or wait for idle reclamation',
+          'BROWSER_SESSION_LIMIT_REACHED',
+          this.estimateSessionRetryAfterMs(),
+          this.sessions.size,
+          this.lifecycle.maxSessions,
+        );
+      }
       entry = {
         tabRegistry: new TabRegistry(),
         currentTabIndex: null,
@@ -309,8 +345,11 @@ export class BrowserSessionCoordinator {
         currentTargetId: null,
         lastToolName: null,
         lastTouchedAt: null,
+        lastTouchedMs: this.now(),
       };
       this.sessions.set(normalized, entry);
+    } else {
+      entry.lastTouchedMs = this.now();
     }
     return entry;
   }
@@ -412,6 +451,14 @@ export class BrowserSessionCoordinator {
     return this.sessions.delete(normalized);
   }
 
+  /** Stop the idle sweep timer. Idempotent; safe for tests and graceful shutdown. */
+  dispose(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
+
   getQueueStats(): BrowserSessionQueueStats {
     const now = this.now();
     const oldestPending = this.deadlineHeap.peek();
@@ -436,6 +483,8 @@ export class BrowserSessionCoordinator {
       maxQueueWaitMs: roundMetric(this.maxQueueWaitMs),
       trackedToolCosts: this.toolCosts.size,
       deadlineTimerActive: this.deadlineTimer !== null,
+      trackedSessions: this.sessions.size,
+      sessionLimit: this.lifecycle.maxSessions,
     };
   }
 
@@ -998,6 +1047,32 @@ export class BrowserSessionCoordinator {
     );
     return Math.ceil(
       clamp(averageServiceMs * competingSessions, MIN_COST_MS, this.schedulerOptions.waitTimeoutMs),
+    );
+  }
+
+  /** Reap sessions untouched beyond the idle TTL. Busy sessions are never evicted. */
+  private sweepIdleSessions(): void {
+    const now = this.now();
+    for (const [sessionId, entry] of this.sessions) {
+      if (now - entry.lastTouchedMs < this.lifecycle.idleTtlMs) continue;
+      // The queue owns sessions with pending or in-flight work.
+      if (this.pendingBySession.has(sessionId) || this.activeExecutionSessionId === sessionId)
+        continue;
+      this.dropSession(sessionId);
+    }
+  }
+
+  /** Suggested retry delay when the session limit rejects a new session id. */
+  private estimateSessionRetryAfterMs(): number {
+    const now = this.now();
+    let oldestTouchMs = Number.POSITIVE_INFINITY;
+    for (const entry of this.sessions.values()) {
+      oldestTouchMs = Math.min(oldestTouchMs, entry.lastTouchedMs);
+    }
+    const idleForMs = Number.isFinite(oldestTouchMs) ? Math.max(0, now - oldestTouchMs) : 0;
+    // An idle session is reclaimed up to one TTL from its last access.
+    return Math.ceil(
+      clamp(this.lifecycle.idleTtlMs - idleForMs, MIN_COST_MS, this.lifecycle.idleTtlMs),
     );
   }
 }

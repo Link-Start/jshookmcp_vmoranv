@@ -21,7 +21,7 @@ describe('nemu_gdbserver', () => {
     }
   });
 
-  it('status with valid sessionId reports sessionReady', async () => {
+  it('status with valid sessionId reports server state', async () => {
     const handlers = new NativeEmulatorHandlers();
     // Create a session first
     const created = await handlers.handleCreateSession({ installSyscalls: true });
@@ -31,11 +31,13 @@ describe('nemu_gdbserver', () => {
     const sessionId = createdContent?.[0] ? JSON.parse(createdContent[0].text).sessionId : null;
     expect(sessionId).toBeDefined();
 
+    // No GDB server started for this session yet → status reports it stopped.
     const result = await handlers.handleGdbserver({ action: 'status', sessionId });
     const content = (result as { content?: Array<{ type: string; text: string }> }).content;
     if (content?.[0]) {
       const data = JSON.parse(content[0].text);
-      expect(data.sessionReady).toBe(true);
+      expect(data.running).toBe(false);
+      expect(data.servers).toBeInstanceOf(Array);
     }
 
     // Cleanup

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -10,13 +10,19 @@ import {
   getDiskScanSession,
   getDiskScanFileSize,
   listDiskScanSessions,
+  initDiskScanPersistence,
+  cleanupOrphanDiskScanFiles,
+  disposeDiskScanPersistence,
   DISK_RECORD_SIZE,
 } from '../../../../../src/server/domains/memory/handlers/scan-persistence';
+import { DISK_SCAN_MAX_SESSIONS, DISK_SCAN_SESSION_TTL_MS } from '@src/constants';
 
 describe('Disk Scan Persistence', () => {
   let tmpDir: string;
 
   beforeEach(() => {
+    // Reset module-level session registry and sweep timer between tests.
+    disposeDiskScanPersistence();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scan-persist-test-'));
   });
 
@@ -181,6 +187,85 @@ describe('Disk Scan Persistence', () => {
       ]);
 
       expect(getDiskScanFileSize('test-s11')).toBe(2 * DISK_RECORD_SIZE);
+    });
+  });
+
+  describe('session cap', () => {
+    it('rejects new sessions once the cap is reached', () => {
+      for (let i = 0; i < DISK_SCAN_MAX_SESSIONS; i += 1) {
+        createDiskScanSession(`cap-${i}`, 'int32', tmpDir);
+      }
+
+      expect(() => createDiskScanSession('cap-overflow', 'int32', tmpDir)).toThrow(/limit reached/);
+      expect(getDiskScanSession('cap-overflow')).toBeUndefined();
+
+      // Deleting one session frees a slot for a new one.
+      expect(deleteDiskScanSession('cap-0')).toBe(true);
+      expect(() => createDiskScanSession('cap-again', 'int32', tmpDir)).not.toThrow();
+    });
+  });
+
+  describe('idle sweep', () => {
+    it('expires idle sessions and unlinks their backing files', () => {
+      vi.useFakeTimers();
+      try {
+        // Timer wiring happens at init (construction) time; the deferred
+        // orphan cleanup fires harmlessly under the fake clock (real tmp
+        // files have real mtimes, which the epoch-based clock never sees as
+        // stale — and the test sessions live in a mkdtemp subdir anyway).
+        initDiskScanPersistence();
+        const stale = createDiskScanSession('sweep-stale', 'int32', tmpDir);
+        appendToDiskScan('sweep-stale', [{ address: BigInt(1), value: BigInt(2) }]);
+        createDiskScanSession('sweep-kept', 'int32', tmpDir);
+
+        vi.advanceTimersByTime(DISK_SCAN_SESSION_TTL_MS / 2);
+        // Access refreshes the idle clock.
+        expect(getDiskScanSession('sweep-kept')).toBeDefined();
+        // Keep total elapsed time below 2×TTL so the touched session (idle
+        // only since the halfway point) stays below the TTL while the stale
+        // one is well past it.
+        vi.advanceTimersByTime(DISK_SCAN_SESSION_TTL_MS - 1);
+
+        expect(getDiskScanSession('sweep-stale')).toBeUndefined();
+        expect(fs.existsSync(stale.filePath)).toBe(false);
+        expect(getDiskScanSession('sweep-kept')).toBeDefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe('initDiskScanPersistence', () => {
+    it('reclaims stale orphan scan files asynchronously without blocking init', async () => {
+      const stalePath = path.join(os.tmpdir(), `jshook-scan-orphan-${process.pid}-stale.bin`);
+      const freshPath = path.join(os.tmpdir(), `jshook-scan-orphan-${process.pid}-fresh.bin`);
+      const nonMatchingPath = path.join(os.tmpdir(), `jshook-scan-orphan-${process.pid}.txt`);
+      fs.writeFileSync(stalePath, 'orphan');
+      fs.writeFileSync(freshPath, 'orphan');
+      fs.writeFileSync(nonMatchingPath, 'orphan');
+      const past = new Date(Date.now() - DISK_SCAN_SESSION_TTL_MS - 60_000);
+      fs.utimesSync(stalePath, past, past);
+      try {
+        // init returns synchronously (timer wiring only); cleanup is deferred
+        // on an unref'd 0ms timer so domain activation is never blocked.
+        const startedAt = Date.now();
+        initDiskScanPersistence();
+        expect(Date.now() - startedAt).toBeLessThan(1_000);
+
+        // Await the cleanup explicitly — both the direct call and the
+        // deferred trigger scheduled by init are idempotent.
+        await cleanupOrphanDiskScanFiles();
+
+        // Stale orphan reclaimed; a fresh file may belong to another process
+        // and files that don't match the scan naming pattern are left alone.
+        expect(fs.existsSync(stalePath)).toBe(false);
+        expect(fs.existsSync(freshPath)).toBe(true);
+        expect(fs.existsSync(nonMatchingPath)).toBe(true);
+      } finally {
+        for (const p of [stalePath, freshPath, nonMatchingPath]) {
+          if (fs.existsSync(p)) fs.unlinkSync(p);
+        }
+      }
     });
   });
 });

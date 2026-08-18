@@ -31,6 +31,11 @@ async function ensure(ctx: MCPServerContext): Promise<H> {
   const ctxAny = ctx as unknown as Record<string, unknown>;
   if (ctxAny[DEP_KEY]) return ctxAny[DEP_KEY] as H;
 
+  // Startup cleanup: reclaim stale jshook-scan-*.bin orphans and arm the
+  // idle-expiry sweep for disk-backed scan sessions. Idempotent.
+  const { initDiskScanPersistence } = await import('./handlers/scan-persistence');
+  initDiskScanPersistence();
+
   // Dynamic imports: load native koffi modules AND handler lazily — only when memory domain is accessed.
   // Cross-platform modules (always loaded)
   const [

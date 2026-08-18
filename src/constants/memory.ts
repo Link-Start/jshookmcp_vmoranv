@@ -234,3 +234,16 @@ export const MASQUERADE_ENABLED = bool('JSHOOK_MASQUERADE', false);
 
 /** Spoof parent process ID for masquerade (0 = don't spoof). */
 export const MASQUERADE_PARENT_PID = int('JSHOOK_MASQUERADE_PARENT_PID', 0);
+
+/* ================================================================== */
+/*  Disk-backed scan persistence                                       */
+/* ================================================================== */
+
+/** Max concurrent disk-backed scan sessions; createDiskScanSession throws once exceeded. */
+export const DISK_SCAN_MAX_SESSIONS = int('DISK_SCAN_MAX_SESSIONS', 16);
+
+/** Idle threshold before a disk scan session is swept and its backing file unlinked (ms). */
+export const DISK_SCAN_SESSION_TTL_MS = int('DISK_SCAN_SESSION_TTL_MS', 10 * 60_000);
+
+/** Sweep interval for expired disk scan sessions (ms). */
+export const DISK_SCAN_SESSION_SWEEP_MS = int('DISK_SCAN_SESSION_SWEEP_MS', 60_000);

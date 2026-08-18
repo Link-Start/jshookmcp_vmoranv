@@ -304,3 +304,16 @@ export const ARGS_PREVIEW_MAX_CHARS = int('ARGS_PREVIEW_MAX_CHARS', 500);
 
 /** Milliseconds in one minute (pure unit constant, not env-configurable). */
 export const MS_PER_MINUTE = 60_000;
+
+/* ================================================================== */
+/*  Browser session coordinator                                        */
+/* ================================================================== */
+
+/** Max tracked browser sessions; new session ids are rejected once exceeded. */
+export const BROWSER_SESSION_MAX_SESSIONS = int('BROWSER_SESSION_MAX_SESSIONS', 512);
+
+/** Idle threshold before a tracked browser session is swept (ms). */
+export const BROWSER_SESSION_IDLE_TTL_MS = int('BROWSER_SESSION_IDLE_TTL_MS', 30 * 60_000);
+
+/** Idle sweep interval for the browser session coordinator (ms). */
+export const BROWSER_SESSION_SWEEP_MS = int('BROWSER_SESSION_SWEEP_MS', 60_000);

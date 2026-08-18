@@ -11,6 +11,12 @@
  * Limits:
  * - Maximum 100 million addresses (~1.6 GB file)
  * - Above that, the scan is rejected with "narrow first" guidance
+ * - Maximum DISK_SCAN_MAX_SESSIONS concurrent sessions (env-overridable)
+ * - Idle sessions expire after DISK_SCAN_SESSION_TTL_MS (unref'd sweep,
+ *   wired at init), deleting the registry entry and unlinking the backing file
+ * - initDiskScanPersistence() wires the sweep synchronously and reclaims
+ *   stale jshook-scan-*.bin orphan files asynchronously (unref'd deferred
+ *   timer, off the domain-activation critical path)
  *
  * The persisted file is referenced by a sessionId and can be used as input
  * to memory_next_scan, which reads from disk instead of in-memory session.
@@ -19,6 +25,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+
+import {
+  DISK_SCAN_MAX_SESSIONS,
+  DISK_SCAN_SESSION_SWEEP_MS,
+  DISK_SCAN_SESSION_TTL_MS,
+} from '@src/constants/memory';
 
 /** Maximum addresses when persisting to disk (100M). */
 export const MAX_DISK_SCAN_ADDRESSES = 100_000_000;
@@ -34,10 +46,111 @@ export interface DiskScanSession {
   filePath: string;
   totalRecords: number;
   valueType: string;
+  /** Epoch ms of session creation. */
+  createdAt: number;
+  /** Epoch ms of the most recent read/write access (idle-sweep input). */
+  lastUsedAt: number;
 }
 
 /** In-memory registry of active disk scan sessions. */
 const diskSessions = new Map<string, DiskScanSession>();
+
+/** Backing-file naming pattern produced by createDiskScanSession (orphan cleanup). */
+const DISK_SCAN_FILE_PATTERN = /^jshook-scan-[a-zA-Z0-9_-]+\.bin$/;
+
+let sweepTimer: ReturnType<typeof setInterval> | null = null;
+let deferredCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+
+function touchSession(session: DiskScanSession): void {
+  session.lastUsedAt = Date.now();
+}
+
+/** Start the unref'd expiry sweep. Idempotent; sessions auto-expire once created. */
+function ensureSweepTimer(): void {
+  if (sweepTimer) return;
+  sweepTimer = setInterval(() => sweepExpiredDiskSessions(), DISK_SCAN_SESSION_SWEEP_MS);
+  // Don't keep the event loop (and thus the process) alive for the sweep.
+  if (sweepTimer.unref) sweepTimer.unref();
+}
+
+function sweepExpiredDiskSessions(): void {
+  const now = Date.now();
+  for (const session of diskSessions.values()) {
+    if (now - session.lastUsedAt >= DISK_SCAN_SESSION_TTL_MS) {
+      deleteDiskScanSession(session.sessionId);
+    }
+  }
+}
+
+/**
+ * Startup initialization: wire the unref'd expiry sweep synchronously (timer
+ * registration is cheap) and trigger orphan reclamation asynchronously off
+ * the init critical path. Orphan cleanup is tmp-directory I/O and must never
+ * delay domain activation; the deferred timer is unref'd so it cannot hold
+ * the process open either. Idempotent; call once from the memory domain
+ * ensure (or a constructor).
+ */
+export function initDiskScanPersistence(): void {
+  ensureSweepTimer();
+  if (!deferredCleanupTimer) {
+    deferredCleanupTimer = setTimeout(() => {
+      deferredCleanupTimer = null;
+      void cleanupOrphanDiskScanFiles();
+    }, 0);
+    deferredCleanupTimer.unref();
+  }
+}
+
+/**
+ * Reclaim orphaned `jshook-scan-*.bin` files left in the tmp directory by a
+ * crashed process. Files younger than the session TTL are kept (they may
+ * belong to a scan session owned by another process). Async so the deferred
+ * trigger never blocks the event loop.
+ */
+export async function cleanupOrphanDiskScanFiles(): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await fs.promises.readdir(os.tmpdir());
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  await Promise.all(
+    entries.map(async (name) => {
+      if (!DISK_SCAN_FILE_PATTERN.test(name)) return;
+      const filePath = path.join(os.tmpdir(), name);
+      try {
+        const stat = await fs.promises.stat(filePath);
+        if (!stat.isFile()) return;
+        // Only reclaim files stale beyond the session TTL.
+        if (now - stat.mtimeMs >= DISK_SCAN_SESSION_TTL_MS) {
+          await fs.promises.unlink(filePath);
+        }
+      } catch {
+        // Best-effort: a racing writer or a vanished file is not an error.
+      }
+    }),
+  );
+}
+
+/**
+ * Stop the sweep timer, cancel any deferred cleanup, and delete every
+ * registered session. Exposed for tests and graceful shutdown; the unref'd
+ * timers are safe to leave running otherwise.
+ */
+export function disposeDiskScanPersistence(): void {
+  if (sweepTimer) {
+    clearInterval(sweepTimer);
+    sweepTimer = null;
+  }
+  if (deferredCleanupTimer) {
+    clearTimeout(deferredCleanupTimer);
+    deferredCleanupTimer = null;
+  }
+  for (const session of diskSessions.values()) {
+    deleteDiskScanSession(session.sessionId);
+  }
+}
 
 /**
  * Create a new disk-backed scan session.
@@ -48,6 +161,13 @@ export function createDiskScanSession(
   valueType: string,
   tmpDir?: string,
 ): DiskScanSession {
+  ensureSweepTimer();
+  if (diskSessions.size >= DISK_SCAN_MAX_SESSIONS) {
+    throw new Error(
+      `Disk scan session limit reached (${DISK_SCAN_MAX_SESSIONS}); ` +
+        'delete a session first or wait for idle expiry',
+    );
+  }
   const dir = tmpDir ?? os.tmpdir();
   const fileName = `jshook-scan-${sessionId.replace(/[^a-zA-Z0-9\-_]/g, '_')}.bin`;
   const filePath = path.join(dir, fileName);
@@ -55,11 +175,14 @@ export function createDiskScanSession(
   // Create the file (truncate if exists)
   fs.writeFileSync(filePath, Buffer.alloc(0));
 
+  const now = Date.now();
   const session: DiskScanSession = {
     sessionId,
     filePath,
     totalRecords: 0,
     valueType,
+    createdAt: now,
+    lastUsedAt: now,
   };
 
   diskSessions.set(sessionId, session);
@@ -78,6 +201,7 @@ export function appendToDiskScan(
   if (!session) {
     throw new Error(`Disk scan session "${sessionId}" not found`);
   }
+  touchSession(session);
 
   const newTotal = session.totalRecords + records.length;
   if (newTotal > MAX_DISK_SCAN_ADDRESSES) {
@@ -119,6 +243,7 @@ export function readAllFromDiskScan(sessionId: string): string[] {
   if (!session) {
     throw new Error(`Disk scan session "${sessionId}" not found`);
   }
+  touchSession(session);
 
   const fd = fs.openSync(session.filePath, 'r');
   try {
@@ -140,10 +265,13 @@ export function readAllFromDiskScan(sessionId: string): string[] {
 }
 
 /**
- * Get disk scan session info.
+ * Get disk scan session info. Refreshes the idle clock, so existence checks
+ * count as activity for the TTL sweep.
  */
 export function getDiskScanSession(sessionId: string): DiskScanSession | undefined {
-  return diskSessions.get(sessionId);
+  const session = diskSessions.get(sessionId);
+  if (session) touchSession(session);
+  return session;
 }
 
 /**

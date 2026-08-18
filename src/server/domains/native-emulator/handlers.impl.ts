@@ -13,7 +13,11 @@
  */
 import { readFile } from 'node:fs/promises';
 
-import { SessionManager, type EmulatorSession } from '@modules/native-emulator/SessionManager';
+import {
+  SessionManager,
+  type EmulatorSession,
+  type SessionManagerOptions,
+} from '@modules/native-emulator/SessionManager';
 import type { BionicOptions } from '@modules/native-emulator/bionic';
 import { extractArm64Libs } from '@modules/native-emulator/apk';
 import { inspectElfImports } from '@modules/native-emulator/import-inspector';
@@ -64,13 +68,40 @@ interface ProfileCallNode {
   callees: ProfileCallNode[];
 }
 
+/**
+ * SessionManager subclass wired to handler-level cleanup: whenever a session
+ * is released — explicit destroy, idle-TTL sweep, or dispose — the handler is
+ * notified so per-session state (register snapshots, GDB RSP server) is
+ * dropped along with the emulator instead of leaking past its lifetime.
+ */
+class ReleaseNotifyingSessionManager extends SessionManager {
+  constructor(
+    private readonly onRelease: (sessionId: string) => void,
+    options?: SessionManagerOptions,
+  ) {
+    super(options);
+  }
+
+  protected override release(session: EmulatorSession): void {
+    try {
+      this.onRelease(session.id);
+    } catch {
+      // A faulty cleanup must not break session teardown — the sweep runs on
+      // an unref'd timer, so an uncaught throw would crash the whole process.
+    }
+    super.release(session);
+  }
+}
+
 export class NativeEmulatorHandlers {
   private readonly sessions: SessionManager;
   /** Per-session register snapshots: sessionId → (name → {reg:value}) */
   private readonly regSnapshots = new Map<string, Map<string, Record<string, bigint>>>();
 
   constructor(sessions?: SessionManager) {
-    this.sessions = sessions ?? new SessionManager();
+    this.sessions =
+      sessions ??
+      new ReleaseNotifyingSessionManager((sessionId) => this.cleanupSessionResources(sessionId));
   }
 
   handleCapabilities(_args: ToolArgs): Promise<ToolResponse> {
@@ -165,6 +196,10 @@ export class NativeEmulatorHandlers {
   handleDestroySession(args: ToolArgs): Promise<ToolResponse> {
     return handleSafe(async () => {
       const sessionId = argStringRequired(args, 'sessionId');
+      // Drop handler-owned per-session state (register snapshots, GDB RSP
+      // server) before the emulator itself — the GDB server is stopped even
+      // when the session id is unknown, clearing orphaned registry entries.
+      this.cleanupSessionResources(sessionId);
       const destroyed = this.sessions.destroySession(sessionId);
       return {
         sessionId,
@@ -1405,6 +1440,15 @@ export class NativeEmulatorHandlers {
   /** Forwarded by the graceful-shutdown closables list. Idempotent. */
   dispose(): void {
     this.sessions.dispose();
+    // Dispose releases each session through the notifying manager, but clear
+    // the handler-owned map explicitly so injected plain managers can't leak it.
+    this.regSnapshots.clear();
+  }
+
+  /** Drop handler-owned per-session state (register snapshots, GDB RSP server). Idempotent. */
+  private cleanupSessionResources(sessionId: string): void {
+    this.regSnapshots.delete(sessionId);
+    removeGdbServer(sessionId);
   }
 
   // ── Guest memory management ──────────────────────────────────────────
