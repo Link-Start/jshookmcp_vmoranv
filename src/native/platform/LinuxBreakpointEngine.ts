@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import koffi from 'koffi';
+import { requireKoffi, type KoffiLibraryHandle } from '../koffi-loader';
 import { BREAKPOINT_HIT_TIMEOUT_MS, BREAKPOINT_TRACE_MAX_HITS } from '@src/constants';
 import type {
   BreakpointAccess,
@@ -90,10 +90,10 @@ interface ActiveBreakpoint extends BreakpointConfig {
 
 // ── koffi FFI caches (mirrors LinuxPtraceHelper) ────────────────────────
 
-let _libc: ReturnType<typeof koffi.load> | null = null;
+let _libc: KoffiLibraryHandle | null = null;
 
-function libc(): ReturnType<typeof koffi.load> {
-  if (!_libc) _libc = koffi.load('libc.so.6');
+function libc(): KoffiLibraryHandle {
+  if (!_libc) _libc = requireKoffi().load('libc.so.6');
   return _libc;
 }
 
@@ -124,7 +124,7 @@ function ptrace(req: number, pid: number, addr: number, data: bigint): bigint {
 
 function peekUser(pid: number, offset: number): bigint {
   const val = ptrace(PTRACE_PEEKUSER, pid, offset, 0n);
-  if (val === -1n && koffi.errno() !== 0) {
+  if (val === -1n && requireKoffi().errno() !== 0) {
     throw new Error(`LinuxBP: PTRACE_PEEKUSER failed at offset ${offset} for pid ${pid}`);
   }
   return val & 0xffffffffffffffffn;
@@ -136,21 +136,21 @@ function pokeUser(pid: number, offset: number, value: bigint): void {
 
 function getRegs(pid: number): Buffer {
   const buf = Buffer.alloc(REGS_SIZE);
-  ptraceFn()(BigInt(PTRACE_GETREGS), pid, 0, koffi.address(buf) as bigint);
+  ptraceFn()(BigInt(PTRACE_GETREGS), pid, 0, requireKoffi().address(buf) as bigint);
   return buf;
 }
 
 /** Blocking waitpid; returns status word or 0 on failure. */
 function waitpidBlocking(pid: number): number {
   const st = Buffer.alloc(4);
-  const ret = waitpidFn()(pid, koffi.address(st), 0) as number;
+  const ret = waitpidFn()(pid, requireKoffi().address(st), 0) as number;
   return ret > 0 ? st.readInt32LE(0) : 0;
 }
 
 /** Non-blocking (WNOHANG) waitpid; returns {pid, status}. */
 function waitpidNoHang(): { pid: number; status: number } {
   const st = Buffer.alloc(4);
-  const ret = waitpidFn()(-1, koffi.address(st), WNOHANG) as number;
+  const ret = waitpidFn()(-1, requireKoffi().address(st), WNOHANG) as number;
   return { pid: ret, status: st.readInt32LE(0) };
 }
 

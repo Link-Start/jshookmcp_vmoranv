@@ -8,7 +8,8 @@
  * @module Win32Debug
  */
 
-import koffi, { type LibraryHandle } from 'koffi';
+import type { LibraryHandle } from 'koffi';
+import { requireKoffi } from './koffi-loader';
 import { logger } from '@utils/logger';
 import { GetLastError, CloseHandle } from './Win32API';
 
@@ -182,7 +183,7 @@ let kernel32Debug: LibraryHandle | null = null;
 
 function getKernel32(): LibraryHandle {
   if (!kernel32Debug) {
-    kernel32Debug = koffi.load('kernel32.dll');
+    kernel32Debug = requireKoffi().load('kernel32.dll');
     logger.debug('Loaded kernel32.dll for debug APIs');
   }
   return kernel32Debug;

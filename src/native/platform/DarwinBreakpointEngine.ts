@@ -17,7 +17,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import koffi from 'koffi';
+import { requireKoffi, type KoffiLibraryHandle } from '../koffi-loader';
 import { BREAKPOINT_HIT_TIMEOUT_MS, BREAKPOINT_TRACE_MAX_HITS } from '@src/constants';
 import { ToolError } from '@errors/ToolError';
 import type {
@@ -34,10 +34,10 @@ import { sleep } from './utils';
 // ── koffi libSystem bindings (inline — mirrors DarwinAPI pattern) ───────
 
 /* eslint-disable no-underscore-dangle */
-let _libSystem: ReturnType<typeof koffi.load> | null = null;
+let _libSystem: KoffiLibraryHandle | null = null;
 /* eslint-enable no-underscore-dangle */
-function libSystem(): ReturnType<typeof koffi.load> {
-  if (!_libSystem) _libSystem = koffi.load('/usr/lib/libSystem.B.dylib');
+function libSystem(): KoffiLibraryHandle {
+  if (!_libSystem) _libSystem = requireKoffi().load('/usr/lib/libSystem.B.dylib');
   return _libSystem;
 }
 
@@ -66,7 +66,11 @@ function darwinTaskThreads(task: number): { kr: number; threads: number[] } {
   // thread array; countPtr receives the array length.
   const threadListPtrBuf = Buffer.alloc(8); // void* (8 bytes on arm64)
   const countBuf = Buffer.alloc(4);
-  const kr = fn(task, koffi.address(threadListPtrBuf), koffi.address(countBuf)) as number;
+  const kr = fn(
+    task,
+    requireKoffi().address(threadListPtrBuf),
+    requireKoffi().address(countBuf),
+  ) as number;
   if (kr !== KERN.SUCCESS) return { kr, threads: [] };
 
   const count = countBuf.readUInt32LE(0);
@@ -95,8 +99,8 @@ function darwinTaskThreads(task: number): { kr: number; threads: number[] } {
           task,
           BigInt(arrAddr + i * 4),
           4n,
-          koffi.address(portBuf),
-          koffi.address(bytesReadBuf),
+          requireKoffi().address(portBuf),
+          requireKoffi().address(bytesReadBuf),
         ) as number;
         return entryKr;
       } catch {
@@ -130,7 +134,12 @@ function darwinThreadGetState(thread: number, flavor: number, state: Buffer): nu
   const fn = libSystem().func('int thread_get_state(int, int, _Out_ void *, _Inout_ uint32_t *)');
   const countPtr = Buffer.alloc(4);
   countPtr.writeUInt32LE(state.length / 4, 0); // count in uint32 units
-  const kr = fn(thread, flavor, koffi.address(state), koffi.address(countPtr)) as number;
+  const kr = fn(
+    thread,
+    flavor,
+    requireKoffi().address(state),
+    requireKoffi().address(countPtr),
+  ) as number;
   return kr;
 }
 
@@ -141,7 +150,7 @@ function darwinThreadGetState(thread: number, flavor: number, state: Buffer): nu
  */
 function darwinThreadSetState(thread: number, flavor: number, state: Buffer): number {
   const fn = libSystem().func('int thread_set_state(int, int, void *, uint32_t)');
-  return fn(thread, flavor, koffi.address(state), state.length / 4) as number;
+  return fn(thread, flavor, requireKoffi().address(state), state.length / 4) as number;
 }
 
 // ── Flavor constants (from osfmk/mach/arm/thread_status.h) ──────────────

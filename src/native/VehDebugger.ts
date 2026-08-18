@@ -85,7 +85,7 @@ import {
   PAGE,
   MEM,
 } from './Win32API';
-import koffi from 'koffi';
+import { requireKoffi } from './koffi-loader';
 import { formatAddress } from './formatAddress';
 import { allocateDR as allocateDebugRegister } from './platform/utils';
 
@@ -125,7 +125,7 @@ interface VehSession {
  * identical across all processes on the same Windows build.
  */
 function getProcAddr(name: string): bigint {
-  const lib = koffi.load('kernel32.dll');
+  const lib = requireKoffi().load('kernel32.dll');
   const hMod = lib.func('void *GetModuleHandleA(const char *)')('kernel32.dll');
   const fn = lib.func('void *GetProcAddress(void *, const char *)');
   return BigInt(fn(hMod, name) as unknown as number | bigint);
@@ -450,7 +450,7 @@ export class VehDebuggerEngine {
     if (this.sessions.has(pid)) return;
 
     const hProcess = openProcessForMemory(pid, true);
-    const kernel32 = koffi.load('kernel32.dll');
+    const kernel32 = requireKoffi().load('kernel32.dll');
 
     // Create named event (auto-reset, initially non-signaled)
     const eventName = `jshook_veh_${pid}`;
@@ -597,7 +597,7 @@ export class VehDebuggerEngine {
       }
     }
 
-    const kernel32 = koffi.load('kernel32.dll');
+    const kernel32 = requireKoffi().load('kernel32.dll');
     try {
       VirtualFreeEx(session.hProcess, session.pCode, 0, MEM.RELEASE);
     } catch {
@@ -673,7 +673,7 @@ export class VehDebuggerEngine {
   async waitForHit(timeoutMs?: number): Promise<BreakpointHit | null> {
     const timeout = timeoutMs ?? BREAKPOINT_HIT_TIMEOUT_MS;
     const deadline = Date.now() + timeout;
-    const kernel32 = koffi.load('kernel32.dll');
+    const kernel32 = requireKoffi().load('kernel32.dll');
     const waitForMultipleObjects = kernel32.func(
       'uint32 WaitForMultipleObjects(uint32, void **, int, uint32)',
     );

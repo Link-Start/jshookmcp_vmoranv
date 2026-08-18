@@ -13,7 +13,12 @@
  * implemented.
  */
 
-import koffi from 'koffi';
+import {
+  requireKoffi,
+  type KoffiLibraryHandle,
+  type KoffiCallable,
+  type Koffi,
+} from './koffi-loader';
 
 export interface CallStackFrame {
   frameIndex: number;
@@ -24,9 +29,9 @@ export interface CallStackFrame {
 
 // ── Lazy-loaded koffi handles ──
 
-let _kernel32: ReturnType<typeof koffi.load> | null = null;
-function kernel32(): ReturnType<typeof koffi.load> {
-  if (!_kernel32) _kernel32 = koffi.load('kernel32.dll');
+let _kernel32: KoffiLibraryHandle | null = null;
+function kernel32(): KoffiLibraryHandle {
+  if (!_kernel32) _kernel32 = requireKoffi().load('kernel32.dll');
   return _kernel32;
 }
 
@@ -53,12 +58,12 @@ const CONTEXT_FLAGS_OFFSET = 0x30;
 // Field access is via koffi-alloc'd object property syntax (dot notation),
 // not koffi.read/koffi.write (those are not available in the koffi API).
 
-type KoffiStructType = ReturnType<typeof koffi.struct>;
+type KoffiStructType = ReturnType<Koffi['struct']>;
 
 let _THREADENTRY32: KoffiStructType | null = null;
 function getThreadEntry32Type(): KoffiStructType {
   if (!_THREADENTRY32) {
-    _THREADENTRY32 = koffi.struct({
+    _THREADENTRY32 = requireKoffi().struct({
       dwSize: 'uint32',
       cntUsage: 'uint32',
       th32ThreadID: 'uint32',
@@ -74,7 +79,7 @@ function getThreadEntry32Type(): KoffiStructType {
 let _MODULEENTRY32W: KoffiStructType | null = null;
 function getModuleEntry32Type(): KoffiStructType {
   if (!_MODULEENTRY32W) {
-    _MODULEENTRY32W = koffi.struct({
+    _MODULEENTRY32W = requireKoffi().struct({
       dwSize: 'uint32',
       th32ModuleID: 'uint32',
       th32ProcessID: 'uint32',
@@ -83,8 +88,8 @@ function getModuleEntry32Type(): KoffiStructType {
       modBaseAddr: 'uint64',
       modBaseSize: 'uint32',
       hModule: 'uint64',
-      szModule: koffi.array('char16', 256),
-      szExePath: koffi.array('char16', 260),
+      szModule: requireKoffi().array('char16', 256),
+      szExePath: requireKoffi().array('char16', 260),
     });
   }
   return _MODULEENTRY32W;
@@ -92,7 +97,7 @@ function getModuleEntry32Type(): KoffiStructType {
 
 // ── FFI function bindings ──
 
-type KoffiFunc = ReturnType<ReturnType<typeof koffi.load>['func']>;
+type KoffiFunc = KoffiCallable;
 
 let _OpenProcess: KoffiFunc | null = null;
 function getOpenProcess() {
@@ -195,7 +200,7 @@ function getReadProcessMemory() {
 // ── Typed wrappers for koffi-alloc'd struct access ──
 
 /**
- * koffi.alloc(struct) returns an object with typed properties.
+ * requireKoffi().alloc(struct) returns an object with typed properties.
  * We use `as any` to access fields since the return type is opaque.
  */
 
@@ -213,14 +218,14 @@ interface ModuleEntryAccessor {
 }
 
 function allocThreadEntry(): ThreadEntryAccessor {
-  const te = koffi.alloc(getThreadEntry32Type(), 1) as unknown as ThreadEntryAccessor;
-  te.dwSize = koffi.sizeof(getThreadEntry32Type());
+  const te = requireKoffi().alloc(getThreadEntry32Type(), 1) as unknown as ThreadEntryAccessor;
+  te.dwSize = requireKoffi().sizeof(getThreadEntry32Type());
   return te;
 }
 
 function allocModuleEntry(): ModuleEntryAccessor {
-  const me = koffi.alloc(getModuleEntry32Type(), 1) as unknown as ModuleEntryAccessor;
-  me.dwSize = koffi.sizeof(getModuleEntry32Type());
+  const me = requireKoffi().alloc(getModuleEntry32Type(), 1) as unknown as ModuleEntryAccessor;
+  me.dwSize = requireKoffi().sizeof(getModuleEntry32Type());
   return me;
 }
 
@@ -304,9 +309,9 @@ function readQword(hProcess: bigint, address: bigint): bigint {
   const ok = getReadProcessMemory()(
     hProcess,
     address as unknown as bigint,
-    koffi.address(buf),
+    requireKoffi().address(buf),
     8n,
-    koffi.address(bytesReadBuf),
+    requireKoffi().address(bytesReadBuf),
   ) as number;
   if (!ok || bytesReadBuf.readBigUInt64LE(0) !== 8n) return 0n;
   return buf.readBigUInt64LE(0);
@@ -361,7 +366,7 @@ export function walkCallStack(pid: number, threadId?: number): CallStackFrame[] 
 
   const ctx = Buffer.alloc(CONTEXT_SIZE);
   ctx.writeUInt32LE(CONTEXT_FULL_X64, CONTEXT_FLAGS_OFFSET);
-  if (!getGetThreadContext()(hThread, koffi.address(ctx))) {
+  if (!getGetThreadContext()(hThread, requireKoffi().address(ctx))) {
     getResumeThread()(hThread);
     getCloseHandle()(hThread);
     getCloseHandle()(hProcess);

@@ -6,7 +6,8 @@
  * @module IcmpProvider.Windows
  */
 
-import koffi, { type LibraryHandle } from 'koffi';
+import type { LibraryHandle } from 'koffi';
+import { requireKoffi } from './koffi-loader';
 import { logger } from '@utils/logger';
 import {
   ICMP_PROBE_TIMEOUT_MS,
@@ -96,7 +97,7 @@ let winIcmpFns: WinIcmpFns | null = null;
 
 function getIphlpapi(): LibraryHandle {
   if (!iphlpapi) {
-    iphlpapi = koffi.load('iphlpapi.dll');
+    iphlpapi = requireKoffi().load('iphlpapi.dll');
     logger.debug('Loaded iphlpapi.dll via koffi');
   }
   return iphlpapi;
@@ -104,7 +105,7 @@ function getIphlpapi(): LibraryHandle {
 
 function getWs2_32(): LibraryHandle {
   if (!ws2_32) {
-    ws2_32 = koffi.load('ws2_32.dll');
+    ws2_32 = requireKoffi().load('ws2_32.dll');
     logger.debug('Loaded ws2_32.dll via koffi');
   }
   return ws2_32;
@@ -215,7 +216,7 @@ export class WindowsIcmpProvider extends BaseIcmpProvider {
   isAvailable(): boolean {
     if (process.platform !== 'win32') return false;
     try {
-      const lib = koffi.load('iphlpapi.dll');
+      const lib = requireKoffi().load('iphlpapi.dll');
       lib.unload();
       return true;
     } catch {

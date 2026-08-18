@@ -12,7 +12,7 @@
  * Win32-only; no-op on other platforms.
  */
 
-import koffi from 'koffi';
+import { requireKoffi, type KoffiLibraryHandle, type KoffiCallable } from '../koffi-loader';
 import { DLL, ds } from '@utils/obfuscated-strings';
 import { resolveNtdll } from './SyscallResolver';
 import type { ResolvedNtdll } from './SyscallResolver';
@@ -20,13 +20,13 @@ import { logger } from '@utils/logger';
 
 // ── Win32 API declarations (for gadget page allocation) ─────────────────────
 
-let k32Handle: ReturnType<typeof koffi.load> | null = null;
-function k32(): ReturnType<typeof koffi.load> {
-  if (!k32Handle) k32Handle = koffi.load(ds(DLL.kernel32));
+let k32Handle: KoffiLibraryHandle | null = null;
+function k32(): KoffiLibraryHandle {
+  if (!k32Handle) k32Handle = requireKoffi().load(ds(DLL.kernel32));
   return k32Handle;
 }
 
-let vaFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let vaFn: KoffiCallable | null = null;
 function Va() {
   if (!vaFn) {
     vaFn = k32().func('void * VirtualAlloc(void *, size_t, uint32, uint32)');
@@ -34,13 +34,13 @@ function Va() {
   return vaFn;
 }
 
-let vfFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let vfFn: KoffiCallable | null = null;
 function Vf() {
   if (!vfFn) vfFn = k32().func('int VirtualFree(void *, size_t, uint32)');
   return vfFn;
 }
 
-let vpFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let vpFn: KoffiCallable | null = null;
 function Vp() {
   if (!vpFn) {
     vpFn = k32().func('int VirtualProtect(void *, size_t, uint32, _Out_ uint32 *)');
@@ -48,13 +48,13 @@ function Vp() {
   return vpFn;
 }
 
-let gcpFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let gcpFn: KoffiCallable | null = null;
 function Gcp() {
   if (!gcpFn) gcpFn = k32().func('void * GetCurrentProcess()');
   return gcpFn;
 }
 
-let wpmFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let wpmFn: KoffiCallable | null = null;
 function Wpm() {
   if (!wpmFn) {
     wpmFn = k32().func(
@@ -228,10 +228,10 @@ export class DirectSyscallInvoker {
     const handleBuf = Buffer.alloc(8);
     const oa = buildObjectAttributes(inheritHandle ? 0x00000002 : 0x00000000);
     const status = this.ntOpenProcessStub!(
-      koffi.address(handleBuf),
+      requireKoffi().address(handleBuf),
       desiredAccess,
-      koffi.address(oa),
-      koffi.address(cid),
+      requireKoffi().address(oa),
+      requireKoffi().address(cid),
     );
     if (!ntSuccess(status)) {
       throw new Error(`NtOpenProcess(syscall) failed for PID ${pid}: ${ntStatusToHex(status)}`);
@@ -250,9 +250,9 @@ export class DirectSyscallInvoker {
     const status = this.ntReadVirtualMemoryStub!(
       hProcess,
       baseAddress,
-      koffi.address(buf),
+      requireKoffi().address(buf),
       BigInt(size),
-      koffi.address(bytesRead),
+      requireKoffi().address(bytesRead),
     );
     if (!ntSuccess(status)) {
       throw new Error(`NtReadVirtualMemory(syscall) failed: ${ntStatusToHex(status)}`);
@@ -270,9 +270,9 @@ export class DirectSyscallInvoker {
     const status = this.ntWriteVirtualMemoryStub!(
       hProcess,
       baseAddress,
-      koffi.address(data),
+      requireKoffi().address(data),
       BigInt(data.length),
-      koffi.address(bytesWritten),
+      requireKoffi().address(bytesWritten),
     );
     if (!ntSuccess(status)) {
       throw new Error(`NtWriteVirtualMemory(syscall) failed: ${ntStatusToHex(status)}`);
@@ -296,9 +296,9 @@ export class DirectSyscallInvoker {
     sizeBuf.writeBigUInt64LE(BigInt(size), 0);
     const status = this.ntAllocateVirtualMemoryStub!(
       hProcess,
-      koffi.address(addrBuf),
+      requireKoffi().address(addrBuf),
       0, // ZeroBits
-      koffi.address(sizeBuf),
+      requireKoffi().address(sizeBuf),
       allocType,
       protect,
     );
@@ -326,10 +326,10 @@ export class DirectSyscallInvoker {
     const old = Buffer.alloc(4);
     const status = this.ntProtectVirtualMemoryStub!(
       hProcess,
-      koffi.address(addrBuf),
-      koffi.address(sizeBuf),
+      requireKoffi().address(addrBuf),
+      requireKoffi().address(sizeBuf),
       newProtect,
-      koffi.address(old),
+      requireKoffi().address(old),
     );
     if (!ntSuccess(status)) {
       throw new Error(`NtProtectVirtualMemory(syscall) failed: ${ntStatusToHex(status)}`);
@@ -349,8 +349,8 @@ export class DirectSyscallInvoker {
     sizeBuf.writeBigUInt64LE(BigInt(size), 0);
     const status = this.ntFreeVirtualMemoryStub!(
       hProcess,
-      koffi.address(addrBuf),
-      koffi.address(sizeBuf),
+      requireKoffi().address(addrBuf),
+      requireKoffi().address(sizeBuf),
       freeType,
     );
     if (!ntSuccess(status)) {
@@ -395,14 +395,20 @@ export class DirectSyscallInvoker {
     const gadgetBytes = Buffer.from([0x0f, 0x05, 0xc3]); // syscall; ret
     const self = Gcp()() as unknown as bigint;
     const wrote = Buffer.alloc(8);
-    const wret = Wpm()(self, base, koffi.address(gadgetBytes), 3, koffi.address(wrote));
+    const wret = Wpm()(
+      self,
+      base,
+      requireKoffi().address(gadgetBytes),
+      3,
+      requireKoffi().address(wrote),
+    );
     if (!wret) {
       throw new Error('DirectSyscallInvoker: WriteProcessMemory failed for gadget page');
     }
 
     // Protect to RX
     const old = Buffer.alloc(4);
-    const pret = Vp()(base, 4096, PAGE_EXECUTE_READ, koffi.address(old));
+    const pret = Vp()(base, 4096, PAGE_EXECUTE_READ, requireKoffi().address(old));
     if (!pret) {
       throw new Error('DirectSyscallInvoker: VirtualProtect RX failed for gadget page');
     }
@@ -454,20 +460,26 @@ export class DirectSyscallInvoker {
     // Write stub to allocated page
     const self = Gcp()() as unknown as bigint;
     const wrote = Buffer.alloc(8);
-    const wret = Wpm()(self, base, koffi.address(stub), STUB_SIZE, koffi.address(wrote));
+    const wret = Wpm()(
+      self,
+      base,
+      requireKoffi().address(stub),
+      STUB_SIZE,
+      requireKoffi().address(wrote),
+    );
     if (!wret) {
       throw new Error('DirectSyscallInvoker: WriteProcessMemory failed for stub page');
     }
 
     // Protect to RX
     const old = Buffer.alloc(4);
-    const pret = Vp()(base, STUB_PAGE, PAGE_EXECUTE_READ, koffi.address(old));
+    const pret = Vp()(base, STUB_PAGE, PAGE_EXECUTE_READ, requireKoffi().address(old));
     if (!pret) {
       throw new Error('DirectSyscallInvoker: VirtualProtect RX failed for stub page');
     }
 
     // Decode with the given signature — koffi creates a callable wrapper
-    return koffi.decode(base, sig) as unknown as NativeCallable<T>;
+    return requireKoffi().decode(base, sig) as unknown as NativeCallable<T>;
   }
 
   /** Build all needed stubs from the resolved SSN table. */

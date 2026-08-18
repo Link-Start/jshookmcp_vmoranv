@@ -42,31 +42,31 @@
  * @module InProcessPatcher
  */
 
-import koffi from 'koffi';
+import { requireKoffi, type KoffiLibraryHandle, type KoffiCallable } from '../koffi-loader';
 import { DLL, ds } from '@utils/obfuscated-strings';
 import { logger } from '@utils/logger';
 
 // ── koffi lazy-load ──────────────────────────────────────────────────────────
 
-let k32Handle: ReturnType<typeof koffi.load> | null = null;
-function k32(): ReturnType<typeof koffi.load> {
-  if (!k32Handle) k32Handle = koffi.load(ds(DLL.kernel32));
+let k32Handle: KoffiLibraryHandle | null = null;
+function k32(): KoffiLibraryHandle {
+  if (!k32Handle) k32Handle = requireKoffi().load(ds(DLL.kernel32));
   return k32Handle;
 }
 
-let getModuleHandleFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let getModuleHandleFn: KoffiCallable | null = null;
 function getGMH() {
   if (!getModuleHandleFn) getModuleHandleFn = k32().func('void * GetModuleHandleA(char *)');
   return getModuleHandleFn;
 }
 
-let getProcAddressFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let getProcAddressFn: KoffiCallable | null = null;
 function getGPA() {
   if (!getProcAddressFn) getProcAddressFn = k32().func('void * GetProcAddress(void *, char *)');
   return getProcAddressFn;
 }
 
-let virtualProtectFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let virtualProtectFn: KoffiCallable | null = null;
 function getVP() {
   if (!virtualProtectFn) {
     virtualProtectFn = k32().func('int VirtualProtect(void *, size_t, uint32, _Out_ uint32 *)');
@@ -74,13 +74,13 @@ function getVP() {
   return virtualProtectFn;
 }
 
-let getCurrentProcessFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let getCurrentProcessFn: KoffiCallable | null = null;
 function getGCP() {
   if (!getCurrentProcessFn) getCurrentProcessFn = k32().func('void * GetCurrentProcess()');
   return getCurrentProcessFn;
 }
 
-let writeProcessMemoryFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let writeProcessMemoryFn: KoffiCallable | null = null;
 function getWPM() {
   if (!writeProcessMemoryFn) {
     writeProcessMemoryFn = k32().func(
@@ -134,7 +134,7 @@ function toBigInt(value: unknown): bigint {
   if (value === null || value === undefined) return 0n;
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return BigInt(value);
-  return koffi.address(value);
+  return requireKoffi().address(value);
 }
 
 /**
@@ -151,7 +151,7 @@ function patchFunction(targetAddr: bigint, patch: Buffer, name: string): boolean
     targetAddr,
     patch.length,
     PAGE_EXECUTE_READWRITE,
-    koffi.address(oldProtect),
+    requireKoffi().address(oldProtect),
   );
   if (!vpRet) {
     logger.debug(`InProcessPatcher: VirtualProtect failed for ${name}`);
@@ -163,18 +163,28 @@ function patchFunction(targetAddr: bigint, patch: Buffer, name: string): boolean
   const wpmRet = getWPM()(
     self,
     targetAddr,
-    koffi.address(patch),
+    requireKoffi().address(patch),
     patch.length,
-    koffi.address(wrote),
+    requireKoffi().address(wrote),
   );
   if (!wpmRet) {
-    getVP()(targetAddr, patch.length, oldProtect.readUInt32LE(0), koffi.address(Buffer.alloc(4)));
+    getVP()(
+      targetAddr,
+      patch.length,
+      oldProtect.readUInt32LE(0),
+      requireKoffi().address(Buffer.alloc(4)),
+    );
     logger.debug(`InProcessPatcher: WriteProcessMemory failed for ${name}`);
     return false;
   }
 
   // Restore original protection
-  getVP()(targetAddr, patch.length, oldProtect.readUInt32LE(0), koffi.address(Buffer.alloc(4)));
+  getVP()(
+    targetAddr,
+    patch.length,
+    oldProtect.readUInt32LE(0),
+    requireKoffi().address(Buffer.alloc(4)),
+  );
 
   // Verify the patch actually took effect
   if (!verifyPatch(targetAddr, patch)) {

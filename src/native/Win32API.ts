@@ -12,7 +12,8 @@
  * @module Win32API
  */
 
-import koffi, { type LibraryHandle } from 'koffi';
+import type { LibraryHandle } from 'koffi';
+import { getKoffi, requireKoffi } from './koffi-loader';
 import { logger } from '@utils/logger';
 import { MEMORY_SYSCALL_EVASION } from '@src/constants';
 import {
@@ -117,7 +118,13 @@ export function isKoffiAvailable(): boolean {
   }
 
   try {
-    // Try to load kernel32 to verify koffi works
+    // koffi may be absent (dynamic import rejected) — getKoffi() returns null.
+    const koffi = getKoffi();
+    if (!koffi) {
+      koffiAvailable = false;
+      return false;
+    }
+    // Try to load kernel32 to verify koffi's native binding works.
     const testLib = koffi.load('kernel32.dll');
     testLib.unload();
     koffiAvailable = true;
@@ -142,7 +149,7 @@ export function isWindows(): boolean {
  */
 export function getKernel32(): LibraryHandle {
   if (!kernel32) {
-    kernel32 = koffi.load('kernel32.dll');
+    kernel32 = requireKoffi().load('kernel32.dll');
     logger.debug('Loaded kernel32.dll via koffi');
   }
   return kernel32;
@@ -153,7 +160,7 @@ export function getKernel32(): LibraryHandle {
  */
 export function getNtdll(): LibraryHandle {
   if (!ntdll) {
-    ntdll = koffi.load('ntdll.dll');
+    ntdll = requireKoffi().load('ntdll.dll');
     logger.debug('Loaded ntdll.dll via koffi');
   }
   return ntdll;
@@ -164,7 +171,7 @@ export function getNtdll(): LibraryHandle {
  */
 function getPsapi(): LibraryHandle {
   if (!psapi) {
-    psapi = koffi.load('psapi.dll');
+    psapi = requireKoffi().load('psapi.dll');
     logger.debug('Loaded psapi.dll via koffi');
   }
   return psapi;
@@ -174,7 +181,7 @@ function toPointerBigInt(value: unknown): bigint {
   if (value === null || value === undefined) return 0n;
   if (typeof value === 'bigint') return value;
   if (typeof value === 'number') return BigInt(value);
-  return koffi.address(value);
+  return requireKoffi().address(value);
 }
 
 /**

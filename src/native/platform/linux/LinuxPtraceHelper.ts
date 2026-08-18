@@ -6,7 +6,7 @@
  * Requires CAP_SYS_PTRACE (same privilege level needed for /proc/pid/mem r/w).
  */
 import fs from 'node:fs';
-import koffi from 'koffi';
+import { requireKoffi, type KoffiLibraryHandle, type KoffiCallable } from '../../koffi-loader';
 
 // ── ptrace constants ────────────────────────────────────────────────────
 
@@ -41,15 +41,15 @@ const REGS_SIZE = 216;
 
 // ── caches ──────────────────────────────────────────────────────────────
 
-let _libc: ReturnType<typeof koffi.load> | null = null;
+let _libc: KoffiLibraryHandle | null = null;
 const _vdsoGadgetCache = new Map<number, bigint>();
 
 function libc() {
-  if (!_libc) _libc = koffi.load('libc.so.6');
+  if (!_libc) _libc = requireKoffi().load('libc.so.6');
   return _libc;
 }
 
-let _ptraceFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let _ptraceFn: KoffiCallable | null = null;
 function ptraceFn() {
   if (!_ptraceFn) {
     _ptraceFn = libc().func('long ptrace(long, int, void *, void *)');
@@ -57,7 +57,7 @@ function ptraceFn() {
   return _ptraceFn;
 }
 
-let _waitpidFn: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let _waitpidFn: KoffiCallable | null = null;
 function waitpidFn() {
   if (!_waitpidFn) {
     _waitpidFn = libc().func('int waitpid(int, _Out_ int *, int)');
@@ -73,7 +73,7 @@ function ptrace(req: number, pid: number, addr: unknown, data: unknown): bigint 
 
 function waitStop(pid: number): void {
   const st = Buffer.alloc(4);
-  const ret = waitpidFn()(pid, koffi.address(st), 0) as number;
+  const ret = waitpidFn()(pid, requireKoffi().address(st), 0) as number;
   if (ret <= 0) {
     throw new Error(`LinuxPtrace: waitpid failed for pid ${pid} (ret=${ret})`);
   }
@@ -151,7 +151,7 @@ export function remoteSyscall(
     waitStop(pid);
 
     // Read original regs
-    ptrace(PTRACE_GETREGS, pid, null, koffi.address(saved));
+    ptrace(PTRACE_GETREGS, pid, null, requireKoffi().address(saved));
     regsSaved = true;
 
     // Clone for modification
@@ -170,7 +170,7 @@ export function remoteSyscall(
     const gadget = resolveVdsoSyscall(pid);
     regs.writeBigUInt64LE(gadget, OFF_RIP);
 
-    ptrace(PTRACE_SETREGS, pid, null, koffi.address(regs));
+    ptrace(PTRACE_SETREGS, pid, null, requireKoffi().address(regs));
     // PTRACE_SYSCALL stops the tracee TWICE: once at syscall-enter-stop
     // (before the kernel executes the syscall — orig_rax holds the number, rax
     // is still the pre-syscall value) and once at syscall-exit-stop (after
@@ -183,7 +183,7 @@ export function remoteSyscall(
     waitStop(pid); // syscall-exit-stop — rax is now the syscall result
 
     // Read result
-    ptrace(PTRACE_GETREGS, pid, null, koffi.address(regs));
+    ptrace(PTRACE_GETREGS, pid, null, requireKoffi().address(regs));
     const rax = regs.readBigUInt64LE(OFF_RAX);
 
     const isErr = rax >= 0xfffffffffffff000n; // -4095 .. -1 in unsigned
@@ -193,7 +193,7 @@ export function remoteSyscall(
     // path (attach, waitpid, vDSO gadget resolution) must not leave the tracee
     // attached with corrupted registers. SETREGS only when the originals were
     // actually read (a failed attach/stop leaves them as zeros).
-    if (regsSaved) ptrace(PTRACE_SETREGS, pid, null, koffi.address(saved));
+    if (regsSaved) ptrace(PTRACE_SETREGS, pid, null, requireKoffi().address(saved));
     ptrace(PTRACE_DETACH, pid, null, null);
   }
 }

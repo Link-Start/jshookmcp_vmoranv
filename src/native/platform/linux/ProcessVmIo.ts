@@ -14,7 +14,7 @@
  * layout, argument wiring, and the error path only -- no real process or
  * syscall is invoked.
  */
-import koffi from 'koffi';
+import { requireKoffi, type KoffiLibraryHandle, type KoffiCallable } from '../../koffi-loader';
 
 // ── iovec layout (x86-64: struct iovec { void *iov_base; size_t iov_len }) ──
 // 16 bytes: iov_base at offset 0 (LE), iov_len at offset 8 (LE).
@@ -23,14 +23,14 @@ const IOVEC_SIZE = 16;
 
 // ── caches ──────────────────────────────────────────────────────────────
 
-let _libc: ReturnType<typeof koffi.load> | null = null;
+let _libc: KoffiLibraryHandle | null = null;
 
 function libc() {
-  if (!_libc) _libc = koffi.load('libc.so.6');
+  if (!_libc) _libc = requireKoffi().load('libc.so.6');
   return _libc;
 }
 
-let readvFnCache: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let readvFnCache: KoffiCallable | null = null;
 function readvFn() {
   if (!readvFnCache) {
     readvFnCache = libc().func(
@@ -40,7 +40,7 @@ function readvFn() {
   return readvFnCache;
 }
 
-let writevFnCache: ReturnType<ReturnType<typeof koffi.load>['func']> | null = null;
+let writevFnCache: KoffiCallable | null = null;
 function writevFn() {
   if (!writevFnCache) {
     writevFnCache = libc().func(
@@ -70,10 +70,12 @@ function buildIovec(base: bigint, len: bigint): Buffer {
  */
 export function readRemote(pid: number, address: bigint, size: number): Buffer {
   const local = Buffer.alloc(size);
-  const localIov = buildIovec(koffi.address(local), BigInt(size));
+  const localIov = buildIovec(requireKoffi().address(local), BigInt(size));
   const remoteIov = buildIovec(address, BigInt(size));
 
-  const ret = Number(readvFn()(pid, koffi.address(localIov), 1n, koffi.address(remoteIov), 1n, 0n));
+  const ret = Number(
+    readvFn()(pid, requireKoffi().address(localIov), 1n, requireKoffi().address(remoteIov), 1n, 0n),
+  );
   if (ret === -1) {
     throw new Error(
       'process_vm_readv failed (errno unknown); commonly ESRCH=no such pid, EPERM=needs CAP_SYS_PTRACE, EFAULT=bad address',
@@ -92,11 +94,18 @@ export function readRemote(pid: number, address: bigint, size: number): Buffer {
  * Returns the number of bytes written. Throws on failure (return value -1).
  */
 export function writeRemote(pid: number, address: bigint, data: Buffer): number {
-  const localIov = buildIovec(koffi.address(data), BigInt(data.length));
+  const localIov = buildIovec(requireKoffi().address(data), BigInt(data.length));
   const remoteIov = buildIovec(address, BigInt(data.length));
 
   const ret = Number(
-    writevFn()(pid, koffi.address(localIov), 1n, koffi.address(remoteIov), 1n, 0n),
+    writevFn()(
+      pid,
+      requireKoffi().address(localIov),
+      1n,
+      requireKoffi().address(remoteIov),
+      1n,
+      0n,
+    ),
   );
   if (ret === -1) {
     throw new Error(
