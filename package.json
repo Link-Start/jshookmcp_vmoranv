@@ -128,7 +128,6 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^17.4.2",
     "jsdom": "^29.1.1",
-    "koffi": "^3.0.2",
     "mockttp": "4.4.2",
     "protobufjs": "8.7.1",
     "quickjs-emscripten": "^0.32.0",
@@ -160,9 +159,10 @@
   },
   "optionalDependencies": {
     "@devicefarmer/adbkit": "^3.3.8",
-    "better-sqlite3": "12.11.1",
+    "better-sqlite3": "13.0.1",
     "binaryen": "^130.0.0",
     "camoufox-js": "^0.11.1",
+    "koffi": "^3.0.2",
     "playwright-core": "^1.61.0",
     "webcrack": "2.16.0",
     "z3-solver": "^5.0.0"
@@ -182,6 +182,7 @@
       "brace-expansion": "5.0.8",
       "qs": ">=6.15.2",
       "minimatch": "10.2.4",
+      "better-sqlite3": "13.0.1",
       "esbuild": ">=0.28.1",
       "isolated-vm": "6.1.2",
       "flatted": ">=3.4.2",

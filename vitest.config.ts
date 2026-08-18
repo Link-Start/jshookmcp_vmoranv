@@ -251,6 +251,7 @@ export default defineConfig({
             'tests/contracts/**/*.test.ts',
             'tests/cli/**/*.test.ts',
             'tests/packages/**/*.test.ts',
+            'tests/scripts/**/*.test.ts',
             'tests/constants*.test.ts',
           ],
           exclude: ['tests/e2e/**'],
