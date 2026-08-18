@@ -155,4 +155,68 @@ describe('artifacts utils', () => {
     expect(mockedMkdir).toHaveBeenCalledTimes(1);
     expect(mockedRealpath).toHaveBeenCalledTimes(2);
   });
+
+  // NOTE: the validated-dir cache is process-level and shared across the
+  // tests in this file, so each test below uses a distinct directory
+  // namespace to stay independent of whatever the earlier tests cached.
+  it('bounds the validated-dir cache: distinct client dirs evict the oldest past 64', async () => {
+    const mockedMkdir = vi.mocked(mkdir);
+    mockedMkdir.mockClear();
+
+    // Fill the cache to its 64-entry cap with distinct client-provided dirs.
+    for (let i = 0; i < 64; i++) {
+      await resolveArtifactPath({
+        category: 'tmp',
+        toolName: 'x',
+        ext: 'txt',
+        customDir: `evict-${i}`,
+      });
+    }
+    expect(mockedMkdir).toHaveBeenCalledTimes(64);
+
+    // One more distinct dir pushes the cache past the cap: the least-recently
+    // used entry (evict-0) is evicted, so the Map stays bounded at 64 (a4-05).
+    await resolveArtifactPath({
+      category: 'tmp',
+      toolName: 'x',
+      ext: 'txt',
+      customDir: 'evict-64',
+    });
+    expect(mockedMkdir).toHaveBeenCalledTimes(65);
+
+    // evict-0 was evicted, so resolving it again re-validates (a fresh mkdir)
+    // instead of accumulating yet another permanent entry.
+    await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt', customDir: 'evict-0' });
+    expect(mockedMkdir).toHaveBeenCalledTimes(66);
+  });
+
+  it('refreshes LRU order on cache hit so a hot dir survives eviction', async () => {
+    const mockedMkdir = vi.mocked(mkdir);
+    mockedMkdir.mockClear();
+
+    for (let i = 0; i < 64; i++) {
+      await resolveArtifactPath({
+        category: 'tmp',
+        toolName: 'x',
+        ext: 'txt',
+        customDir: `lru-${i}`,
+      });
+    }
+    expect(mockedMkdir).toHaveBeenCalledTimes(64);
+
+    // Touch lru-0: a cache hit must refresh it to most-recently-used, with no
+    // re-validation.
+    await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt', customDir: 'lru-0' });
+    expect(mockedMkdir).toHaveBeenCalledTimes(64);
+
+    // Insert lru-64 → evicts the true LRU (lru-1, not the just-touched lru-0).
+    await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt', customDir: 'lru-64' });
+    expect(mockedMkdir).toHaveBeenCalledTimes(65);
+
+    // lru-0 survived (still cached); lru-1 was evicted and is re-validated.
+    await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt', customDir: 'lru-0' });
+    expect(mockedMkdir).toHaveBeenCalledTimes(65);
+    await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt', customDir: 'lru-1' });
+    expect(mockedMkdir).toHaveBeenCalledTimes(66);
+  });
 });

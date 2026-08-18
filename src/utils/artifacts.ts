@@ -38,10 +38,34 @@ export function generateShortId(): string {
 // category default) is fixed per caller, so after the first validation —
 // realpath containment check + mkdir — later resolutions reuse the cached
 // result and skip two realpath syscalls and one mkdir per request (a4-04).
-// Rejected directories are evicted so a later fix-up can be retried; a
-// symlink/junction planted inside the root AFTER first validation is not
-// re-checked for the process lifetime (accepted trade-off of the cache).
+// Rejected directories are evicted so a later fix-up can be retried. The
+// cache is bounded as an LRU (a4-05): customDir is client-controlled, so an
+// unbounded map would let each distinct directory name accumulate a permanent
+// entry plus an on-disk mkdir — memory and directory-metadata growth with no
+// eviction. Entries evicted past the cap are simply re-validated on the next
+// request, which also re-runs the realpath containment check, so the
+// "symlink/junction planted inside the root after first validation" window is
+// bounded by eviction rather than by process lifetime.
+const MAX_VALIDATED_DIRS = 64;
 const validatedDirs = new Map<string, Promise<string>>();
+
+/**
+ * Move `key` to the most-recently-used position (Map iteration order is
+ * insertion order, so re-inserting refreshes LRU order) and evict the
+ * least-recently-used entries once the cap is exceeded.
+ */
+function cacheValidatedDir(key: string, value: Promise<string>): Promise<string> {
+  validatedDirs.delete(key);
+  validatedDirs.set(key, value);
+  while (validatedDirs.size > MAX_VALIDATED_DIRS) {
+    const oldestKey = validatedDirs.keys().next().value;
+    if (oldestKey === undefined) {
+      break;
+    }
+    validatedDirs.delete(oldestKey);
+  }
+  return value;
+}
 
 /**
  * Validate `dir` once per process (realpath containment + mkdir) and cache
@@ -52,14 +76,13 @@ async function prepareArtifactDir(dir: string, normalizedRoot: string): Promise<
   const normalizedDir = normalize(dir);
   const cached = validatedDirs.get(normalizedDir);
   if (cached) {
-    return cached;
+    return cacheValidatedDir(normalizedDir, cached);
   }
   const pending = validateArtifactDir(dir, normalizedRoot, normalizedDir).catch((error) => {
     validatedDirs.delete(normalizedDir);
     throw error;
   });
-  validatedDirs.set(normalizedDir, pending);
-  return pending;
+  return cacheValidatedDir(normalizedDir, pending);
 }
 
 async function validateArtifactDir(
