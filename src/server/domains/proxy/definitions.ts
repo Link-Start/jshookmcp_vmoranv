@@ -8,7 +8,12 @@ export const PROXY_TOOLS: Tool[] = [
       .number('port', 'Listen port.', { default: 8080 })
       .boolean('useHttps', 'Enable HTTPS interception.', {
         default: true,
-      }),
+      })
+      .boolean(
+        'capture',
+        'Capture request/response metadata and body previews. Set false to disable capture entirely.',
+        { default: true },
+      ),
   ),
   tool('proxy_stop', (t) => t.desc('Stop the proxy and release all active rules.').destructive()),
   tool('proxy_status', (t) =>
