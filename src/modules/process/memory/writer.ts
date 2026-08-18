@@ -4,7 +4,7 @@
 
 import { logger } from '@utils/logger';
 import { nativeMemoryManager } from '@native/NativeMemoryManager';
-import { isKoffiAvailable } from '@native/Win32API';
+import { isKoffiBindingUsable } from '@native/Win32API';
 import { MEMORY_MAX_WRITE_BYTES, MEMORY_WRITE_TIMEOUT_MS } from '@src/constants';
 import {
   execAsync,
@@ -297,7 +297,7 @@ export async function writeMemory(
     }
 
     // Try native FFI first on Windows (10-100x faster)
-    if (platform === 'win32' && isKoffiAvailable()) {
+    if (platform === 'win32' && isKoffiBindingUsable()) {
       try {
         const result = await nativeMemoryManager.writeMemory(pid, address, data, encoding);
         if (result.success) {

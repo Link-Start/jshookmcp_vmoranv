@@ -20,7 +20,7 @@ const state = vi.hoisted(() => ({
   GetModuleBaseName: vi.fn(),
   GetModuleInformation: vi.fn(),
   isWindows: vi.fn(() => true),
-  isKoffiAvailable: vi.fn(() => true),
+  isKoffiBindingUsable: vi.fn(() => true),
   PAGE: {
     NOACCESS: 0x01,
     READONLY: 0x02,
@@ -84,7 +84,7 @@ describe('Win32MemoryProvider', () => {
     });
 
     it('returns unavailable when koffi missing', async () => {
-      state.isKoffiAvailable.mockReturnValue(false);
+      state.isKoffiBindingUsable.mockReturnValue(false);
       const result = await provider.checkAvailability();
       expect(result.available).toBe(false);
       expect(result.reason).toContain('koffi');

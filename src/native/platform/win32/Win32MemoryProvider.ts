@@ -25,7 +25,7 @@ import {
   GetModuleBaseName,
   GetModuleInformation,
   isWindows,
-  isKoffiAvailable,
+  isKoffiBindingUsable,
   PAGE,
   MEM,
   MEM_TYPE,
@@ -102,7 +102,7 @@ export class Win32MemoryProvider implements PlatformMemoryAPI {
     if (!isWindows()) {
       return { available: false, reason: 'Not running on Windows', platform: 'win32' };
     }
-    if (!isKoffiAvailable()) {
+    if (!isKoffiBindingUsable()) {
       return { available: false, reason: 'koffi FFI library not available', platform: 'win32' };
     }
     return { available: true, platform: 'win32' };

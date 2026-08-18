@@ -5,7 +5,7 @@
 import { promises as fs } from 'node:fs';
 import { logger } from '@utils/logger';
 import { nativeMemoryManager } from '@native/NativeMemoryManager';
-import { isKoffiAvailable } from '@native/Win32API';
+import { isKoffiBindingUsable } from '@native/Win32API';
 import {
   MEMORY_MAX_READ_BYTES,
   MEMORY_READ_TIMEOUT_MS,
@@ -291,7 +291,7 @@ export async function readMemory(
     }
 
     // Try native FFI first on Windows (10-100x faster)
-    if (platform === 'win32' && isKoffiAvailable()) {
+    if (platform === 'win32' && isKoffiBindingUsable()) {
       try {
         const result = await nativeMemoryManager.readMemory(pid, address, size);
         if (result.success) {

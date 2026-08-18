@@ -110,9 +110,16 @@ let psapi: LibraryHandle | null = null;
 let koffiAvailable: boolean | null = null;
 
 /**
- * Check if koffi is available
+ * Check whether koffi's native binding is actually usable on this platform.
+ *
+ * Stronger than `koffi-loader`'s `isKoffiAvailable()` (which only reports
+ * "the koffi module resolved"): this also loads `kernel32.dll` through the
+ * resolved binding, so a koffi install whose native addon is present but
+ * broken (load throws) is reported as unusable. Callers that gate real FFI
+ * work (memory read/write, process enumeration) should use this, not the
+ * loader's resolve-only check.
  */
-export function isKoffiAvailable(): boolean {
+export function isKoffiBindingUsable(): boolean {
   if (koffiAvailable !== null) {
     return koffiAvailable;
   }

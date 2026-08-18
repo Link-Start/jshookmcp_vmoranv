@@ -52,7 +52,10 @@ async function tryLoadKeystone(): Promise<KeystoneEngine | null> {
 
   try {
     // koffi is a CJS native addon; dynamic import() returns
-    // { default: module.exports } for CJS modules in ESM context.
+    // { default: module.exports } for CJS modules in ESM context. Intentional
+    // exception to koffi-loader's single-load-point rule: this probes a
+    // *specific* keystone.dll binding on demand (try/catch-guarded) and hits
+    // the ESM module cache, so the binding is not re-executed.
     const koffiModule = await import('koffi');
     const koffi = ((koffiModule as { default?: unknown }).default ?? koffiModule) as {
       load: (lib: string) => Record<string, unknown>;

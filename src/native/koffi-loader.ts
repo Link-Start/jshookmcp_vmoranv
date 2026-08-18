@@ -16,6 +16,16 @@
  *                        unavailable (for call sites that cannot degrade).
  *   - `isKoffiAvailable()` → `true` only when koffi was resolved.
  *
+ * Three probe sites intentionally bypass this loader with their own
+ * `import('koffi')` (each wrapped in try/catch, and each hits the ESM module
+ * cache so the binding is not re-executed):
+ *   - `native/NativeMemoryManager.availability.ts` (macOS libSystem probe)
+ *   - `server/domains/memory/handlers/assemble.ts` (keystone.dll probe)
+ *   - `server/domains/memory/handlers/byovd.ts` (driver-device probe)
+ * They probe a *specific* native library on demand and degrade to a fallback,
+ * rather than requiring the global loader's cached handle, so the single
+ * load-point rule is documented here as "everything else".
+ *
  * Dynamic `import('koffi')` (rather than `createRequire`) is deliberate: it
  * keeps `vi.mock('koffi', ...)` working in unit tests, which `createRequire` /
  * bare `require` bypass.
@@ -54,6 +64,11 @@ export function requireKoffi(): Koffi {
 
 /**
  * True only when the koffi module was successfully resolved.
+ *
+ * This is the *resolve-only* check. It does NOT verify that the resolved
+ * binding can actually load a native library — for that stronger guarantee
+ * (used to gate real FFI work) call `isKoffiBindingUsable()` from
+ * `@native/Win32API`.
  */
 export function isKoffiAvailable(): boolean {
   return koffi !== null;

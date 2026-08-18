@@ -1,4 +1,4 @@
-import { isKoffiAvailable, isWindows } from '@native/Win32API';
+import { isKoffiBindingUsable, isWindows } from '@native/Win32API';
 import { NATIVE_ADMIN_CHECK_TIMEOUT_MS, MEMORY_PROBE_CMD_TIMEOUT_MS } from '@src/constants';
 
 export async function checkNativeMemoryAvailability(
@@ -27,7 +27,7 @@ export async function checkNativeMemoryAvailability(
     };
   }
 
-  if (!isKoffiAvailable()) {
+  if (!isKoffiBindingUsable()) {
     return {
       available: false,
       reason: 'koffi library not available. Install with: pnpm add koffi',
@@ -67,7 +67,10 @@ async function checkDarwinAvailability(
 ): Promise<{ available: boolean; reason?: string }> {
   // 1. Check koffi + libSystem.B.dylib availability
   try {
-    // Dynamic import to avoid loading koffi bindings on Windows
+    // Dynamic import to avoid loading koffi bindings on Windows. Intentional
+    // exception to koffi-loader's single-load-point rule: this probes a
+    // *specific* libSystem binding on demand (try/catch-guarded) and hits the
+    // ESM module cache, so the binding is not re-executed.
     const koffiMod = await import('koffi');
     const testLib = koffiMod.default.load('/usr/lib/libSystem.B.dylib');
     testLib.unload();

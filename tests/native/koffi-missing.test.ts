@@ -5,7 +5,7 @@
  * Before the fix, 22 native files statically imported `koffi` at module top
  * level. When koffi's native binding is absent (prebuild download failure,
  * --no-optional install, or compile failure) the static import throws
- * MODULE_NOT_FOUND at module-load time, before `isKoffiAvailable()`'s
+ * MODULE_NOT_FOUND at module-load time, before `isKoffiBindingUsable()`'s
  * try-catch can run — so memory/process domain activation crashed outright.
  *
  * This test simulates that absence by making `import('koffi')` reject, then
@@ -26,7 +26,7 @@ vi.mock('koffi', () => {
 const originalPlatform = process.platform;
 Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
 
-import { getKernel32, isKoffiAvailable, isWindows } from '@src/native/Win32API';
+import { getKernel32, isKoffiBindingUsable, isWindows } from '@src/native/Win32API';
 import { enumerateProcessHandles } from '@src/native/HandleEnumerator';
 import { detectApcInjection } from '@src/native/APCDetector';
 import { requireKoffi } from '@src/native/koffi-loader';
@@ -41,7 +41,7 @@ describe('koffi-missing graceful degradation', () => {
 
   it('imports Win32API without crashing and reports koffi unavailable', () => {
     expect(isWindows()).toBe(true);
-    expect(isKoffiAvailable()).toBe(false);
+    expect(isKoffiBindingUsable()).toBe(false);
   });
 
   it('requireKoffi() throws a descriptive error instead of crashing', () => {

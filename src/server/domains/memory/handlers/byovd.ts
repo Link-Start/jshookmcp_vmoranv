@@ -329,7 +329,10 @@ export class ByovdHandlers {
    */
   private async checkDriverLoaded(devicePath: string): Promise<boolean> {
     try {
-      // Dynamic FFI import — only try on Windows
+      // Dynamic FFI import — only try on Windows. Intentional exception to
+      // koffi-loader's single-load-point rule: this probes the driver device on
+      // demand (try/catch-guarded) and hits the ESM module cache, so the
+      // binding is not re-executed.
       const koffi = await import('koffi');
       const kernel32 = koffi.default.load('kernel32.dll');
       const createFileFn = kernel32.func(
