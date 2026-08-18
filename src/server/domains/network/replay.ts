@@ -50,6 +50,17 @@ import type { SessionProfile } from '@internal-types/SessionProfile';
 /** Idle duration after which a cached HTTP/2 session is closed and evicted. */
 const HTTP2_SESSION_IDLE_TTL_MS = 30_000;
 
+/** Default ceiling on concurrently cached HTTP/2 sessions (env-overridable). */
+const DEFAULT_MAX_CACHED_SESSIONS = 32;
+
+/** Resolve the concurrent-session ceiling, honoring an env override when valid. */
+function maxCachedSessions(): number {
+  const raw = process.env.JSHOOK_HTTP2_MAX_SESSIONS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_MAX_CACHED_SESSIONS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_CACHED_SESSIONS;
+}
+
 interface Http2SessionCacheEntry {
   /** Composite cache key (origin + DNS pin) this entry was stored under. */
   key: string;
@@ -60,12 +71,9 @@ interface Http2SessionCacheEntry {
 
 /**
  * Per-(origin, DNS pin) HTTP/2 session cache. Reusing `session.request()` across
- * replays avoids a full TCP+TLS+ALPN handshake per request; sessions are only
- * closed on idle expiry (unref'd timer) or when the session itself errors/closes.
- *
- * Known boundary: there is no cap on the number of concurrently cached sessions
- * — the map grows with each distinct (origin, DNS pin) pair and is reclaimed
- * only by the idle TTL, not by an entry-count ceiling.
+ * replays avoids a full TCP+TLS+ALPN handshake per request; sessions are closed
+ * on idle expiry (unref'd timer), when the session itself errors/closes, or when
+ * the concurrent-session ceiling is exceeded (least-recently-used eviction).
  */
 const http2SessionCache = new Map<string, Http2SessionCacheEntry>();
 
@@ -89,6 +97,23 @@ function evictHttp2Session(entry: Http2SessionCacheEntry): void {
     clearTimeout(entry.idleTimer);
     entry.idleTimer = null;
   }
+}
+
+/**
+ * Enforce the concurrent-session ceiling by closing the least-recently-used
+ * cached session (never `excludeKey`, the entry just created). Called after a
+ * new session is inserted so the map never grows past the cap.
+ */
+function evictLeastRecentlyUsedHttp2Session(excludeKey: string): void {
+  if (http2SessionCache.size <= maxCachedSessions()) return;
+  let victim: Http2SessionCacheEntry | null = null;
+  for (const [key, entry] of http2SessionCache) {
+    if (key === excludeKey) continue;
+    if (victim === null || entry.lastUsed < victim.lastUsed) victim = entry;
+  }
+  if (victim === null) return;
+  evictHttp2Session(victim);
+  victim.session.close();
 }
 
 function getOrCreateHttp2Session(
@@ -117,6 +142,10 @@ function getOrCreateHttp2Session(
   // A GOAWAY means the server is draining this connection — new requests must
   // open a fresh session. In-flight streams still complete on their own.
   session.once('goaway', onBroken);
+
+  // Bound the cache: evict the LRU entry (never this one) if we just crossed
+  // the concurrent-session ceiling.
+  evictLeastRecentlyUsedHttp2Session(key);
 
   return entry;
 }

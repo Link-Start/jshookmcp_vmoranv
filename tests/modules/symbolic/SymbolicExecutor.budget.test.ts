@@ -32,4 +32,31 @@ describe('SymbolicExecutor constraint-solving budget governance', () => {
     });
     expect(result.warnings).toContain('Constraint solving skipped:budget');
   });
+
+  it('passes the remaining budget (not the full budget) to the legacy fallback', async () => {
+    const executor = new SymbolicExecutor() as any;
+    const legacySpy = vi.spyOn(executor, 'solveConstraintsLegacy').mockImplementation(() => {});
+
+    // Simulate the Z3 attempt consuming 500ms of the 3000ms budget: solveStartedAt
+    // is read at t=1000, and the (spied) Z3 phase advances the clock to t=1500
+    // before reporting failure, so the legacy solver must get the 2500ms remaining.
+    let currentTime = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => currentTime);
+    const z3Spy = vi.spyOn(executor, 'solveConstraintsZ3').mockImplementation(async () => {
+      currentTime = 1_500;
+      return false;
+    });
+
+    try {
+      const paths = [{ id: 'p1', constraints: [], isFeasible: false, states: [], coverage: 0 }];
+      await executor.solveConstraints(paths, [], 3_000);
+
+      expect(legacySpy).toHaveBeenCalledTimes(1);
+      expect(legacySpy).toHaveBeenCalledWith(paths, [], 2_500);
+    } finally {
+      nowSpy.mockRestore();
+      z3Spy.mockRestore();
+      legacySpy.mockRestore();
+    }
+  });
 });

@@ -163,6 +163,39 @@ describe('replayRequest - HTTP/2 session cache', () => {
     expect(connectCount.value).toBe(2);
   });
 
+  it('evicts the least-recently-used session once the cache exceeds its cap', async () => {
+    const prev = process.env.JSHOOK_HTTP2_MAX_SESSIONS;
+    process.env.JSHOOK_HTTP2_MAX_SESSIONS = '2';
+    try {
+      lookupMock.mockResolvedValue({ address: TEST_PUBLIC_IP, family: 4 });
+
+      // Origin A (example.com) and origin B (example.org) fill the cap.
+      await replayRequest(h2Base(), h2Args());
+      await replayRequest(
+        { url: 'https://example.org/api', method: 'GET', headers: {}, protocol: 'h2' },
+        { requestId: 'req-cap-b', dryRun: false, authorization: { allowedHosts: ['example.org'] } },
+      );
+      expect(connectCount.value).toBe(2);
+      expect(closeCount.value).toBe(0);
+
+      // Origin C exceeds the cap → the LRU entry (A) is evicted and closed.
+      await replayRequest(
+        { url: 'https://example.net/api', method: 'GET', headers: {}, protocol: 'h2' },
+        { requestId: 'req-cap-c', dryRun: false, authorization: { allowedHosts: ['example.net'] } },
+      );
+      expect(connectCount.value).toBe(3);
+      expect(closeCount.value).toBe(1);
+
+      // Revisiting A must reconnect: its session was evicted, not kept.
+      await replayRequest(h2Base(), h2Args());
+      expect(connectCount.value).toBe(4);
+    } finally {
+      if (prev === undefined) delete process.env.JSHOOK_HTTP2_MAX_SESSIONS;
+      else process.env.JSHOOK_HTTP2_MAX_SESSIONS = prev;
+      clearHttp2SessionCache();
+    }
+  });
+
   it('times out by cancelling the hung stream and evicting the session without closing it', async () => {
     lookupMock.mockResolvedValue({ address: TEST_PUBLIC_IP, family: 4 });
     vi.useFakeTimers();

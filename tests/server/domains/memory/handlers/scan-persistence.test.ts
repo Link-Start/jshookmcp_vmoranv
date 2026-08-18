@@ -268,4 +268,39 @@ describe('Disk Scan Persistence', () => {
       }
     });
   });
+
+  describe('cleanupOrphanDiskScanFiles concurrency', () => {
+    it('bounds concurrent stat/unlink to a fixed batch size', async () => {
+      const names = Array.from({ length: 100 }, (_, i) => `jshook-scan-orphan-${i}.bin`);
+      const readdirSpy = vi
+        .spyOn(fs.promises, 'readdir')
+        .mockResolvedValue(names as unknown as Awaited<ReturnType<typeof fs.promises.readdir>>);
+
+      let inFlight = 0;
+      let maxInFlight = 0;
+      const statSpy = vi.spyOn(fs.promises, 'stat').mockImplementation(async () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await Promise.resolve();
+        inFlight -= 1;
+        return { isFile: () => true, mtimeMs: 0 } as unknown as fs.Stats;
+      });
+      const unlinkSpy = vi.spyOn(fs.promises, 'unlink').mockResolvedValue(undefined);
+
+      try {
+        await cleanupOrphanDiskScanFiles();
+
+        expect(statSpy).toHaveBeenCalledTimes(100);
+        expect(unlinkSpy).toHaveBeenCalledTimes(100);
+        // The batching loop keeps at most 8 stat/unlink pairs in flight at a
+        // time; an unbounded Promise.all over the whole directory would reach
+        // 100 concurrent stats.
+        expect(maxInFlight).toBeLessThanOrEqual(8);
+      } finally {
+        readdirSpy.mockRestore();
+        statSpy.mockRestore();
+        unlinkSpy.mockRestore();
+      }
+    });
+  });
 });

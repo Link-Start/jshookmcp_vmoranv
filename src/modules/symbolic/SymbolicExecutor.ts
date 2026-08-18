@@ -574,10 +574,18 @@ export class SymbolicExecutor {
   ): Promise<void> {
     logger.info(' ...');
 
+    const solveStartedAt = Date.now();
     const z3Used = await this.solveConstraintsZ3(paths, warnings, budgetMs);
     if (!z3Used) {
-      // Z3 unavailable — fall back to simple regex solver
-      this.solveConstraintsLegacy(paths, warnings, budgetMs);
+      // Z3 unavailable — fall back to the simple regex solver with only the
+      // budget left over after the Z3 attempt (init/mutex time is already
+      // counted against the executor budget; reusing the full budget here
+      // would let the solve phase run up to ~2x its allowance).
+      const remainingBudget =
+        typeof budgetMs === 'number' && budgetMs > 0
+          ? Math.max(0, budgetMs - (Date.now() - solveStartedAt))
+          : budgetMs;
+      this.solveConstraintsLegacy(paths, warnings, remainingBudget);
     }
 
     logger.info(
@@ -718,7 +726,9 @@ export class SymbolicExecutor {
     warnings: string[],
     budgetMs?: number,
   ): void {
-    const hasBudget = typeof budgetMs === 'number' && budgetMs > 0;
+    // A defined numeric budget (including 0, meaning already exhausted) bounds
+    // the solver; undefined means unbounded.
+    const hasBudget = typeof budgetMs === 'number' && budgetMs >= 0;
     const deadline = hasBudget ? Date.now() + budgetMs : undefined;
 
     for (const path of paths) {

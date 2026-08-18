@@ -41,6 +41,9 @@ export const DISK_RECORD_SIZE = 16;
 /** Estimated max file size: 100M × 16 = ~1.6 GB. */
 export const MAX_DISK_SCAN_FILE_SIZE = MAX_DISK_SCAN_ADDRESSES * DISK_RECORD_SIZE;
 
+/** Max concurrent stat/unlink pairs during orphan cleanup. */
+const ORPHAN_CLEANUP_CONCURRENCY = 8;
+
 export interface DiskScanSession {
   sessionId: string;
   filePath: string;
@@ -115,22 +118,28 @@ export async function cleanupOrphanDiskScanFiles(): Promise<void> {
     return;
   }
   const now = Date.now();
-  await Promise.all(
-    entries.map(async (name) => {
-      if (!DISK_SCAN_FILE_PATTERN.test(name)) return;
-      const filePath = path.join(os.tmpdir(), name);
-      try {
-        const stat = await fs.promises.stat(filePath);
-        if (!stat.isFile()) return;
-        // Only reclaim files stale beyond the session TTL.
-        if (now - stat.mtimeMs >= DISK_SCAN_SESSION_TTL_MS) {
-          await fs.promises.unlink(filePath);
-        }
-      } catch {
-        // Best-effort: a racing writer or a vanished file is not an error.
+
+  const reclaim = async (name: string): Promise<void> => {
+    if (!DISK_SCAN_FILE_PATTERN.test(name)) return;
+    const filePath = path.join(os.tmpdir(), name);
+    try {
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile()) return;
+      // Only reclaim files stale beyond the session TTL.
+      if (now - stat.mtimeMs >= DISK_SCAN_SESSION_TTL_MS) {
+        await fs.promises.unlink(filePath);
       }
-    }),
-  );
+    } catch {
+      // Best-effort: a racing writer or a vanished file is not an error.
+    }
+  };
+
+  // Bound I/O concurrency: process the directory in fixed batches so a tmp dir
+  // with thousands of orphans doesn't fan out that many stat/unlink calls at
+  // once (which could exhaust file descriptors).
+  for (let i = 0; i < entries.length; i += ORPHAN_CLEANUP_CONCURRENCY) {
+    await Promise.all(entries.slice(i, i + ORPHAN_CLEANUP_CONCURRENCY).map(reclaim));
+  }
 }
 
 /**
