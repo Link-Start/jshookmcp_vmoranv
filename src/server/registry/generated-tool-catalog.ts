@@ -11551,7 +11551,8 @@ export const GENERATED_TOOL_CATALOG = [
   {
     tool: {
       name: 'instrumentation_session',
-      description: 'Start, stop, or query status of an instrumentation recording session.',
+      description:
+        'Start, stop, or query status of an instrumentation recording session. Destroying a session archives it read-only (the last 8 destroyed sessions are retained, oldest evicted) so export/diff/merge/status can still inspect it.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -23272,7 +23273,8 @@ export const GENERATED_TOOL_CATALOG = [
   {
     tool: {
       name: 'state_board',
-      description: 'CRUD operations on the cross-tool shared state board.',
+      description:
+        'CRUD operations on the cross-tool shared state board. TTL contract for set: omitting ttlSeconds defaults to 24h expiry; ttlSeconds: 0 means explicit permanent (no expiry, bounded only by the LRU cap); any other value is honored verbatim. NOTE: before this change, omitting ttlSeconds meant permanent — this is a behavior change.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -23295,7 +23297,7 @@ export const GENERATED_TOOL_CATALOG = [
           },
           ttlSeconds: {
             type: 'number',
-            description: 'TTL in seconds',
+            description: 'TTL in seconds (0 = permanent, omit = 24h default)',
           },
           includeValues: {
             type: 'boolean',
