@@ -98,8 +98,8 @@ export class InstrumentationHandlers {
     return handleSafe(async () => {
       const sessionId = argString(args, 'sessionId', '');
       if (!sessionId) throw new Error('sessionId is required');
-      this.sessionManager.destroySession(sessionId);
-      return { sessionId, message: 'Session destroyed' };
+      const result = this.sessionManager.destroySession(sessionId);
+      return { sessionId, message: 'Session destroyed', ...result };
     });
   }
 

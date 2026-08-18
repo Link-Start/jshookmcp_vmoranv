@@ -14,7 +14,11 @@ const queryTypes = [
 export const instrumentationTools: Tool[] = [
   tool('instrumentation_session', (t) =>
     t
-      .desc('Start, stop, or query status of an instrumentation recording session.')
+      .desc(
+        'Start, stop, or query status of an instrumentation recording session. ' +
+          'Destroying a session archives it read-only (the last 8 destroyed sessions are ' +
+          'retained, oldest evicted) so export/diff/merge/status can still inspect it.',
+      )
       .enum('action', ['create', 'list', 'destroy', 'status'], 'Session operation')
       .string('name', 'Optional session name for create')
       .string('sessionId', 'Session ID (required for destroy/status)')
