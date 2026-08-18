@@ -24,6 +24,16 @@ import { HTTP_CAPACITY_RETRY_AFTER_MS } from '@src/constants';
 // amplification under load instead of fanning out to the full session table.
 const DEFAULT_BROADCAST_IDLE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * Per-session in-flight request cap. `inFlight` previously only counted — never
+ * bounded — so a single session could pile up unbounded concurrent requests and
+ * exhaust the process (a1-06). Overridable via MCP_HTTP_MAX_INFLIGHT.
+ */
+const DEFAULT_MAX_INFLIGHT = (() => {
+  const envVal = parseInt(process.env.MCP_HTTP_MAX_INFLIGHT ?? '', 10);
+  return Number.isFinite(envVal) && envVal > 0 ? envVal : 64;
+})();
+
 interface SessionRecord {
   sessionId: string;
   transport: StreamableHTTPServerTransport;
@@ -41,6 +51,7 @@ export interface MultiplexedStreamableHttpTransportOptions {
   onSessionClosed?: (sessionId: string) => void;
   onSessionOpened?: (sessionId: string) => void | Promise<void>;
   maxSessions?: number;
+  maxInFlight?: number;
   capacityRetryAfterMs?: number;
   sessionIdleTtlMs?: number;
   broadcastIdleTtlMs?: number;
@@ -171,6 +182,32 @@ export class MultiplexedStreamableHttpTransport implements Transport {
               code: -32000,
               message: `Expired MCP session: ${sessionId}`,
               data: { code: 'MCP_SESSION_EXPIRED' },
+            },
+            id: null,
+          }),
+        );
+        return;
+      }
+      const maxInFlight = this.options.maxInFlight ?? DEFAULT_MAX_INFLIGHT;
+      if (existing.inFlight >= maxInFlight) {
+        const retryAfterMs = this.options.capacityRetryAfterMs ?? HTTP_CAPACITY_RETRY_AFTER_MS;
+        res.writeHead(503, {
+          'Content-Type': 'application/json',
+          'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1000))),
+        });
+        res.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            error: {
+              code: -32001,
+              message: 'MCP session in-flight capacity reached',
+              data: {
+                code: 'MCP_SESSION_INFLIGHT_CAPACITY',
+                retryAfterMs,
+                inFlight: existing.inFlight,
+                inFlightLimit: maxInFlight,
+                sessionId,
+              },
             },
             id: null,
           }),

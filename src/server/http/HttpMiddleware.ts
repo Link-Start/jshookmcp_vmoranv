@@ -164,10 +164,34 @@ const RATE_LIMIT_MAX_REQUESTS = (() => {
 })();
 
 interface RateLimitEntry {
-  timestamps: number[];
+  /** Ring buffer of bucket slot ids (parallel to `counts`). Slot 0 = empty. */
+  slots: number[];
+  /** Ring buffer of per-slot request counts (parallel to `slots`). */
+  counts: number[];
+  /** Last activity timestamp, for idle-eviction during cleanup. */
+  lastSeen: number;
 }
 
+/**
+ * Number of fixed time buckets per IP. A bounded ring means the per-request
+ * cost is O(1) regardless of how many requests one IP makes in a window —
+ * the previous `timestamps` array grew linearly and each request re-filtered
+ * it (a1-09).
+ */
+export const RATE_LIMIT_BUCKET_COUNT = 60;
+
+/** Duration of one bucket, derived so the ring always spans one full window. */
+const RATE_LIMIT_BUCKET_MS = Math.max(1, Math.ceil(RATE_LIMIT_WINDOW_MS / RATE_LIMIT_BUCKET_COUNT));
+
 const rateLimitStore = new Map<string, RateLimitEntry>();
+
+function createRateLimitEntry(): RateLimitEntry {
+  return {
+    slots: Array.from<number>({ length: RATE_LIMIT_BUCKET_COUNT }).fill(0),
+    counts: Array.from<number>({ length: RATE_LIMIT_BUCKET_COUNT }).fill(0),
+    lastSeen: 0,
+  };
+}
 
 /** Maximum number of tracked IPs to prevent unbounded memory growth under DDoS. */
 const RATE_LIMIT_MAX_IPS = HTTP_RATE_LIMIT_MAX_IPS;
@@ -181,11 +205,19 @@ function rateLimitCleanup(now: number): void {
   lastCleanup = now;
   const cutoff = now - RATE_LIMIT_WINDOW_MS;
   for (const [ip, entry] of rateLimitStore) {
-    entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
-    if (entry.timestamps.length === 0) {
+    if (entry.lastSeen <= cutoff) {
       rateLimitStore.delete(ip);
     }
   }
+}
+
+/**
+ * Test-only introspection: number of fixed time buckets tracked for an IP.
+ * Always `RATE_LIMIT_BUCKET_COUNT`, proving per-IP storage cannot grow with
+ * the request rate. Not part of the runtime API.
+ */
+export function rateLimitTrackedBuckets(ip: string): number {
+  return rateLimitStore.get(ip)?.counts.length ?? 0;
 }
 
 /** Evict oldest entries when the map exceeds the IP cap. */
@@ -248,15 +280,32 @@ export function checkRateLimit(
   const ip = getClientIP(req);
   let entry = rateLimitStore.get(ip);
   if (!entry) {
-    entry = { timestamps: [] };
+    entry = createRateLimitEntry();
     rateLimitStore.set(ip, entry);
   }
+  entry.lastSeen = now;
 
-  // Evict timestamps outside the window
-  const cutoff = now - RATE_LIMIT_WINDOW_MS;
-  entry.timestamps = entry.timestamps.filter((t) => t > cutoff);
+  // Fixed-bucket ring: each request only touches its own slot and sums a
+  // bounded number of buckets, so per-request work stays O(1) regardless of
+  // how many requests a single IP has made within the window (a1-09).
+  const currentSlot = Math.floor(now / RATE_LIMIT_BUCKET_MS);
+  const bucketIndex = currentSlot % RATE_LIMIT_BUCKET_COUNT;
 
-  if (entry.timestamps.length >= maxRequests) {
+  // The ring slot now belongs to a new bucket — reset the stale count it held.
+  if (entry.slots[bucketIndex] !== currentSlot) {
+    entry.slots[bucketIndex] = currentSlot;
+    entry.counts[bucketIndex] = 0;
+  }
+
+  const oldestSlot = currentSlot - (RATE_LIMIT_BUCKET_COUNT - 1);
+  let count = 0;
+  for (let i = 0; i < RATE_LIMIT_BUCKET_COUNT; i++) {
+    if (entry.slots[i]! >= oldestSlot) {
+      count += entry.counts[i]!;
+    }
+  }
+
+  if (count >= maxRequests) {
     const retryAfterSec = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
     res.writeHead(429, {
       'Content-Type': 'text/plain',
@@ -266,6 +315,6 @@ export function checkRateLimit(
     return false;
   }
 
-  entry.timestamps.push(now);
+  entry.counts[bucketIndex] = (entry.counts[bucketIndex] ?? 0) + 1;
   return true;
 }

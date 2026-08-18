@@ -271,6 +271,50 @@ describe('MultiplexedStreamableHttpTransport', () => {
     await active;
   });
 
+  it('rejects a session request once its in-flight capacity is reached', async () => {
+    const transport = new MultiplexedStreamableHttpTransport({ maxInFlight: 2 });
+    await transport.start();
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    const session = mocks.innerTransports[0];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    session.handleRequest.mockImplementation(async () => await gate);
+
+    const first = transport.handleRequest(createReq('POST', session.sessionId), createRes(), {});
+    const second = transport.handleRequest(createReq('POST', session.sessionId), createRes(), {});
+    await vi.waitFor(() => expect(transport.getStats().inFlight).toBe(2));
+
+    const overloaded = createRes();
+    // The in-flight cap rejects before any await; without the cap the promise
+    // would hang on the gate, so race it to fail fast on a regression.
+    const third = transport.handleRequest(createReq('POST', session.sessionId), overloaded, {});
+    const outcome = await Promise.race([
+      third.then(() => 'resolved'),
+      new Promise<string>((resolve) => setTimeout(() => resolve('hung'), 500)),
+    ]);
+
+    expect(outcome).toBe('resolved');
+    expect(overloaded.writeHead).toHaveBeenCalledWith(503, {
+      'Content-Type': 'application/json',
+      'Retry-After': '1',
+    });
+    expect(JSON.parse(overloaded.end.mock.calls[0]![0])).toMatchObject({
+      error: {
+        code: -32001,
+        data: {
+          code: 'MCP_SESSION_INFLIGHT_CAPACITY',
+          inFlight: 2,
+          inFlightLimit: 2,
+        },
+      },
+    });
+
+    release();
+    await Promise.allSettled([first, second, third]);
+  });
+
   it('routes same client request ids from different sessions back to the correct inner transport', async () => {
     const transport = new MultiplexedStreamableHttpTransport();
     await transport.start();
