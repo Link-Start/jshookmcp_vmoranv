@@ -303,8 +303,10 @@ export async function handleAnalysisDecodeStringArray(
         const value = items[index];
         if (typeof value !== 'string') return;
 
-        // Extract original code from source using node positions
-        const originalCode = code.slice(node.start ?? 0, node.end ?? 0);
+        // Extract original code from source using node positions. Positions are
+        // relative to `preparedCode` (post-derotation), not the raw input —
+        // slicing `code` here would misalign whenever rotation was removed.
+        const originalCode = preparedCode.slice(node.start ?? 0, node.end ?? 0);
 
         replacements.push({
           arrayName,

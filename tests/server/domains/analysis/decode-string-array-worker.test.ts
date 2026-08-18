@@ -62,14 +62,16 @@ describe('decode string array worker runtime', () => {
     await Promise.allSettled(pools.splice(0).map((pool) => pool.close()));
   });
 
-  const fixtures = [
+  const fixtures: Array<{ name: string; code: string; expectedOriginals?: string[] }> = [
     {
       name: 'simple string array lookups',
       code: 'var _0x = ["alpha", "beta"];\nconsole.log(_0x(0), _0x("1"));',
+      expectedOriginals: ['_0x(0)', '_0x("1")'],
     },
     {
       name: 'rotation IIFE derotation',
       code: '(function(){ var _0x = ["a", "b"]; while (true) { _0x.push(_0x.shift()); } })();\nvar arr = ["x", "y"];\nconsole.log(arr(0));',
+      expectedOriginals: ['arr(0)'],
     },
   ];
 
@@ -104,6 +106,15 @@ describe('decode string array worker runtime', () => {
       expect(workerResult.arraysFound).toBe(mainThreadJson.arraysFound);
       expect(workerResult.rotationRemoved).toBe(mainThreadJson.rotationRemoved);
       expect(workerResult.replacements).toEqual(mainThreadJson.replacements);
+
+      // The `original` field must reflect the replaced call's source text in
+      // the *derotated* code. When rotation is removed, slicing from the raw
+      // input offsets misaligns and yields garbage — assert the exact text.
+      if (fixture.expectedOriginals !== undefined) {
+        expect((workerResult.replacements ?? []).map((r) => r.original)).toEqual(
+          fixture.expectedOriginals,
+        );
+      }
     });
   }
 });

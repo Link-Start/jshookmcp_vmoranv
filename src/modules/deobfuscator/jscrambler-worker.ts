@@ -759,34 +759,34 @@ const __bootstrap = async () => {
 
       if (detectSelfDefending(ast)) {
         removeSelfDefending(ast);
-        transformations.push('');
+        transformations.push('Removed self-defending code');
       }
 
       if (decryptStringsFlag) {
         const decrypted = decryptStrings(ast, warnings);
         if (decrypted > 0) {
-          transformations.push(': ' + decrypted);
+          transformations.push('Decrypted ' + decrypted + ' strings');
         }
       }
 
       if (restoreControlFlowFlag) {
         const restored = restoreControlFlow(ast, warnings);
         if (restored > 0) {
-          transformations.push(': ' + restored);
+          transformations.push('Restored ' + restored + ' control-flow patterns');
         }
       }
 
       if (removeDeadCodeFlag) {
         const removed = removeDeadCode(ast);
         if (removed > 0) {
-          transformations.push(': ' + removed);
+          transformations.push('Removed ' + removed + ' dead branches');
         }
       }
 
       if (simplifyExpressionsFlag) {
         const simplified = simplifyExpressions(ast);
         if (simplified > 0) {
-          transformations.push(': ' + simplified);
+          transformations.push('Simplified ' + simplified + ' expressions');
         }
       }
 

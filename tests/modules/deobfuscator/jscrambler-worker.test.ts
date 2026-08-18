@@ -19,7 +19,18 @@ import {
 } from '@modules/deobfuscator/jscrambler-worker';
 import { resolveBabelUrls } from '@modules/deobfuscator/babel-urls';
 
-const FIXTURES = [
+interface JscramblerFixture {
+  name: string;
+  code: string;
+  options: Record<string, unknown>;
+  expectedTransformations?: string[];
+  expectedWarning?: string;
+  expectedSuccess?: boolean;
+  expectedCodeContains?: string[];
+  expectedCodeNotContains?: string[];
+}
+
+const FIXTURES: JscramblerFixture[] = [
   {
     name: 'self-defending debugger',
     code: `
@@ -28,6 +39,7 @@ setInterval(function(){ debugger; }, 1000);
 guard();
 `,
     options: {},
+    expectedTransformations: ['Removed self-defending code'],
   },
   {
     name: 'unresolvable decrypt call left in place',
@@ -36,9 +48,11 @@ function dec(s){ return s.split('').map(c=>String.fromCharCode(c.charCodeAt(0)))
 const value = dec("abc");
 `,
     options: { decryptStrings: true },
+    expectedTransformations: [],
+    expectedWarning: 'decrypt',
   },
   {
-    name: 'while-switch control-flow pattern',
+    name: 'while-switch control-flow pattern (unresolvable)',
     code: `
 while (true) {
   switch (state) {
@@ -48,6 +62,8 @@ while (true) {
 }
 `,
     options: { restoreControlFlow: true },
+    expectedTransformations: [],
+    expectedWarning: 'control-flow',
   },
   {
     name: 'dead branch + arithmetic simplification',
@@ -56,11 +72,50 @@ if (false) { drop(); } else { keep(); }
 const n = 2 + 3;
 `,
     options: {},
+    expectedTransformations: ['Removed 1 dead branches', 'Simplified 1 expressions'],
   },
   {
     name: 'parse failure',
     code: 'function broken( {',
     options: {},
+    expectedTransformations: [],
+    expectedSuccess: false,
+  },
+  {
+    name: 'successful static decryption (evalCall branch coverage)',
+    code: `
+const dec = (s) => String.fromCharCode(s.charCodeAt(0) + 1);
+function dec2(s) {
+  return s.substring(0, 2) + s.substr(1, 2) + s.slice(0, 1) +
+    s.concat('_') + s.indexOf('a') + s.toLowerCase() +
+    s.replace('a', 'z') + s.split('')[0] +
+    String.fromCharCode(s.charCodeAt(0)) +
+    parseInt('10', 10) + Number('2');
+}
+var _s = ["alpha", "beta"];
+function idx(i) { return _s[i]; }
+const a = dec("a");
+const b = dec2("abc");
+const c = idx(1);
+`,
+    options: {},
+    expectedTransformations: ['Decrypted 3 strings'],
+    expectedCodeContains: ['"b"', '"beta"'],
+  },
+  {
+    name: 'while-switch linearizable (success path)',
+    code: `
+var state = 0;
+while (true) {
+  switch (state) {
+    case 0: foo(); state = 1; break;
+    case 1: bar(); break;
+  }
+}
+`,
+    options: { restoreControlFlow: true },
+    expectedTransformations: ['Restored 1 control-flow patterns'],
+    expectedCodeNotContains: ['while', 'switch'],
   },
 ];
 
@@ -140,6 +195,31 @@ describe('jscrambler worker runtime', () => {
       expect(workerResult.transformations).toEqual(mainThread.transformations);
       expect(workerResult.warnings).toEqual(mainThread.warnings);
       expect(workerResult.confidence).toBeCloseTo(mainThread.confidence);
+
+      // Equivalent-fixture assertions: pin the transformation labels and the
+      // branch behavior so a worker/main-thread drift (or a garbage-label
+      // regression) fails here instead of silently passing on `toEqual`.
+      if (fixture.expectedTransformations !== undefined) {
+        expect(workerResult.transformations).toEqual(fixture.expectedTransformations);
+      }
+      if (fixture.expectedWarning !== undefined) {
+        expect(
+          workerResult.warnings.some((w) => w.includes(fixture.expectedWarning as string)),
+        ).toBe(true);
+      }
+      if (fixture.expectedSuccess !== undefined) {
+        expect(workerResult.success).toBe(fixture.expectedSuccess);
+      }
+      if (fixture.expectedCodeContains !== undefined) {
+        for (const needle of fixture.expectedCodeContains) {
+          expect(workerResult.code).toContain(needle);
+        }
+      }
+      if (fixture.expectedCodeNotContains !== undefined) {
+        for (const needle of fixture.expectedCodeNotContains) {
+          expect(workerResult.code).not.toContain(needle);
+        }
+      }
     });
   }
 });

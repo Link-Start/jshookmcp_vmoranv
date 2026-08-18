@@ -184,7 +184,7 @@ const __bootstrap = async () => {
         const value = items[index];
         if (typeof value !== 'string') return;
 
-        const originalCode = code.slice(node.start ?? 0, node.end ?? 0);
+        const originalCode = preparedCode.slice(node.start ?? 0, node.end ?? 0);
 
         replacements.push({ arrayName, index, value, original: originalCode });
         path.replaceWith(t.stringLiteral(value));

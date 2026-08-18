@@ -77,34 +77,34 @@ export class JScramberDeobfuscator {
 
       if (this.detectSelfDefending(ast)) {
         this.removeSelfDefending(ast);
-        transformations.push('');
+        transformations.push('Removed self-defending code');
       }
 
       if (decryptStrings) {
         const decrypted = this.decryptStrings(ast, warnings);
         if (decrypted > 0) {
-          transformations.push(`: ${decrypted}`);
+          transformations.push(`Decrypted ${decrypted} strings`);
         }
       }
 
       if (restoreControlFlow) {
         const restored = this.restoreControlFlow(ast, warnings);
         if (restored > 0) {
-          transformations.push(`: ${restored}`);
+          transformations.push(`Restored ${restored} control-flow patterns`);
         }
       }
 
       if (removeDeadCode) {
         const removed = this.removeDeadCode(ast);
         if (removed > 0) {
-          transformations.push(`: ${removed}`);
+          transformations.push(`Removed ${removed} dead branches`);
         }
       }
 
       if (simplifyExpressions) {
         const simplified = this.simplifyExpressions(ast);
         if (simplified > 0) {
-          transformations.push(`: ${simplified}`);
+          transformations.push(`Simplified ${simplified} expressions`);
         }
       }
 
