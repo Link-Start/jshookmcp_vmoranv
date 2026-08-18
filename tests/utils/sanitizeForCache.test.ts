@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, readFile, readdir, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sanitizeForCache } from '@utils/sanitizeForCache';
+import { sanitizeForCache, enforceOffloadDirectoryQuota } from '@utils/sanitizeForCache';
 import { getProjectRoot } from '@utils/outputPaths';
 
 // Call-through mock for the async write: lets individual tests inject an EEXIST
@@ -252,5 +252,83 @@ describe('sanitizeForCache', () => {
         await rm(join(getProjectRoot(), ...out.url._offload.path.split('/')), { force: true });
       }
     }
+  });
+
+  it('enforceOffloadDirectoryQuota deletes oldest files when over the cap', async () => {
+    const dir = join(getProjectRoot(), 'artifacts', `offloaded-quota-direct-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    const base = Date.now() - 60_000;
+    for (let i = 0; i < 4; i++) {
+      const p = join(dir, `seed-${i}.txt`);
+      await writeFile(p, `file-${i}`);
+      const t = new Date(base + i * 10_000);
+      await utimes(p, t, t);
+    }
+
+    const removed = await enforceOffloadDirectoryQuota(dir, 2);
+
+    expect(removed).toBe(2);
+    expect((await readdir(dir)).toSorted()).toEqual(['seed-2.txt', 'seed-3.txt']);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('sanitizeForCache honors maxFiles by pruning the offload directory', async () => {
+    const dir = join(getProjectRoot(), 'artifacts', `offloaded-quota-e2e-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    const base = Date.now() - 60_000;
+    for (let i = 0; i < 3; i++) {
+      const p = join(dir, `seed-${i}.txt`);
+      await writeFile(p, `file-${i}`);
+      const t = new Date(base + i * 10_000);
+      await utimes(p, t, t);
+    }
+
+    const out = (await sanitizeForCache(
+      { url: DATA_URI },
+      { outputDir: dir, maxFiles: 2 },
+    )) as unknown as { url: { _offload: { path: string } } };
+    expect(out.url._offload.path).toBeTruthy();
+
+    const remaining = (await readdir(dir)).toSorted();
+    expect(remaining).toHaveLength(2);
+    expect(remaining.some((f) => f.startsWith('offload-'))).toBe(true);
+    expect(remaining).not.toContain('seed-0.txt');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('fans out disk writes for multiple oversized fields instead of serializing them', async () => {
+    const mockedWrite = vi.mocked(writeFile);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const resolvers: Array<() => void> = [];
+    mockedWrite.mockImplementation(() => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      return new Promise<void>((resolve) => {
+        resolvers.push(() => {
+          inFlight -= 1;
+          resolve();
+        });
+      });
+    });
+
+    const big1 = 'A'.repeat(100 * 1024);
+    const big2 = 'B'.repeat(100 * 1024);
+    const promise = sanitizeForCache({ f1: big1, f2: big2 }, { ...opts(), threshold: 64 * 1024 });
+
+    try {
+      // Both writes must be scheduled before either resolves — the fan-out is
+      // what makes them concurrent (a serial implementation only starts the
+      // second write after the first resolves, so this would time out).
+      await vi.waitFor(() => expect(resolvers.length).toBe(2));
+      expect(maxInFlight).toBe(2);
+    } finally {
+      for (const resolve of resolvers) resolve();
+      mockedWrite.mockRestore();
+    }
+
+    const out = (await promise) as Record<string, unknown>;
+    expect(isPlaceholder(out.f1)).toBe(true);
+    expect(isPlaceholder(out.f2)).toBe(true);
   });
 });

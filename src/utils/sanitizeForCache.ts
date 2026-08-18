@@ -21,8 +21,9 @@
  *     file before the response is returned, only the blocking is removed.
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
-import { resolve, relative, isAbsolute, sep } from 'node:path';
+import { mkdir, writeFile, readdir, stat, rm } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { resolve, relative, isAbsolute, sep, join } from 'node:path';
 import { generateShortId, getArtifactDir, getArtifactsRoot } from '@utils/artifacts';
 import { getProjectRoot } from '@utils/outputPaths';
 import { OFFLOAD_FIELD_SANITIZE_THRESHOLD_BYTES } from '@src/constants';
@@ -33,6 +34,14 @@ export const DATA_URI_RE = /^data:([a-zA-Z0-9/+.-]+);base64,/;
 
 /** Length (chars) of the human-readable sample retained in the placeholder. */
 const SAMPLE_LENGTH = 128;
+
+/**
+ * Default soft cap on the number of offloaded files kept in a single offload
+ * directory. Offload writes were previously unbounded (see
+ * enforceOffloadDirectoryQuota); this is the backstop the write path enforces
+ * independent of the age/size retention scheduler.
+ */
+export const OFFLOAD_MAX_FILES = 2000;
 
 /**
  * Object keys that must never be copied when sanitizing captured data. Hostile
@@ -68,6 +77,12 @@ export interface SanitizeOptions {
    * payload, not preserve it. Default: true.
    */
   writeFile?: boolean;
+  /**
+   * Soft cap on the number of offloaded files retained in the output directory.
+   * When a write would exceed it, the oldest files are pruned (see
+   * enforceOffloadDirectoryQuota). Default: OFFLOAD_MAX_FILES.
+   */
+  maxFiles?: number;
 }
 
 /** Format a byte count as a human-readable B/KB/MB string. Shared across the offload pipeline. */
@@ -84,11 +99,74 @@ function isOffloadPlaceholder(value: object): boolean {
   return Object.prototype.hasOwnProperty.call(value, '_offload');
 }
 
+/**
+ * Enforce a soft file-count cap on an offload directory by deleting the oldest
+ * files first (mtime order).
+ *
+ * Rationale (RAM audit #3): the offload write paths (sanitizeForCache and
+ * ToolResponseOffloader) wrote into artifacts/offloaded/ with no cap, while
+ * DetailedDataManager eviction only unlinks its OWN persistPath (a separate
+ * tmp/detailed-data/ dir) — so DDM could never reclaim offloaded files. The only
+ * cleanup was the 7-day retention scheduler, which is disabled when
+ * MCP_ARTIFACT_RETENTION_DAYS=0, leaving truly unbounded growth. This backstop
+ * bounds the FILE COUNT independent of the age/size retention scheduler, so
+ * disabling retention can no longer fill the disk. Byte-level bounding remains
+ * the retention scheduler's job; this is the last-resort count invariant.
+ *
+ * Callers await it AFTER writing a file, so the directory never exceeds
+ * `maxFiles` once a write completes. The just-written file is the newest entry
+ * and is therefore never the victim of its own prune.
+ *
+ * @returns the number of files removed.
+ */
+export async function enforceOffloadDirectoryQuota(
+  outputDir: string,
+  maxFiles: number = OFFLOAD_MAX_FILES,
+  excludePath?: string,
+): Promise<number> {
+  if (maxFiles <= 0) return 0;
+
+  let entries: Dirent[];
+  try {
+    entries = await readdir(outputDir, { withFileTypes: true });
+  } catch {
+    return 0; // directory absent/unreadable — nothing to prune
+  }
+
+  const files = entries.filter((entry) => entry.isFile());
+  if (files.length <= maxFiles) return 0;
+
+  const withMtime = await Promise.all(
+    files.map(async (file) => {
+      try {
+        const info = await stat(join(outputDir, file.name));
+        return { path: join(outputDir, file.name), mtimeMs: info.mtimeMs };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const prunable = withMtime
+    .filter((x): x is { path: string; mtimeMs: number } => x !== null)
+    .filter((x) => x.path !== excludePath);
+  // mtime ties prune an arbitrary equally-old file — acceptable, since the
+  // freshly written file is protected by excludePath, not by ordering.
+  prunable.sort((a, b) => a.mtimeMs - b.mtimeMs);
+
+  const victims = prunable.slice(0, files.length - maxFiles);
+  // Best-effort removal: a concurrent reader (get_offloaded_data) must not turn
+  // a failed unlink into a failed offload.
+  await Promise.all(victims.map((file) => rm(file.path, { force: true }).catch(() => {})));
+  return victims.length;
+}
+
 /** Write raw string bytes to artifacts/offloaded and return the project-relative path. */
 async function writeOffloadFile(
   raw: string,
   mimeType: string | undefined,
   outputDir: string,
+  maxFiles: number,
 ): Promise<string> {
   await mkdir(outputDir, { recursive: true });
 
@@ -107,6 +185,11 @@ async function writeOffloadFile(
     const absolutePath = resolve(outputDir, `offload-${ts}-${generateShortId()}.${ext}`);
     try {
       await writeFile(absolutePath, payload, { encoding: 'utf8', flag: 'wx' });
+      // Bound the directory after the write so it never exceeds the cap once a
+      // write completes. The freshly written file is excluded explicitly (and
+      // via the name tie-break) so a prune can never delete the path we are
+      // about to return.
+      await enforceOffloadDirectoryQuota(outputDir, maxFiles, absolutePath);
       return relative(getProjectRoot(), absolutePath).replace(/\\/g, '/');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST' && attempt === 0) {
@@ -119,32 +202,43 @@ async function writeOffloadFile(
   throw new Error(`[sanitizeForCache] could not reserve a unique offload file in ${outputDir}`);
 }
 
-/** Build the compact placeholder for an oversized string, optionally writing the original to disk. */
-async function offloadString(
+/** Build the compact placeholder for an oversized string, scheduling its disk write. */
+function offloadString(
   value: string,
   opts: Required<SanitizeOptions>,
-): Promise<OffloadFilePlaceholder> {
+  pendingWrites: Promise<void>[],
+): OffloadFilePlaceholder {
   const mimeType = value.match(DATA_URI_RE)?.[1];
   const sample = value.slice(0, SAMPLE_LENGTH);
 
-  let path = '';
-  if (opts.writeFile) {
-    try {
-      path = await writeOffloadFile(value, mimeType, opts.outputDir);
-    } catch (error) {
-      logger.warn(`[sanitizeForCache] Failed to offload field to disk: ${String(error)}`);
-    }
-  }
-
-  return {
+  const placeholder: OffloadFilePlaceholder = {
     _offload: {
       type: 'file',
-      path,
+      path: '',
       size: formatSize(Buffer.byteLength(value, 'utf8')),
       ...(mimeType ? { mimeType } : {}),
       sample,
     },
   };
+
+  if (opts.writeFile) {
+    // Fan the write out rather than awaiting inline: multiple oversized fields
+    // (or array elements) write concurrently, and a single field's failure only
+    // clears its own path — it never fails a sibling. The caller awaits
+    // Promise.all(pendingWrites) before returning, so every placeholder still
+    // carries a real, readable path.
+    pendingWrites.push(
+      writeOffloadFile(value, mimeType, opts.outputDir, opts.maxFiles)
+        .then((path) => {
+          placeholder._offload.path = path;
+        })
+        .catch((error) => {
+          logger.warn(`[sanitizeForCache] Failed to offload field to disk: ${String(error)}`);
+        }),
+    );
+  }
+
+  return placeholder;
 }
 
 /** True when a string should be offloaded: any data: URI, or any string over the threshold. */
@@ -156,9 +250,12 @@ async function sanitizeValue(
   value: unknown,
   opts: Required<SanitizeOptions>,
   seen: WeakSet<object>,
+  pendingWrites: Promise<void>[],
 ): Promise<unknown> {
   if (typeof value === 'string') {
-    return shouldOffloadString(value, opts.threshold) ? await offloadString(value, opts) : value;
+    return shouldOffloadString(value, opts.threshold)
+      ? offloadString(value, opts, pendingWrites)
+      : value;
   }
 
   if (value === null || typeof value !== 'object') {
@@ -184,7 +281,7 @@ async function sanitizeValue(
     let mutated = false;
     const result: unknown[] = [];
     for (let i = 0; i < value.length; i++) {
-      const sanitized = await sanitizeValue(value[i], opts, seen);
+      const sanitized = await sanitizeValue(value[i], opts, seen, pendingWrites);
       if (sanitized !== value[i]) mutated = true;
       result.push(sanitized);
     }
@@ -200,7 +297,7 @@ async function sanitizeValue(
       skippedUnsafe = true;
       continue;
     }
-    const sanitized = await sanitizeValue(item, opts, seen);
+    const sanitized = await sanitizeValue(item, opts, seen, pendingWrites);
     if (sanitized !== item) mutated = true;
     result[key] = sanitized;
   }
@@ -251,8 +348,14 @@ export async function sanitizeForCache<T>(data: T, options: SanitizeOptions = {}
     threshold: options.threshold ?? OFFLOAD_FIELD_SANITIZE_THRESHOLD_BYTES,
     outputDir,
     writeFile: options.writeFile ?? true,
+    maxFiles: options.maxFiles ?? OFFLOAD_MAX_FILES,
   };
-  return (await sanitizeValue(data, opts, new WeakSet<object>())) as T;
+  const pendingWrites: Promise<void>[] = [];
+  const result = (await sanitizeValue(data, opts, new WeakSet<object>(), pendingWrites)) as T;
+  // Wait for every offload write before returning so the placeholders all carry
+  // a real, readable path (same guarantee as before, now written concurrently).
+  await Promise.all(pendingWrites);
+  return result;
 }
 
 /** Exposed for tests / callers that need the default offload directory. */

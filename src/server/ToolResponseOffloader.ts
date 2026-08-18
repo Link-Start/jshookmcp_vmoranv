@@ -27,7 +27,13 @@
 
 import { promises as fs } from 'node:fs';
 import { DetailedDataManager } from '@utils/DetailedDataManager';
-import { sanitizeForCache, formatSize, DATA_URI_RE, getOffloadDir } from '@utils/sanitizeForCache';
+import {
+  sanitizeForCache,
+  formatSize,
+  DATA_URI_RE,
+  getOffloadDir,
+  enforceOffloadDirectoryQuota,
+} from '@utils/sanitizeForCache';
 import { resolveArtifactPath } from '@utils/artifacts';
 import { logger } from '@utils/logger';
 import { OFFLOADER_DETAIL_THRESHOLD_BYTES, OFFLOADER_FILE_THRESHOLD_BYTES } from '@src/constants';
@@ -41,6 +47,11 @@ export interface OffloaderConfig {
   outputDir?: string;
   /** Tools excluded from offloading (e.g. tools that intentionally return large data). */
   excludeTools?: Set<string>;
+  /**
+   * Soft cap on the number of offloaded files retained in the output directory
+   * (RAM audit #3). Default: OFFLOAD_MAX_FILES.
+   */
+  maxOffloadFiles?: number;
 }
 
 interface OffloadPlaceholder {
@@ -64,6 +75,7 @@ export class LargeDataOffloader {
   private readonly fileThreshold: number;
   private readonly excludeTools: Set<string>;
   private readonly outputDir: string;
+  private readonly maxOffloadFiles: number | undefined;
 
   constructor(
     private readonly detailedData: DetailedDataManager,
@@ -73,6 +85,7 @@ export class LargeDataOffloader {
     this.fileThreshold = config.fileThreshold ?? OFFLOADER_FILE_THRESHOLD_BYTES;
     this.excludeTools = config.excludeTools ?? new Set();
     this.outputDir = config.outputDir ?? getOffloadDir();
+    this.maxOffloadFiles = config.maxOffloadFiles;
   }
 
   /**
@@ -130,6 +143,10 @@ export class LargeDataOffloader {
       await fs.writeFile(absolutePath, raw, 'utf8');
     }
 
+    // Bound the offload directory after the write (RAM audit #3): the file this
+    // call just wrote is the newest and survives its own prune.
+    await enforceOffloadDirectoryQuota(this.outputDir, this.maxOffloadFiles);
+
     return {
       path: displayPath,
       size: formatSize(raw.length),
@@ -185,7 +202,11 @@ export class LargeDataOffloader {
     const content = response.content;
     if (!Array.isArray(content)) return response;
 
-    let changed = false;
+    // Collect one task per offloadable entry, then fan them out with
+    // Promise.all. Each task mutates only its own content[i] slot and resolves
+    // to whether it changed anything, so concurrent writes can't race and a
+    // single entry's failure never prevents its siblings from offloading.
+    const tasks: Array<() => Promise<boolean>> = [];
 
     for (let i = 0; i < content.length; i++) {
       const entry = content[i];
@@ -206,11 +227,14 @@ export class LargeDataOffloader {
       // but this also catches any future path that bypasses the cache.
       const detailWrapper = this.tryParseJson(text);
       if (detailWrapper !== null && this.isDetailWrapper(detailWrapper)) {
-        const sanitized = await sanitizeForCache(detailWrapper);
-        if (sanitized !== detailWrapper) {
-          content[i] = { ...record, text: JSON.stringify(sanitized, null, 2) };
-          changed = true;
-        }
+        tasks.push(async () => {
+          const sanitized = await sanitizeForCache(detailWrapper);
+          if (sanitized !== detailWrapper) {
+            content[i] = { ...record, text: JSON.stringify(sanitized, null, 2) };
+            return true;
+          }
+          return false;
+        });
         continue;
       }
 
@@ -220,83 +244,93 @@ export class LargeDataOffloader {
       // ── Data URI (base64 image) → write binary file ──
       const dataUriMatch = text.match(DATA_URI_RE);
       if (dataUriMatch) {
-        try {
-          const file = await this.writeOffloadedFile(text, dataUriMatch[1]);
-          content[i] = {
-            ...record,
-            text: JSON.stringify(
-              {
-                _offload: {
-                  type: 'file',
-                  path: file.path,
-                  size: file.size,
-                  mimeType: dataUriMatch[1],
+        tasks.push(async () => {
+          try {
+            const file = await this.writeOffloadedFile(text, dataUriMatch[1]);
+            content[i] = {
+              ...record,
+              text: JSON.stringify(
+                {
+                  _offload: {
+                    type: 'file',
+                    path: file.path,
+                    size: file.size,
+                    mimeType: dataUriMatch[1],
+                  },
                 },
-              },
-              null,
-              2,
-            ),
-          };
-          changed = true;
-        } catch (error) {
-          // Never drop the tool's payload because offloading failed — keep
-          // the original text and surface a warning instead.
-          logger.warn(
-            `[Offloader] Failed to offload data URI from ${toolName} (entry ${i}), keeping original text`,
-            error,
-          );
-        }
+                null,
+                2,
+              ),
+            };
+            return true;
+          } catch (error) {
+            // Never drop the tool's payload because offloading failed — keep
+            // the original text and surface a warning instead.
+            logger.warn(
+              `[Offloader] Failed to offload data URI from ${toolName} (entry ${i}), keeping original text`,
+              error,
+            );
+            return false;
+          }
+        });
         continue;
       }
 
       // ── Large JSON string → DetailedDataManager ──
       const parsed = this.tryParseJson(text);
       if (parsed !== null) {
-        try {
-          content[i] = {
-            ...record,
-            text: JSON.stringify(await this.storeInDetailManager(parsed, toolName, i), null, 2),
-          };
-          changed = true;
-        } catch (error) {
-          logger.warn(
-            `[Offloader] Failed to store ${toolName} payload (entry ${i}) in DetailDataManager, keeping original text`,
-            error,
-          );
-        }
+        tasks.push(async () => {
+          try {
+            content[i] = {
+              ...record,
+              text: JSON.stringify(await this.storeInDetailManager(parsed, toolName, i), null, 2),
+            };
+            return true;
+          } catch (error) {
+            logger.warn(
+              `[Offloader] Failed to store ${toolName} payload (entry ${i}) in DetailDataManager, keeping original text`,
+              error,
+            );
+            return false;
+          }
+        });
         continue;
       }
 
       // ── Large non-JSON string → file ──
       if (text.length >= this.fileThreshold) {
-        try {
-          const file = await this.writeOffloadedFile(text, undefined);
-          content[i] = {
-            ...record,
-            text: JSON.stringify(
-              {
-                _offload: {
-                  type: 'file',
-                  path: file.path,
-                  size: file.size,
+        tasks.push(async () => {
+          try {
+            const file = await this.writeOffloadedFile(text, undefined);
+            content[i] = {
+              ...record,
+              text: JSON.stringify(
+                {
+                  _offload: {
+                    type: 'file',
+                    path: file.path,
+                    size: file.size,
+                  },
                 },
-              },
-              null,
-              2,
-            ),
-          };
-          changed = true;
-        } catch (error) {
-          logger.warn(
-            `[Offloader] Failed to offload large string from ${toolName} (entry ${i}), keeping original text`,
-            error,
-          );
-        }
+                null,
+                2,
+              ),
+            };
+            return true;
+          } catch (error) {
+            logger.warn(
+              `[Offloader] Failed to offload large string from ${toolName} (entry ${i}), keeping original text`,
+              error,
+            );
+            return false;
+          }
+        });
         continue;
       }
     }
 
-    if (changed) {
+    const results = await Promise.all(tasks.map((task) => task()));
+    if (results.some((changed) => changed)) {
       logger.debug(`[Offloader] Offloaded large data from ${toolName}`);
     }
     return response;
