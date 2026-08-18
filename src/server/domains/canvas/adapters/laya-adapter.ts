@@ -62,13 +62,23 @@ export function buildLayaSceneTreeDumpPayload(opts: DumpOpts): string {
   function localToGlobalRect(node) {
     if (!node) return { x: 0, y: 0, width: 0, height: 0 };
     try {
-      var p0 = { x: 0, y: 0 };
-      var p1 = { x: safeProp(node, 'width', 0), y: safeProp(node, 'height', 0) };
-      var lp0 = node.localToGlobal ? node.localToGlobal(p0) : p0;
-      var lp1 = node.localToGlobal ? node.localToGlobal(p1) : p1;
-      var w = Math.abs(lp1.x - lp0.x) || safeProp(node, 'width', 0);
-      var h = Math.abs(lp1.y - lp0.y) || safeProp(node, 'height', 0);
-      return { x: lp0.x, y: lp0.y, width: w, height: h };
+      var w = safeProp(node, 'width', 0);
+      var h = safeProp(node, 'height', 0);
+      if (node.localToGlobal) {
+        // Map all four corners and take the axis-aligned bounding box. The old
+        // two-corner span (0,0)→(w,h) only measured the diagonal, which collapses
+        // to zero width/height for rotated nodes (e.g. a 45° square).
+        var c0 = node.localToGlobal({ x: 0, y: 0 });
+        var c1 = node.localToGlobal({ x: w, y: 0 });
+        var c2 = node.localToGlobal({ x: 0, y: h });
+        var c3 = node.localToGlobal({ x: w, y: h });
+        var minX = Math.min(c0.x, c1.x, c2.x, c3.x);
+        var maxX = Math.max(c0.x, c1.x, c2.x, c3.x);
+        var minY = Math.min(c0.y, c1.y, c2.y, c3.y);
+        var maxY = Math.max(c0.y, c1.y, c2.y, c3.y);
+        return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+      }
+      return { x: safeProp(node, 'x', 0), y: safeProp(node, 'y', 0), width: w, height: h };
     } catch(e) {
       return { x: safeProp(node, 'x', 0), y: safeProp(node, 'y', 0),
                width: safeProp(node, 'width', 0), height: safeProp(node, 'height', 0) };
@@ -211,13 +221,23 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
   function localToGlobalRect(node) {
     if (!node) return { x: 0, y: 0, width: 0, height: 0 };
     try {
-      var p0 = { x: 0, y: 0 };
-      var p1 = { x: safeProp(node, 'width', 0), y: safeProp(node, 'height', 0) };
-      var lp0 = node.localToGlobal ? node.localToGlobal(p0) : p0;
-      var lp1 = node.localToGlobal ? node.localToGlobal(p1) : p1;
-      var w = Math.abs(lp1.x - lp0.x) || safeProp(node, 'width', 0);
-      var h = Math.abs(lp1.y - lp0.y) || safeProp(node, 'height', 0);
-      return { x: lp0.x, y: lp0.y, width: w, height: h };
+      var w = safeProp(node, 'width', 0);
+      var h = safeProp(node, 'height', 0);
+      if (node.localToGlobal) {
+        // Map all four corners and take the axis-aligned bounding box. The old
+        // two-corner span (0,0)→(w,h) only measured the diagonal, which collapses
+        // to zero width/height for rotated nodes (e.g. a 45° square).
+        var c0 = node.localToGlobal({ x: 0, y: 0 });
+        var c1 = node.localToGlobal({ x: w, y: 0 });
+        var c2 = node.localToGlobal({ x: 0, y: h });
+        var c3 = node.localToGlobal({ x: w, y: h });
+        var minX = Math.min(c0.x, c1.x, c2.x, c3.x);
+        var maxX = Math.max(c0.x, c1.x, c2.x, c3.x);
+        var minY = Math.min(c0.y, c1.y, c2.y, c3.y);
+        var maxY = Math.max(c0.y, c1.y, c2.y, c3.y);
+        return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+      }
+      return { x: safeProp(node, 'x', 0), y: safeProp(node, 'y', 0), width: w, height: h };
     } catch(e) {
       return { x: safeProp(node, 'x', 0), y: safeProp(node, 'y', 0),
                width: safeProp(node, 'width', 0), height: safeProp(node, 'height', 0) };
@@ -287,7 +307,23 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
     try {
       var nativeHit = stage.hitTest({ x: stageX, y: stageY });
       if (nativeHit) {
-        enginePicked = nativeHit;
+        // Map the raw Laya node into a CanvasSceneNode so downstream consumers
+        // (highlight, scene search) get the full contract, not a bare engine node.
+        enginePicked = {
+          id: nodeId(nativeHit, 0),
+          type: nativeHit.constructor ? nativeHit.constructor.name : 'Node',
+          name: safeProp(nativeHit, 'name', undefined),
+          visible: !!(safeProp(nativeHit, 'visible', true)),
+          interactive: !!(safeProp(nativeHit, 'mouseEnabled', true)),
+          mouseEnabled: safeProp(nativeHit, 'mouseEnabled', undefined),
+          alpha: safeProp(nativeHit, 'alpha', 1),
+          x: safeProp(nativeHit, 'x', 0),
+          y: safeProp(nativeHit, 'y', 0),
+          width: safeProp(nativeHit, 'width', 0),
+          height: safeProp(nativeHit, 'height', 0),
+          worldBounds: localToGlobalRect(nativeHit),
+          path: nodePath(nativeHit)
+        };
         hitTestMethod = 'engine';
       }
     } catch(e) {}
@@ -298,27 +334,20 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
     if (!node || !safeProp(node, 'visible', true)) return;
 
     var wb = localToGlobalRect(node);
-    var mx = sx, my = sy;
 
-    // Convert screen → node local using parent chain
-    var cur = node;
-    var screenPt = { x: sx, y: sy };
-    while (cur) {
-      if (cur.globalToLocal) {
-        try { screenPt = cur.globalToLocal(screenPt); } catch(e) { break; }
-      }
-      cur = cur.parent;
-    }
-    var lx = screenPt.x, ly = screenPt.y;
+    // Convert stage → node local with a single full inverse chain. Applying
+    // globalToLocal at each ancestor would transform the same point repeatedly.
+    var localPt = node.globalToLocal
+      ? node.globalToLocal({ x: stageX, y: stageY })
+      : { x: stageX, y: stageY };
+    var lx = localPt.x, ly = localPt.y;
 
-    // Check bounds against node's local coordinate frame
+    // Bounds check in the node's own local frame (top-left origin, width ×
+    // height) — never the parent-relative x/y.
     var nw = safeProp(node, 'width', 0) || (wb.width / (safeProp(node, 'scaleX', 1) || 1));
     var nh = safeProp(node, 'height', 0) || (wb.height / (safeProp(node, 'scaleY', 1) || 1));
-    var nx = safeProp(node, 'x', 0), ny = safeProp(node, 'y', 0);
-    var pivotX = safeProp(node, 'pivotX', 0), pivotY = safeProp(node, 'pivotY', 0);
 
-    var inBounds = lx >= nx - pivotX && lx <= nx - pivotX + nw &&
-                   ly >= ny - pivotY && ly <= ny - pivotY + nh;
+    var inBounds = lx >= 0 && lx <= nw && ly >= 0 && ly <= nh;
 
     var interactive = !!(safeProp(node, 'mouseEnabled', true));
 
@@ -333,7 +362,8 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
           interactive: interactive,
           mouseEnabled: safeProp(node, 'mouseEnabled', undefined),
           alpha: safeProp(node, 'alpha', 1),
-          x: nx, y: ny,
+          x: safeProp(node, 'x', 0),
+          y: safeProp(node, 'y', 0),
           width: nw, height: nh,
           worldBounds: wb,
           path: path
@@ -343,7 +373,10 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
     }
 
     var nodeChildren = getChildren(node);
-    for (var i = 0; i < nodeChildren.length; i++) {
+    // Reverse child order: the last child is drawn last and therefore topmost
+    // among siblings (Laya render order = children array order). The stable
+    // depth sort below preserves this reverse order within the same depth.
+    for (var i = nodeChildren.length - 1; i >= 0; i--) {
       var cn = nodeChildren[i];
       if (!cn) continue;
       var childPath = accPath ? accPath + '/' + nodeId(cn, i) : nodeId(cn, i);
@@ -358,8 +391,10 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
   var finalMethod = hitTestMethod;
 
   if (!picked && candidates.length > 0) {
-    // Sort by depth ascending (deepest/nested first = topmost)
-    candidates.sort(function(a, b) { return a.depth - b.depth; });
+    // Sort by depth descending: deepest node first (a child always renders
+    // above its parent). Same-depth siblings keep the reverse child order from
+    // the DFS above because Array.sort is stable.
+    candidates.sort(function(a, b) { return b.depth - a.depth; });
     picked = candidates[0].node;
     finalMethod = 'manual';
   }

@@ -44,6 +44,15 @@ export async function dumpScene(
     includeDrawCommands,
   );
 
+  if (sceneTree.unsupported) {
+    throw new ToolError(
+      'NOT_FOUND',
+      `Skia scene extraction is not supported for the active canvas engine (canvasId=${
+        canvasId || 'auto'
+      }); no Skia scene graph is exposed via the DOM`,
+    );
+  }
+
   return {
     sceneTree,
     canvasId: canvasId || 'auto',
@@ -66,6 +75,15 @@ export async function correlateObjects(
 
   // Extract Skia scene
   const sceneTree = await extractSceneTree(pageController, canvasId || undefined, true);
+
+  if (sceneTree.unsupported) {
+    throw new ToolError(
+      'NOT_FOUND',
+      `Skia object correlation is not supported for the active canvas engine (canvasId=${
+        canvasId || 'auto'
+      }); no Skia scene graph is exposed via the DOM`,
+    );
+  }
 
   if (sceneTree.layers.length === 0 && sceneTree.drawCommands.length === 0) {
     throw new ToolError(

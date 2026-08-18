@@ -645,7 +645,14 @@ export async function extractSceneTree(
       `(() => { /* drawCommands canvasMeta ${canvasId ?? ''} */ return { canvas: {}, layers: [], drawCommands: [] }; ` +
         `})()`,
     );
-    return normalizeLegacyScene(scene);
+    const normalized = normalizeLegacyScene(scene);
+    // The browser-page probe cannot actually extract a Skia scene graph (it is
+    // a stub), so an empty result means "unsupported" for the active engine —
+    // not a legitimately empty scene. Flag it so callers error honestly.
+    if (normalized.layers.length === 0 && normalized.drawCommands.length === 0) {
+      return { ...normalized, unsupported: true };
+    }
+    return normalized;
   }
 
   return modernSceneToLegacyScene(new SkiaSceneExtractor().extractSceneTree(canvasId));

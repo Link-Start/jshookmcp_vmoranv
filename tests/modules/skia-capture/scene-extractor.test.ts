@@ -431,6 +431,48 @@ describe('SkiaSceneExtractor', () => {
       expect(result.totalDrawCommands).toBe(0);
     });
 
+    it('flags the browser-path empty result as unsupported instead of silently empty', async () => {
+      // In a browser context the injected probe is a stub that cannot actually
+      // extract a Skia scene; an empty result must be marked `unsupported` so
+      // callers surface an honest error rather than a silent empty scene.
+      const mockPC = createMockPageController({});
+
+      const result = await extractSceneTree(mockPC);
+
+      expect(result.unsupported).toBe(true);
+      expect(result.layers).toEqual([]);
+      expect(result.drawCommands).toEqual([]);
+    });
+
+    it('does not flag a non-empty scene as unsupported', async () => {
+      const mockPC = createMockPageController({
+        scene: {
+          canvas: { width: 800, height: 600, dpr: 1, contextType: 'webgl' },
+          layers: [
+            {
+              id: 'layer_root',
+              name: 'root',
+              bounds: { x: 0, y: 0, width: 800, height: 600 },
+              transform: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+              opacity: 1,
+              visible: true,
+              parentId: null,
+              customData: {},
+            },
+          ],
+          drawCommands: [],
+        },
+        webgl: [],
+        font: { hasSkiaFontSignatures: false, textMetrics: null },
+        engine: { engines: [], isSkiaEngine: false },
+      });
+
+      const result = await extractSceneTree(mockPC);
+
+      expect(result.unsupported).toBeUndefined();
+      expect(result.layers.length).toBe(1);
+    });
+
     it('should build parent-child relationships based on bounds containment', async () => {
       const mockPC = createMockPageController({
         scene: {
