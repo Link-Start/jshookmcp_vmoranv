@@ -62,6 +62,10 @@ interface Http2SessionCacheEntry {
  * Per-(origin, DNS pin) HTTP/2 session cache. Reusing `session.request()` across
  * replays avoids a full TCP+TLS+ALPN handshake per request; sessions are only
  * closed on idle expiry (unref'd timer) or when the session itself errors/closes.
+ *
+ * Known boundary: there is no cap on the number of concurrently cached sessions
+ * — the map grows with each distinct (origin, DNS pin) pair and is reclaimed
+ * only by the idle TTL, not by an entry-count ceiling.
  */
 const http2SessionCache = new Map<string, Http2SessionCacheEntry>();
 

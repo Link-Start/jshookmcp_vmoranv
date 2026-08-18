@@ -321,6 +321,10 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
   // moves (the engine's own event system never fires), so compute the stage
   // coordinate directly from the canvas coordinate and the client scale factor
   // instead of trusting the stale mouseX/mouseY.
+  // Honest boundary: this assumes clientScaleX/Y scale the whole canvas
+  // uniformly. A game that letterboxes (black bars) or pillars its stage inside
+  // a differently-aspect canvas shifts the origin, so a pick that lands in a bar
+  // maps to an out-of-bounds stage coordinate.
   var stageX = canvasX / (scaleX || 1);
   var stageY = canvasY / (scaleY || 1);
 
@@ -332,10 +336,18 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
 
   if (isLaya3 && typeof stage.hitTest === 'function') {
     try {
+      // LayaAir 3.x's stage.hitTest is called with a plain {x,y} literal, not
+      // wrapped via toPt. The only real engine the harness verified is 2.8,
+      // whose localToGlobal/globalToLocal need a Laya.Point; whether 3.x's
+      // hitTest likewise expects a Point is unverified, so this engine path
+      // deliberately skips toPt and relies on the plain literal.
       var nativeHit = stage.hitTest({ x: stageX, y: stageY });
       if (nativeHit) {
         // Map the raw Laya node into a CanvasSceneNode so downstream consumers
         // (highlight, scene search) get the full contract, not a bare engine node.
+        // nodeId(nativeHit, 0) pins the sibling index to 0, so two id-less nodes
+        // of the same type share this id — acceptable here since path (via
+        // nodePath) stays unique and id is only a hint, not a stable key.
         enginePicked = {
           id: nodeId(nativeHit, 0),
           type: nativeHit.constructor ? nativeHit.constructor.name : 'Node',

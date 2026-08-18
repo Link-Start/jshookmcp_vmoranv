@@ -18,7 +18,7 @@ import { Readable } from 'node:stream';
 
 import { ToolError } from '@errors/ToolError';
 import { logger } from '@utils/logger';
-import { int } from '@src/constants';
+import { NEMU_APK_MAX_TOTAL_SO_BYTES } from '@src/constants';
 
 /** Only this ABI is loadable — the emulated CPU is AArch64. */
 export const LOADABLE_ABI = 'arm64-v8a';
@@ -26,15 +26,6 @@ export const LOADABLE_ABI = 'arm64-v8a';
 const ARM64_SO_RE = /^lib\/arm64-v8a\/(lib[^/]+\.so)$/i;
 /** Guard against a zip bomb: refuse to buffer more than this per extracted lib. */
 const MAX_SO_BYTES = 256 * 1024 * 1024;
-/**
- * Guard against a zip bomb: refuse to buffer more than this across all
- * extracted libs combined. Exceeding it stops extraction early and marks the
- * result truncated instead of accumulating unbounded memory.
- *
- * @env NEMU_APK_MAX_TOTAL_SO_BYTES
- */
-export const MAX_TOTAL_SO_BYTES = int('NEMU_APK_MAX_TOTAL_SO_BYTES', 512 * 1024 * 1024);
-
 /** One extracted native library: its basename and raw bytes. */
 export interface ExtractedLib {
   /** Basename, e.g. "libapp.so" or "libnative-lib.so". */
@@ -95,7 +86,7 @@ export async function extractArm64LibsDetailed(
   if (!apkPath || apkPath.length === 0) {
     throw new ToolError('VALIDATION', 'apkPath must be a non-empty string');
   }
-  const maxTotalBytes = options.maxTotalBytes ?? MAX_TOTAL_SO_BYTES;
+  const maxTotalBytes = options.maxTotalBytes ?? NEMU_APK_MAX_TOTAL_SO_BYTES;
   return new Promise<ExtractArm64LibsResult>((resolve, reject) => {
     openZipArchive(apkPath, { lazyEntries: true, autoClose: true }, (err, zipFile) => {
       if (err || !zipFile) {

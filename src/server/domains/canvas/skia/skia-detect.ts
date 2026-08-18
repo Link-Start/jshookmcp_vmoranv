@@ -12,6 +12,20 @@ import { correlateToJS } from '@modules/skia-capture/SkiaObjectCorrelator';
 import type { JSObjectInfo } from '@modules/skia-capture/SkiaObjectCorrelator';
 
 /**
+ * Build the NOT_FOUND ToolError shared by SKIA-02/SKIA-03 when the active
+ * canvas engine exposes no Skia scene graph. Only the operation noun differs
+ * between the two call sites; the canvasId suffix and reason are identical.
+ */
+function unsupportedSceneError(operation: string, canvasId: string | undefined): ToolError {
+  return new ToolError(
+    'NOT_FOUND',
+    `Skia ${operation} is not supported for the active canvas engine (canvasId=${
+      canvasId || 'auto'
+    }); no Skia scene graph is exposed via the DOM`,
+  );
+}
+
+/**
  * Handler for skia_detect_renderer (SKIA-01).
  */
 export async function detectRenderer(
@@ -45,12 +59,7 @@ export async function dumpScene(
   );
 
   if (sceneTree.unsupported) {
-    throw new ToolError(
-      'NOT_FOUND',
-      `Skia scene extraction is not supported for the active canvas engine (canvasId=${
-        canvasId || 'auto'
-      }); no Skia scene graph is exposed via the DOM`,
-    );
+    throw unsupportedSceneError('scene extraction', canvasId);
   }
 
   return {
@@ -77,12 +86,7 @@ export async function correlateObjects(
   const sceneTree = await extractSceneTree(pageController, canvasId || undefined, true);
 
   if (sceneTree.unsupported) {
-    throw new ToolError(
-      'NOT_FOUND',
-      `Skia object correlation is not supported for the active canvas engine (canvasId=${
-        canvasId || 'auto'
-      }); no Skia scene graph is exposed via the DOM`,
-    );
+    throw unsupportedSceneError('object correlation', canvasId);
   }
 
   if (sceneTree.layers.length === 0 && sceneTree.drawCommands.length === 0) {

@@ -857,3 +857,15 @@ export function getJscramblerPool(): JscramblerPool {
   }
   return sharedPool as JscramblerPool;
 }
+
+/**
+ * Close the shared JScrambler pool and reset the singleton (idempotent — a
+ * no-op when never created). Wired into `closeServer()` so the min-1 warm
+ * worker is released on shutdown (see `disposeWebcrackPool`).
+ */
+export async function disposeJscramblerPool(): Promise<void> {
+  if (sharedPool) {
+    await sharedPool.close();
+    sharedPool = null;
+  }
+}

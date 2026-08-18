@@ -259,7 +259,10 @@ function deserializeBundle(bundle: WebcrackWorkerBundle): WebcrackBundleLike {
  * Replicate webcrack's `result.save(path)` on the main thread for the worker
  * path, where the `save` method (a function) cannot cross the structured-clone
  * boundary. Writes `<path>/deobfuscated.js`, `<path>/bundle.json` and one file
- * per bundle module — byte-identical in structure to webcrack's own `save`.
+ * per bundle module — mirroring the `save` layout of webcrack 2.16.0 (the
+ * version pinned in package.json). The worker/fallback equivalence test only
+ * asserts the `code` output matches; this on-disk layout is not itself diffed
+ * against webcrack's own `save` output.
  */
 export async function saveWebcrackArtifacts(
   savedTo: string,

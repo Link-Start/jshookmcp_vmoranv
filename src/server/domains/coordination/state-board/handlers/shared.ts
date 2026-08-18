@@ -218,6 +218,10 @@ export class StateBoardStore {
     const entry = this.state.get(fullKey);
     if (!entry) return;
     this.state.delete(fullKey);
+    // History is deliberately retained here: a user-issued `delete` is an
+    // auditable action, so the 'delete' record below stays in history. Contrast
+    // cleanupExpired, where expiry is passive cleanup and history is removed
+    // alongside state (no audit record is written).
     this.recordChange(fullKey, {
       id: randomUUID().slice(0, 8),
       key: entry.key,
@@ -318,6 +322,11 @@ export class StateBoardStore {
     // allows. Trim back to `maxEntries` (evicting history alongside state) so
     // restore cannot bypass the same bound that normal inserts enforce.
     this.evictLruIfNeeded();
+    // mutationSeq is snapshotted to the restored entry count rather than
+    // incremented, so it can move backwards relative to a pre-restore in-memory
+    // seq. That is safe: dirtiness is a pure equality check (isPersistDirty
+    // compares mutationSeq !== lastPersistedSeq) and both are snapped together
+    // here, so no consumer relies on the seq being monotonic.
     this.mutationSeq = this.state.size;
     this.lastPersistedSeq = this.mutationSeq;
     return { evictedHistoryKeys };

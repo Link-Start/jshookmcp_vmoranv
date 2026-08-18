@@ -29,6 +29,7 @@ import {
   buildNotEnabledResponse,
 } from './handlers/core-handlers.helpers';
 import { handleSafe, R } from '@server/domains/shared/ResponseBuilder';
+import { ToolError } from '@errors/ToolError';
 import { NETWORK_SMART_HANDLE_THRESHOLD_BYTES } from '@src/constants';
 import type { ToolResponse } from '@server/types';
 
@@ -403,6 +404,14 @@ export class NetworkHandlersCore {
     }
   }
 
+  /**
+   * @deprecated Legacy base-class implementation. Production registration routes
+   * `network_get_response_body` to `CoreHandlers.handleNetworkGetResponseBody`
+   * (see `handlers/core-handlers.response-body.ts`). Kept only for the legacy
+   * `AdvancedHandlersBase` inheritance chain exercised by `runtime-requests.test.ts`.
+   * Behavior is kept in sync with the production handler, including the
+   * `skipped` response shape for bodies dropped over the single-body cap.
+   */
   async handleNetworkGetResponseBody(args: Record<string, unknown>): Promise<ToolResponse> {
     try {
       const requestId = asOptionalString(args.requestId) || '';
@@ -451,16 +460,39 @@ export class NetworkHandlersCore {
       }
 
       let body: { body: string; base64Encoded: boolean } | null = null;
+      let skippedReason: string | null = null;
       let attemptsMade = 0;
       for (let attempt = 0; attempt <= retries; attempt += 1) {
         attemptsMade = attempt + 1;
-        body = await this.consoleMonitor.getResponseBody(requestId);
+        try {
+          body = await this.consoleMonitor.getResponseBody(requestId);
+        } catch (error) {
+          const skipped = getSkippedBodyReason(error);
+          if (skipped !== null) {
+            skippedReason = skipped;
+            break;
+          }
+          throw error;
+        }
         if (body) {
           break;
         }
         if (attempt < retries) {
           await this.sleep(retryIntervalMs);
         }
+      }
+
+      if (skippedReason !== null) {
+        return R.fail(`Response body skipped for requestId: ${requestId}`)
+          .merge({
+            skipped: true,
+            reason: skippedReason,
+            attempts: attemptsMade,
+            hint:
+              'The response body was not captured because its size exceeds the single-body cap. ' +
+              'The request metadata is still available via network_get_requests.',
+          })
+          .json();
       }
 
       if (!body) {
@@ -584,4 +616,20 @@ export class NetworkHandlersCore {
     }
     logger.info('AdvancedHandlersBase cleaned up');
   }
+}
+
+/**
+ * Extracts the skip reason when a body fetch threw a `ToolError` carrying a
+ * `details.skipped` marker (set by `NetworkMonitor.getResponseBody` when the
+ * content-length exceeded the single-body cap). Returns `null` for any other
+ * error so callers rethrow it unchanged.
+ *
+ * Mirrors the canonical helper in `handlers/core-handlers.response-body.ts`
+ * (kept inline here so this deprecated base class needs no reverse import).
+ */
+function getSkippedBodyReason(error: unknown): string | null {
+  if (!(error instanceof ToolError)) return null;
+  const details = error.details;
+  if (!details || details.skipped !== true) return null;
+  return typeof details.reason === 'string' ? details.reason : error.message;
 }

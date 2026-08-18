@@ -314,3 +314,15 @@ export function getHeapParsePool(): HeapParsePool {
   }
   return sharedPool as HeapParsePool;
 }
+
+/**
+ * Close the shared heap-parse pool and reset the singleton (idempotent — a
+ * no-op when never created). Wired into `closeServer()` so the min-1 warm
+ * worker is released on shutdown (see `disposeWebcrackPool`).
+ */
+export async function disposeHeapParsePool(): Promise<void> {
+  if (sharedPool) {
+    await sharedPool.close();
+    sharedPool = null;
+  }
+}

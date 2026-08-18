@@ -63,11 +63,12 @@ export interface WebcrackPool {
 }
 
 /**
- * Pool sizing / timeouts for webcrack. `min 1` keeps a worker warm (no
- * cold-start import of webcrack + isolated-vm on the first call), `max 2` caps
- * CPU oversubscription (webcrack is CPU-bound). The job timeout is longer than
- * WorkerPool's 15s default because a large obfuscated bundle can take tens of
- * seconds; the idle timeout mirrors the heap-parse worker.
+ * Pool sizing / timeouts for webcrack. `min 1` keeps a worker thread alive
+ * between calls — it avoids a per-call worker-thread spawn, though the first
+ * job still pays the one-time webcrack + isolated-vm import inside the worker.
+ * `max 2` caps CPU oversubscription (webcrack is CPU-bound). The job timeout is
+ * longer than WorkerPool's 15s default because a large obfuscated bundle can
+ * take tens of seconds; the idle timeout mirrors the heap-parse worker.
  */
 const WEBCRACK_POOL_MIN_WORKERS = 1;
 const WEBCRACK_POOL_MAX_WORKERS = 2;
@@ -181,6 +182,20 @@ export function getWebcrackPool(): WebcrackPool {
     });
   }
   return sharedPool as WebcrackPool;
+}
+
+/**
+ * Close the shared webcrack pool and reset the singleton so a subsequent
+ * `getWebcrackPool()` starts fresh. Idempotent — a no-op when the pool was
+ * never created. Wired into `closeServer()` so the min-1 warm worker (which
+ * `WorkerPool` never idle-evicts at the `minWorkers` floor) is released on
+ * shutdown instead of living for the server's lifetime.
+ */
+export async function disposeWebcrackPool(): Promise<void> {
+  if (sharedPool) {
+    await sharedPool.close();
+    sharedPool = null;
+  }
 }
 
 let cachedWebcrackUrl: string | undefined;

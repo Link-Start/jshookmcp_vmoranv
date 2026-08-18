@@ -20,6 +20,9 @@ describe('heap parse worker pool resource limits', () => {
     getHeapParsePool();
     expect(workerPoolCtor).toHaveBeenCalledWith(
       expect.objectContaining({
+        name: 'heap-parse',
+        minWorkers: 1,
+        maxWorkers: 2,
         resourceLimits: {
           maxOldGenerationSizeMb: 512,
           maxYoungGenerationSizeMb: 64,

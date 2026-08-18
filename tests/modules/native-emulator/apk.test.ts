@@ -203,7 +203,7 @@ describe('extractArm64LibsDetailed aggregate cap', () => {
     expect(totalBytes).toBe(200);
   });
 
-  it('extractArm64Libs returns the partial array (caller-compatible) when truncated', async () => {
+  it('extractArm64Libs preserves the array-returning contract', async () => {
     const chunk = new Uint8Array(100);
     const apk = await writeApk('bomb-legacy.apk', [
       { name: 'lib/arm64-v8a/liba.so', data: chunk },

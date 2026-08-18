@@ -108,6 +108,17 @@ export const NEMU_PROFILE_MAX_STEPS = int('NEMU_PROFILE_MAX_STEPS', 500_000);
 export const NEMU_MAX_SO_BYTES = int('NEMU_MAX_SO_BYTES', 256 * 1024 * 1024);
 
 /**
+ * Guard against a zip bomb when extracting `lib/arm64-v8a/*.so` from an APK
+ * (`extractArm64LibsDetailed`): refuse to buffer more than this across all
+ * extracted libs combined. Exceeding it stops extraction early and marks the
+ * result truncated instead of accumulating unbounded memory.
+ *
+ * @env NEMU_APK_MAX_TOTAL_SO_BYTES
+ * @default 512 MiB
+ */
+export const NEMU_APK_MAX_TOTAL_SO_BYTES = int('NEMU_APK_MAX_TOTAL_SO_BYTES', 512 * 1024 * 1024);
+
+/**
  * Per-file byte cap for VFS files injected via `nemu_create_session` `files`
  * (base64-decoded size).
  *

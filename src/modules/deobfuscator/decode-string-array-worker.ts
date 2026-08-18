@@ -250,3 +250,15 @@ export function getDecodeStringArrayPool(): DecodeStringArrayPool {
   }
   return sharedPool as DecodeStringArrayPool;
 }
+
+/**
+ * Close the shared decode-string-array pool and reset the singleton
+ * (idempotent — a no-op when never created). Wired into `closeServer()` so the
+ * min-1 warm worker is released on shutdown (see `disposeWebcrackPool`).
+ */
+export async function disposeDecodeStringArrayPool(): Promise<void> {
+  if (sharedPool) {
+    await sharedPool.close();
+    sharedPool = null;
+  }
+}
