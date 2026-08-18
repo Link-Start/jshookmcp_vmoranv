@@ -22113,6 +22113,12 @@ export const GENERATED_TOOL_CATALOG = [
             description: 'Enable HTTPS interception.',
             default: true,
           },
+          capture: {
+            type: 'boolean',
+            description:
+              'Capture request/response metadata and body previews. Set false to disable capture entirely.',
+            default: true,
+          },
         },
       },
       annotations: {
