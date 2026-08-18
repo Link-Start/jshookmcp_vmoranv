@@ -11,6 +11,7 @@ import {
   type StreamingSharedState,
   type CdpEventHandler,
 } from '@server/domains/streaming/handlers/shared';
+import { WS_PAYLOAD_MAX_BYTES } from '@src/constants/streaming';
 
 type AnyObj = Record<string, unknown>;
 
@@ -100,6 +101,48 @@ describe('WsHandlers', () => {
     expect(env.state.wsFrameOrder.length).toBe(5);
     expect(env.state.wsFramesByRequest.get('a')).toHaveLength(5);
     expect(env.state.wsConnections.get('a')?.framesCount).toBe(5);
+  });
+
+  it('truncates oversized frame payloads to the byte budget and marks them', async () => {
+    await handlers.handleWsMonitorEnable({ maxFrames: 2 });
+    emit(env.session.listeners, 'Network.webSocketCreated', {
+      requestId: 'a',
+      url: 'wss://host/a',
+    });
+    const big = 'x'.repeat(WS_PAYLOAD_MAX_BYTES + 100);
+    emit(env.session.listeners, 'Network.webSocketFrameReceived', {
+      requestId: 'a',
+      response: { opcode: 1, payloadData: big },
+      timestamp: 1,
+    });
+
+    const frame = env.state.wsFramesByRequest.get('a')![0]!;
+    expect(frame.payloadLength).toBe(big.length);
+    expect(frame.payloadTruncated).toBe(true);
+    expect(Buffer.byteLength(frame.payload!, 'utf8')).toBeLessThanOrEqual(WS_PAYLOAD_MAX_BYTES);
+    expect(frame.payload!.length).toBeLessThan(big.length);
+
+    const result = JSON.parse(
+      (await handlers.handleWsGetFrames({ fullPayload: true })).content[0]!.text,
+    );
+    expect(result.frames[0].payloadTruncated).toBe(true);
+    expect(result.frames[0].payloadLength).toBe(big.length);
+  });
+
+  it('keeps small frame payloads untruncated', async () => {
+    await handlers.handleWsMonitorEnable({ maxFrames: 2 });
+    emit(env.session.listeners, 'Network.webSocketCreated', {
+      requestId: 'a',
+      url: 'wss://host/a',
+    });
+    emit(env.session.listeners, 'Network.webSocketFrameReceived', {
+      requestId: 'a',
+      response: { opcode: 1, payloadData: 'small-frame' },
+      timestamp: 1,
+    });
+    const frame = env.state.wsFramesByRequest.get('a')![0]!;
+    expect(frame.payloadTruncated).toBeFalsy();
+    expect(frame.payload).toBe('small-frame');
   });
 
   it('rejects catastrophic-backtracking urlFilter patterns before compiling', async () => {

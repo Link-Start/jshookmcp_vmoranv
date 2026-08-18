@@ -3,7 +3,7 @@
  * Ref: http://www.softwareishard.com/blog/har-12-spec/
  */
 
-import { NETWORK_HAR_BODY_CONCURRENCY } from '@src/constants';
+import { NETWORK_HAR_BODY_CONCURRENCY, NETWORK_HAR_BODY_MAX_BYTES } from '@src/constants';
 
 export interface HarEntry {
   startedDateTime: string;
@@ -30,6 +30,8 @@ export interface HarEntry {
       mimeType: string;
       text?: string;
       _bodyUnavailable?: boolean;
+      _bodyTruncated?: boolean;
+      _originalBodySize?: number;
     };
     redirectURL: string;
     headersSize: number;
@@ -71,6 +73,13 @@ function queryStringFromUrl(url: string): Array<{ name: string; value: string }>
   } catch {
     return [];
   }
+}
+
+/** Truncate a UTF-8 string to at most `maxBytes` bytes (may split a multi-byte char at the boundary). */
+function capBodyText(text: string, maxBytes: number): { text: string; truncated: boolean } {
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return { text, truncated: false };
+  const truncated = Buffer.from(text, 'utf8').subarray(0, maxBytes).toString('utf8');
+  return { text: truncated, truncated: true };
 }
 
 /**
@@ -151,7 +160,13 @@ export async function buildHar(params: BuildHarParams): Promise<Har> {
   // Parallel body fetching with concurrency limit to avoid overwhelming CDP
   const bodyResults = new Map<
     string,
-    { text?: string; encoding?: 'base64'; _bodyUnavailable?: boolean }
+    {
+      text?: string;
+      encoding?: 'base64';
+      _bodyUnavailable?: boolean;
+      _bodyTruncated?: boolean;
+      _originalBodySize?: number;
+    }
   >();
   if (includeBodies) {
     const BODY_CONCURRENCY = NETWORK_HAR_BODY_CONCURRENCY;
@@ -164,13 +179,18 @@ export async function buildHar(params: BuildHarParams): Promise<Har> {
             if (bodyResult) {
               // HAR 1.2 requires content.encoding='base64' for base64-encoded
               // bodies, otherwise viewers decode the raw base64 as UTF-8 text.
-              return bodyResult.base64Encoded
-                ? {
-                    requestId: req.requestId,
-                    text: bodyResult.body,
-                    encoding: 'base64' as const,
-                  }
-                : { requestId: req.requestId, text: bodyResult.body };
+              // Cap each body to the byte budget so one huge response cannot
+              // inflate the retained HAR memory; mark truncation on the entry.
+              const originalSize = Buffer.byteLength(bodyResult.body, 'utf8');
+              const { text, truncated } = capBodyText(bodyResult.body, NETWORK_HAR_BODY_MAX_BYTES);
+              return {
+                requestId: req.requestId,
+                text,
+                ...(bodyResult.base64Encoded ? { encoding: 'base64' as const } : {}),
+                ...(truncated
+                  ? { _bodyTruncated: true as const, _originalBodySize: originalSize }
+                  : {}),
+              };
             }
             return { requestId: req.requestId, _bodyUnavailable: true as const };
           } catch {
@@ -181,13 +201,18 @@ export async function buildHar(params: BuildHarParams): Promise<Har> {
       for (const result of settled) {
         if (result.status === 'fulfilled') {
           const val = result.value;
-          bodyResults.set(
-            val.requestId,
-
-            '_bodyUnavailable' in val
-              ? { _bodyUnavailable: true }
-              : { text: val.text, encoding: val.encoding },
-          );
+          if ('_bodyUnavailable' in val) {
+            bodyResults.set(val.requestId, { _bodyUnavailable: true });
+          } else {
+            bodyResults.set(val.requestId, {
+              text: val.text,
+              ...(val.encoding !== undefined && { encoding: val.encoding }),
+              ...(val._bodyTruncated !== undefined && { _bodyTruncated: val._bodyTruncated }),
+              ...(val._originalBodySize !== undefined && {
+                _originalBodySize: val._originalBodySize,
+              }),
+            });
+          }
         }
       }
     }

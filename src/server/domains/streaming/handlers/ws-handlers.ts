@@ -12,6 +12,7 @@ import {
   STREAMING_QUERY_LIMIT_MAX,
   WS_PAYLOAD_PREVIEW_LIMIT,
   WS_PAYLOAD_SAMPLE_LIMIT,
+  WS_PAYLOAD_MAX_BYTES,
 } from '@src/constants/streaming';
 import type {
   StreamingSharedState,
@@ -55,6 +56,12 @@ type ExportFormat = 'json' | 'ndjson';
 
 const parseExportFormat = (value: unknown): ExportFormat =>
   value === 'ndjson' ? 'ndjson' : 'json';
+
+/** Truncate a UTF-8 string to at most `maxBytes` bytes (may split a multi-byte char at the boundary). */
+function truncateUtf8ToBytes(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
+  return Buffer.from(text, 'utf8').subarray(0, maxBytes).toString('utf8');
+}
 
 /**
  * Runs in the browser. Wraps window.WebSocket so each new WebSocket instance is
@@ -209,6 +216,16 @@ export class WsHandlers {
 
     const timestamp = getNumberField(params, 'timestamp') ?? Date.now() / 1000;
 
+    // Retain at most WS_PAYLOAD_MAX_BYTES of the full payload per frame; an
+    // oversized frame keeps only the truncated payload + full payloadLength +
+    // a truncated marker so a single multi-MB frame cannot blow out host memory.
+    let payload = payloadData;
+    let payloadTruncated = false;
+    if (Buffer.byteLength(payloadData, 'utf8') > WS_PAYLOAD_MAX_BYTES) {
+      payload = truncateUtf8ToBytes(payloadData, WS_PAYLOAD_MAX_BYTES);
+      payloadTruncated = true;
+    }
+
     const frame: WsFrameRecord = {
       requestId,
       timestamp,
@@ -217,7 +234,8 @@ export class WsHandlers {
       payloadLength: payloadData.length,
       payloadPreview,
       payloadSample,
-      payload: payloadData,
+      payload,
+      payloadTruncated,
       isBinary: opcode === 2,
     };
 
@@ -480,6 +498,7 @@ export class WsHandlers {
         payloadPreview: frame.payloadPreview,
         isBinary: frame.isBinary,
       };
+      if (frame.payloadTruncated) item.payloadTruncated = true;
       if (fullPayload) item.payload = frame.payload ?? frame.payloadSample;
       return item;
     });
@@ -550,6 +569,7 @@ export class WsHandlers {
         connectionStatus: conn?.status ?? null,
         handshakeStatus: conn?.handshakeStatus ?? null,
       };
+      if (frame.payloadTruncated) record.payloadTruncated = true;
       if (includePayload) record.payload = frame.payload ?? frame.payloadSample;
       return record;
     });

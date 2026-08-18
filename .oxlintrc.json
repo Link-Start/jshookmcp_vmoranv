@@ -49,6 +49,8 @@
           "__xhrInterceptorInjected",
           "__xhrRequests",
           "_bodyUnavailable",
+          "_bodyTruncated",
+          "_originalBodySize",
           "_executionMetrics",
           "_id",
           "_meta",

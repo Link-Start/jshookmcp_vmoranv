@@ -132,7 +132,12 @@ export class GrpcHandlers {
       const body = typeof resp?.body === 'string' ? resp.body : '';
       const base64Encoded = resp?.base64Encoded === true;
       if (body) {
-        const parsed = parseGrpcFrames(body, base64Encoded ? 'base64' : 'hex');
+        // includeHex:false — the retained frames keep only payloadBase64 (the
+        // protobuf_decode_raw input); payloadHex is display-only and would double
+        // the resident bytes of every captured message.
+        const parsed = parseGrpcFrames(body, base64Encoded ? 'base64' : 'hex', {
+          includeHex: false,
+        });
         record.responseMessages = parsed.frames;
         record.responseBodyBytes = parsed.totalBytes;
         if (parsed.warnings.length > 0) record.warnings.push(...parsed.warnings);
@@ -146,7 +151,7 @@ export class GrpcHandlers {
       const pd = (await session.send('Network.getRequestPostData', { requestId })) as UnknownRecord;
       const postData = typeof pd?.postData === 'string' ? pd.postData : '';
       if (postData) {
-        const parsed = parseGrpcFrames(postData, 'base64');
+        const parsed = parseGrpcFrames(postData, 'base64', { includeHex: false });
         record.requestMessages = parsed.frames;
         record.requestBodyBytes = parsed.totalBytes;
         if (parsed.warnings.length > 0) record.warnings.push(...parsed.warnings);

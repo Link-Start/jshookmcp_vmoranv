@@ -32,6 +32,8 @@ export interface WsFrameRecord {
   payloadPreview: string;
   payloadSample: string;
   payload?: string;
+  /** True when the retained `payload` was truncated to the per-frame byte budget. */
+  payloadTruncated?: boolean;
   isBinary: boolean;
 }
 

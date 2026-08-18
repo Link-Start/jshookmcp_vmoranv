@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 
 import { buildHar } from '@server/domains/network/har';
 import type { BuildHarParams, Har, HarEntry } from '@server/domains/network/har';
+import { NETWORK_HAR_BODY_MAX_BYTES } from '@src/constants/network';
 import { buildTestUrl } from '@tests/shared/test-urls';
 
 // ---------------------------------------------------------------------------
@@ -540,6 +541,44 @@ describe('buildHar', () => {
     });
 
     expect(getEntry(har).response.content._bodyUnavailable).toBe(true);
+  });
+
+  it('truncates oversized response bodies to the byte budget with a marker', async () => {
+    const big = 'a'.repeat(NETWORK_HAR_BODY_MAX_BYTES + 100);
+    getResponseMock.mockReturnValue(makeResponse());
+    getResponseBodyMock.mockResolvedValue({ body: big, base64Encoded: false });
+
+    const har = await buildHar({
+      requests: [makeRequest()],
+      getResponse: getResponseMock,
+      getResponseBody: getResponseBodyMock,
+      includeBodies: true,
+    });
+
+    const content = getEntry(har).response.content;
+    expect(content._bodyTruncated).toBe(true);
+    expect(content._originalBodySize).toBe(Buffer.byteLength(big, 'utf8'));
+    expect(Buffer.byteLength(content.text!, 'utf8')).toBeLessThanOrEqual(
+      NETWORK_HAR_BODY_MAX_BYTES,
+    );
+    expect(content.text!.length).toBeLessThan(big.length);
+  });
+
+  it('leaves small response bodies untruncated', async () => {
+    getResponseMock.mockReturnValue(makeResponse());
+    getResponseBodyMock.mockResolvedValue({ body: '{"small":true}', base64Encoded: false });
+
+    const har = await buildHar({
+      requests: [makeRequest()],
+      getResponse: getResponseMock,
+      getResponseBody: getResponseBodyMock,
+      includeBodies: true,
+    });
+
+    const content = getEntry(har).response.content;
+    expect(content.text).toBe('{"small":true}');
+    expect(content._bodyTruncated).toBeUndefined();
+    expect(content._originalBodySize).toBeUndefined();
   });
 
   // -----------------------------------------------------------------------
