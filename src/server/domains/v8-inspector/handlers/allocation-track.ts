@@ -35,6 +35,8 @@
 import { argNumber } from '@server/domains/shared/parse-args';
 import { normalizeSessionSource, resolveTargetSession } from './cdp-session';
 import type { CDPSessionLike, SessionSource } from './cdp-session';
+import { HEAP_PARSE_JOB_TIMEOUT_MS } from './heap-parse-worker';
+import type { HeapParsePool } from './heap-parse-worker';
 
 export interface LiveAllocation {
   objectId: number;
@@ -120,7 +122,7 @@ async function collectSnapshotChunks(
 }
 
 /** Snapshot trace data parsed out of the tracking snapshot. */
-interface ParsedAllocationSnapshot {
+export interface ParsedAllocationSnapshot {
   ok: boolean;
   error?: string;
   allocations: LiveAllocation[];
@@ -438,9 +440,32 @@ export function parseAllocationSnapshot(chunks: string[]): ParsedAllocationSnaps
   return { ok: true, allocations, totalLiveBytes, trackedNodeCount };
 }
 
+/**
+ * Parse a tracking snapshot into live allocations, off the main thread when a
+ * pool is wired in.
+ *
+ * With a pool: the chunks array is posted to the heap-parse worker, which does
+ * the `join('')` + `JSON.parse` + allocation build + size sort (the GB-scale
+ * work that otherwise freezes the event loop). Without a pool (direct handler
+ * calls / tests): falls back to the synchronous `parseAllocationSnapshot` and
+ * sorts on the main thread. Production injects the shared pool via impl.ts.
+ */
+async function parseAllocationSnapshotWithPool(
+  chunks: string[],
+  pool?: HeapParsePool,
+): Promise<ParsedAllocationSnapshot> {
+  if (!pool) {
+    const parsed = parseAllocationSnapshot(chunks);
+    parsed.allocations.sort((a, b) => b.sizeBytes - a.sizeBytes);
+    return parsed;
+  }
+  return pool.submit({ chunks }, HEAP_PARSE_JOB_TIMEOUT_MS);
+}
+
 export async function handleAllocationTrack(
   args: Record<string, unknown>,
   source?: SessionSource,
+  pool?: HeapParsePool,
 ): Promise<AllocationTrackResult> {
   const durationRaw = argNumber(args, 'durationMs', 3000);
   const durationMs = Math.min(
@@ -505,7 +530,7 @@ export async function handleAllocationTrack(
       chunks = await collectSnapshotChunks(session, cdp, 'HeapProfiler.takeHeapSnapshot');
     }
 
-    const parsed = parseAllocationSnapshot(chunks);
+    const parsed = await parseAllocationSnapshotWithPool(chunks, pool);
     if (!parsed.ok) {
       return {
         success: false,
@@ -531,7 +556,8 @@ export async function handleAllocationTrack(
       };
     }
 
-    parsed.allocations.sort((a, b) => b.sizeBytes - a.sizeBytes);
+    // Allocations are already sorted by size descending (the worker sorts, as
+    // does the sync fallback in parseAllocationSnapshotWithPool).
     const top = parsed.allocations.slice(0, topN);
 
     return {

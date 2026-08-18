@@ -164,8 +164,12 @@ export class V8InspectorHandlers {
       requirePageController(this.deps.ctx);
       const { handleAllocationTrack } =
         await import('@server/domains/v8-inspector/handlers/allocation-track');
+      const { getHeapParsePool } =
+        await import('@server/domains/v8-inspector/handlers/heap-parse-worker');
+      // The tracking heap snapshot can be GB-scale; its JSON.parse + allocation
+      // build/sort run in the worker pool, not on the event loop (b1-02).
       return cdpLimit(() =>
-        handleAllocationTrack(args, createTargetSessionResolver(this.deps.ctx)),
+        handleAllocationTrack(args, createTargetSessionResolver(this.deps.ctx), getHeapParsePool()),
       );
     });
   }
