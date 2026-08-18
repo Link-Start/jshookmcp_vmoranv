@@ -59,6 +59,16 @@ export function buildLayaSceneTreeDumpPayload(opts: DumpOpts): string {
     try { var v = node[key]; return v === undefined || v === null ? fallback : v; } catch(e) { return fallback; }
   }
 
+  function toPt(p) {
+    // LayaAir 2.8's minified transform nodes call t.setTo(x, y) on the point
+    // passed to localToGlobal/globalToLocal, which throws "t.setTo is not a
+    // function" for a plain {x,y} literal. Wrap in a real Laya.Point when the
+    // engine exposes one; otherwise pass the literal through unchanged.
+    return (window.Laya && typeof window.Laya.Point === 'function')
+      ? new window.Laya.Point(p.x, p.y)
+      : p;
+  }
+
   function localToGlobalRect(node) {
     if (!node) return { x: 0, y: 0, width: 0, height: 0 };
     try {
@@ -68,10 +78,10 @@ export function buildLayaSceneTreeDumpPayload(opts: DumpOpts): string {
         // Map all four corners and take the axis-aligned bounding box. The old
         // two-corner span (0,0)→(w,h) only measured the diagonal, which collapses
         // to zero width/height for rotated nodes (e.g. a 45° square).
-        var c0 = node.localToGlobal({ x: 0, y: 0 });
-        var c1 = node.localToGlobal({ x: w, y: 0 });
-        var c2 = node.localToGlobal({ x: 0, y: h });
-        var c3 = node.localToGlobal({ x: w, y: h });
+        var c0 = node.localToGlobal(toPt({ x: 0, y: 0 }));
+        var c1 = node.localToGlobal(toPt({ x: w, y: 0 }));
+        var c2 = node.localToGlobal(toPt({ x: 0, y: h }));
+        var c3 = node.localToGlobal(toPt({ x: w, y: h }));
         var minX = Math.min(c0.x, c1.x, c2.x, c3.x);
         var maxX = Math.max(c0.x, c1.x, c2.x, c3.x);
         var minY = Math.min(c0.y, c1.y, c2.y, c3.y);
@@ -218,6 +228,16 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
     try { var v = node[key]; return v === undefined || v === null ? fallback : v; } catch(e) { return fallback; }
   }
 
+  function toPt(p) {
+    // LayaAir 2.8's minified transform nodes call t.setTo(x, y) on the point
+    // passed to localToGlobal/globalToLocal, which throws "t.setTo is not a
+    // function" for a plain {x,y} literal. Wrap in a real Laya.Point when the
+    // engine exposes one; otherwise pass the literal through unchanged.
+    return (window.Laya && typeof window.Laya.Point === 'function')
+      ? new window.Laya.Point(p.x, p.y)
+      : p;
+  }
+
   function localToGlobalRect(node) {
     if (!node) return { x: 0, y: 0, width: 0, height: 0 };
     try {
@@ -227,10 +247,10 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
         // Map all four corners and take the axis-aligned bounding box. The old
         // two-corner span (0,0)→(w,h) only measured the diagonal, which collapses
         // to zero width/height for rotated nodes (e.g. a 45° square).
-        var c0 = node.localToGlobal({ x: 0, y: 0 });
-        var c1 = node.localToGlobal({ x: w, y: 0 });
-        var c2 = node.localToGlobal({ x: 0, y: h });
-        var c3 = node.localToGlobal({ x: w, y: h });
+        var c0 = node.localToGlobal(toPt({ x: 0, y: 0 }));
+        var c1 = node.localToGlobal(toPt({ x: w, y: 0 }));
+        var c2 = node.localToGlobal(toPt({ x: 0, y: h }));
+        var c3 = node.localToGlobal(toPt({ x: w, y: h }));
         var minX = Math.min(c0.x, c1.x, c2.x, c3.x);
         var maxX = Math.max(c0.x, c1.x, c2.x, c3.x);
         var minY = Math.min(c0.y, c1.y, c2.y, c3.y);
@@ -247,7 +267,11 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
   function nodePath(node) {
     var parts = [];
     var cur = node;
-    while (cur && cur !== window.Laya.stage) {
+    // A malicious page can create a parent cycle (node.parent === node, or a
+    // longer loop); the visited set bounds the walk so nodePath can never hang.
+    var visited = new Set();
+    while (cur && cur !== window.Laya.stage && !visited.has(cur)) {
+      visited.add(cur);
       var name = cur.name || nodeId(cur, 0);
       parts.unshift(name);
       cur = cur.parent;
@@ -293,9 +317,12 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
     canvasY = (sy - rect.top) * (targetCanvas.height / rect.height);
   }
 
-  // Canvas → stage: use mouseX/mouseY when available (set by Laya's event system)
-  var stageX = safeProp(stage, 'mouseX', canvasX / (scaleX || 1));
-  var stageY = safeProp(stage, 'mouseY', canvasY / (scaleY || 1));
+  // Canvas → stage. Laya's stage.mouseX/mouseY stay 0 under CDP-driven mouse
+  // moves (the engine's own event system never fires), so compute the stage
+  // coordinate directly from the canvas coordinate and the client scale factor
+  // instead of trusting the stale mouseX/mouseY.
+  var stageX = canvasX / (scaleX || 1);
+  var stageY = canvasY / (scaleY || 1);
 
   var candidates = [];
 
@@ -329,17 +356,31 @@ export function buildLayaHitTestPayload(opts: PickOpts): string {
     } catch(e) {}
   }
 
-  // Recursive DFS hit test (always available; 2.x fallback for 3.x too)
+  // Recursive DFS hit test (always available; 2.x fallback for 3.x too).
+  // Bounded by a depth cap (aligned with the scene-dump maxDepth default) plus
+  // a visited set, so a malicious/cyclic scene graph (e.g. a node listing
+  // itself in _children) can neither overflow the stack nor hang the pick.
+  var hitTestMaxDepth = 20;
+  var hitTestVisited = new Set();
   function hitTestDfs(node, depth, accPath) {
-    if (!node || !safeProp(node, 'visible', true)) return;
+    if (!node || depth > hitTestMaxDepth || hitTestVisited.has(node)) return;
+    hitTestVisited.add(node);
+    if (!safeProp(node, 'visible', true)) return;
 
     var wb = localToGlobalRect(node);
 
     // Convert stage → node local with a single full inverse chain. Applying
     // globalToLocal at each ancestor would transform the same point repeatedly.
-    var localPt = node.globalToLocal
-      ? node.globalToLocal({ x: stageX, y: stageY })
-      : { x: stageX, y: stageY };
+    // A page can override globalToLocal to throw; fall back to stage coords so
+    // one bad node cannot abort the entire pick.
+    var localPt = { x: stageX, y: stageY };
+    if (node.globalToLocal) {
+      try {
+        localPt = node.globalToLocal(toPt({ x: stageX, y: stageY }));
+      } catch (e) {
+        localPt = { x: stageX, y: stageY };
+      }
+    }
     var lx = localPt.x, ly = localPt.y;
 
     // Bounds check in the node's own local frame (top-left origin, width ×

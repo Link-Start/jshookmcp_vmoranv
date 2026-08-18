@@ -668,7 +668,7 @@ describe('NetworkMonitor.impl – response body cache and persistence', () => {
 
   // ── explicit getResponseBody content-length pre-check ──────────────────
   describe('getResponseBody explicit content-length pre-check', () => {
-    it('returns null without fetching when content-length exceeds the single-body cap', async () => {
+    it('throws a skipped ToolError without fetching when content-length exceeds the single-body cap', async () => {
       const { session, send, emit } = createMockSession();
       const monitor = new NetworkMonitor(session);
       await monitor.enable();
@@ -692,9 +692,16 @@ describe('NetworkMonitor.impl – response body cache and persistence', () => {
 
       send.mockClear();
       send.mockResolvedValueOnce({ body: 'oversized', base64Encoded: false });
-      const body = await monitor.getResponseBody('r1');
 
-      expect(body).toBeNull();
+      await expect(monitor.getResponseBody('r1')).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+        details: {
+          skipped: true,
+          reason: 'content-length over single-body cap',
+          requestId: 'r1',
+        },
+      });
+
       const getBodyCalls = send.mock.calls.filter(
         ([method]) => method === 'Network.getResponseBody',
       );

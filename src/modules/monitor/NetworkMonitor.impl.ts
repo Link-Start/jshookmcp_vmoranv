@@ -1,5 +1,6 @@
 import type { CDPSessionLike } from '@modules/browser/CDPSessionLike';
 import { logger } from '@utils/logger';
+import { ToolError } from '@errors/ToolError';
 import type {
   NetworkMonitorLike,
   NetworkRequest,
@@ -584,11 +585,24 @@ export class NetworkMonitor implements NetworkMonitorLike {
     // Pre-check content-length so an explicit getResponseBody doesn't pull an
     // oversized body into memory (b1-06 guarded auto-capture; this guards the
     // direct path). Reuses the skipBodyCapture set populated on responseReceived.
+    // Throw (rather than return null) so the caller can distinguish a skipped
+    // body from a genuinely-not-found one and stop retrying.
     if (this.skipBodyCapture.has(requestId)) {
       logger.warn(
         `Response body skipped for ${requestId}: content-length exceeds the single-body cap`,
       );
-      return null;
+      throw new ToolError(
+        'NOT_FOUND',
+        `Response body skipped for ${requestId}: content-length exceeds the single-body cap`,
+        {
+          toolName: 'network_get_response_body',
+          details: {
+            skipped: true,
+            reason: 'content-length over single-body cap',
+            requestId,
+          },
+        },
+      );
     }
 
     try {
@@ -653,7 +667,17 @@ export class NetworkMonitor implements NetworkMonitorLike {
       const batch = candidates.slice(i, i + this.JS_RESPONSE_CONCURRENCY);
       const batchResults = await Promise.all(
         batch.map(async ([requestId, response]) => {
-          const bodyResult = await this.getResponseBody(requestId);
+          let bodyResult: { body: string; base64Encoded: boolean } | null = null;
+          try {
+            bodyResult = await this.getResponseBody(requestId);
+          } catch (error) {
+            // A skipped body (content-length over cap) is not an error for
+            // collection — omit this response exactly like a missing body.
+            if (error instanceof ToolError && error.details?.skipped === true) {
+              return null;
+            }
+            throw error;
+          }
           if (!bodyResult) {
             return null;
           }

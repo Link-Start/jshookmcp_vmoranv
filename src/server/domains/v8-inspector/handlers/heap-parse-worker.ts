@@ -34,9 +34,13 @@ const HEAP_PARSE_POOL_MAX_WORKERS = 2;
 const HEAP_PARSE_POOL_IDLE_TIMEOUT_MS = 30_000;
 export const HEAP_PARSE_JOB_TIMEOUT_MS = 60_000;
 /**
- * Old-gen heap cap (MB) for heap-parse workers. A full tracking snapshot is
- * GB-scale, so the parse worker needs a large old-gen ceiling — contrast the
- * transform crypto-harness's 64MB cap, which only runs small test snippets.
+ * Old-gen heap cap (MB) for heap-parse workers. A full tracking snapshot can
+ * be GB-scale, but the worker is deliberately capped at 512MB old-gen: a
+ * snapshot whose parsed representation exceeds this cap OOM-crashes the worker,
+ * which surfaces as a failed job (`success: false`) rather than a partial
+ * result. The ceiling trades the largest (multi-GB) captures for a bounded,
+ * predictable worker memory footprint — contrast the transform crypto-harness's
+ * 64MB cap, which only runs small test snippets.
  */
 const HEAP_PARSE_POOL_MAX_OLD_GEN_MB = 512;
 /** Young-gen heap cap (MB) for heap-parse workers. */

@@ -20,6 +20,24 @@ function sind(deg: number): number {
   return Math.sin((deg * Math.PI) / 180);
 }
 
+// Faithful Laya.Point: localToGlobal/globalToLocal write their result back via
+// point.setTo(x, y). LayaAir 2.8's minified build calls t.setTo() on the passed
+// point, so a plain {x,y} literal throws "t.setTo is not a function" — matching
+// the real engine on http://aola.100bt.com/h5. The adapter must wrap its point
+// literals in a real Laya.Point (see toPt in laya-adapter.ts).
+class LayaPoint {
+  x: number;
+  y: number;
+  constructor(x = 0, y = 0) {
+    this.x = x;
+    this.y = y;
+  }
+  setTo(x: number, y: number): void {
+    this.x = x;
+    this.y = y;
+  }
+}
+
 function makeLayaNode(props: Record<string, any> = {}): any {
   const node: any = {
     x: 0,
@@ -50,7 +68,7 @@ function makeLayaNode(props: Record<string, any> = {}): any {
     return child;
   };
 
-  node.localToGlobal = function (point: { x: number; y: number }): { x: number; y: number } {
+  node.localToGlobal = function (point: any): any {
     let x = point.x;
     let y = point.y;
     let cur: any = node;
@@ -67,10 +85,13 @@ function makeLayaNode(props: Record<string, any> = {}): any {
       y = ry + cur.y;
       cur = cur.parent;
     }
-    return { x, y };
+    // Faithful to Laya 2.8: the result is written back through point.setTo(),
+    // so a plain {x,y} literal (no setTo) throws exactly like the real engine.
+    point.setTo(x, y);
+    return point;
   };
 
-  node.globalToLocal = function (point: { x: number; y: number }): { x: number; y: number } {
+  node.globalToLocal = function (point: any): any {
     let x = point.x;
     let y = point.y;
     const chain: any[] = [];
@@ -90,7 +111,8 @@ function makeLayaNode(props: Record<string, any> = {}): any {
       x = ux / n.scaleX + n.pivotX;
       y = uy / n.scaleY + n.pivotY;
     }
-    return { x, y };
+    point.setTo(x, y);
+    return point;
   };
 
   return node;
@@ -137,6 +159,7 @@ function setupLayaPage(opts: SetupOpts = {}) {
   window.Laya = {
     version: opts.isLaya3 ? '3.0.0' : '2.12.0',
     stage,
+    Point: LayaPoint,
   } as any;
   if (opts.isLaya3) {
     (window.Laya as any).InputManager = {};
@@ -225,6 +248,32 @@ describe('buildLayaHitTestPayload (executed on a faithful Laya mock)', () => {
 
     expect(result.picked).not.toBeNull();
     expect(result.picked.id).toBe('child');
+  });
+
+  it('ignores the stale stage.mouseX/mouseY (always 0 under CDP) and computes stage coords directly', () => {
+    const { window, stage } = setupLayaPage();
+    const sprite = makeLayaNode({
+      x: 100,
+      y: 100,
+      width: 50,
+      height: 50,
+      typeName: 'Sprite',
+      id: 'player',
+    });
+    stage.addChild(sprite);
+    // Real Laya 2.8 on the target page keeps stage.mouseX/mouseY at 0 because
+    // the engine's own event system never receives a real mouse event under CDP.
+    // Reading them as "valid" would make the stage coordinate a constant (0,0)
+    // and miss the sprite entirely.
+    stage.mouseX = 0;
+    stage.mouseY = 0;
+
+    const result = runPick(window, 125, 125);
+
+    expect(result.picked).not.toBeNull();
+    expect(result.picked.id).toBe('player');
+    expect(result.coordinates.stage.x).toBe(125);
+    expect(result.coordinates.stage.y).toBe(125);
   });
 
   it('returns a full CanvasSceneNode from the 3.x engine path', () => {
