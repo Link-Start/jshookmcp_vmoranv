@@ -262,6 +262,15 @@ export const OFFLOADER_DETAIL_THRESHOLD_BYTES = int('OFFLOADER_DETAIL_THRESHOLD'
 /** LargeDataOffloader: strings larger than this (bytes) go directly to a file. */
 export const OFFLOADER_FILE_THRESHOLD_BYTES = int('OFFLOADER_FILE_THRESHOLD', 4 * 1024 * 1024);
 
+/**
+ * handleGetOffloadedData read-back guard: refuse to read an offloaded file
+ * larger than this (bytes) back into memory in a single read. A multi-MB blob
+ * read synchronously would freeze the event loop and balloon ~33% larger as a
+ * base64 string. Offloaded files live in artifacts/offloaded/; raise this env
+ * var deliberately only when a caller must read back a larger blob (a2-05/a4-05).
+ */
+export const MAX_OFFLOADED_READ_BYTES = int('MAX_OFFLOADED_READ_BYTES', 64 * 1024 * 1024);
+
 /* ================================================================== */
 /*  Buffer sizes                                                       */
 /* ================================================================== */
