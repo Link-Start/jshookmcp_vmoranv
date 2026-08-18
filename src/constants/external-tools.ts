@@ -95,6 +95,37 @@ export const NEMU_CALL_MAX_STEPS = int('NEMU_CALL_MAX_STEPS', 1_000_000);
  */
 export const NEMU_PROFILE_MAX_STEPS = int('NEMU_PROFILE_MAX_STEPS', 500_000);
 
+/**
+ * Hard cap on the on-disk size of a single `.so` file read by `nemu_load_library`
+ * (and each dependency / the primary in `nemu_load_library_chain`). The
+ * `loadLibraryChain` path also enforces this budget over the summed dependency
+ * sizes. Sized before any read via `stat`, so an oversized file is rejected
+ * without being buffered into memory.
+ *
+ * @env NEMU_MAX_SO_BYTES
+ * @default 256 MiB
+ */
+export const NEMU_MAX_SO_BYTES = int('NEMU_MAX_SO_BYTES', 256 * 1024 * 1024);
+
+/**
+ * Per-file byte cap for VFS files injected via `nemu_create_session` `files`
+ * (base64-decoded size).
+ *
+ * @env NEMU_VFS_MAX_FILE_BYTES
+ * @default 16 MiB
+ */
+export const NEMU_VFS_MAX_FILE_BYTES = int('NEMU_VFS_MAX_FILE_BYTES', 16 * 1024 * 1024);
+
+/**
+ * Total byte cap across all VFS files injected via `nemu_create_session`
+ * `files`. Rejecting the whole payload keeps a single session from pinning an
+ * unbounded amount of base64-decoded guest-memory.
+ *
+ * @env NEMU_VFS_MAX_TOTAL_BYTES
+ * @default 64 MiB
+ */
+export const NEMU_VFS_MAX_TOTAL_BYTES = int('NEMU_VFS_MAX_TOTAL_BYTES', 64 * 1024 * 1024);
+
 /* ================================================================== */
 /*  Binary string extraction                                           */
 /* ================================================================== */

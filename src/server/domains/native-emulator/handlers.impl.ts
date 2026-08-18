@@ -11,7 +11,7 @@
  * Java-mock registration is declarative (a constant int/string/bytes) — no
  * caller-supplied code is ever evaluated.
  */
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 
 import {
   SessionManager,
@@ -41,7 +41,13 @@ import {
 } from '@server/domains/shared/parse-args';
 import type { ToolArgs, ToolResponse } from '@server/types';
 import { getReverseEngineeringConfig } from '@utils/reverseEngineeringConfig';
-import { NEMU_CALL_MAX_STEPS, NEMU_PROFILE_MAX_STEPS } from '@src/constants';
+import {
+  NEMU_CALL_MAX_STEPS,
+  NEMU_PROFILE_MAX_STEPS,
+  NEMU_MAX_SO_BYTES,
+  NEMU_VFS_MAX_FILE_BYTES,
+  NEMU_VFS_MAX_TOTAL_BYTES,
+} from '@src/constants';
 import { nativeCallFailure, nativeDiagnostics } from './handler-call';
 import { formatOpcodeInput, parseOpcodeInput, parseProgramCounter } from './handler-disasm';
 import { buildJavaFieldValue, buildJavaMockImpl } from './handler-java';
@@ -76,6 +82,20 @@ function clampNativeMaxSteps(raw: number | undefined): {
     return { maxSteps: NEMU_CALL_MAX_STEPS, clamped: true };
   }
   return { maxSteps: raw, clamped: false };
+}
+
+/**
+ * Stat a `.so` path and reject when its on-disk size exceeds `cap`, returning
+ * the size. Sizing happens before any `readFile`, so an oversized library is
+ * refused without first buffering it into memory (a malicious path can point at
+ * an arbitrarily large file).
+ */
+async function ensureSoWithinCap(path: string, cap: number): Promise<number> {
+  const info = await stat(path);
+  if (info.size > cap) {
+    throw new Error(`.so file "${path}" is ${info.size} bytes, which exceeds the ${cap}-byte cap`);
+  }
+  return info.size;
 }
 
 /** One node of the profile-mode call tree (BL/BLR targets aggregated). */
@@ -254,8 +274,9 @@ export class NativeEmulatorHandlers {
     return handleSafe(async () => {
       const session = this.requireSession(args);
       const soPath = argStringRequired(args, 'soPath');
-      const bytes = await readFile(soPath);
-      const loaded = session.emulator.loadLibrary(toUint8(bytes));
+      await ensureSoWithinCap(soPath, NEMU_MAX_SO_BYTES);
+      const bytes = toUint8(await readFile(soPath));
+      const loaded = session.emulator.loadLibrary(bytes);
       return {
         sessionId: session.id,
         soPath,
@@ -277,12 +298,24 @@ export class NativeEmulatorHandlers {
         throw new Error('dependencyPaths must contain at least one dependency .so path');
       }
 
-      // Read all dependency bytes
-      const depBytes: Uint8Array[] = [];
+      // Size-check every file before reading: each dependency must fit within
+      // the per-file cap, and their summed size must stay within the same
+      // budget so a chain of many .so files cannot exhaust memory.
+      let totalDependencyBytes = 0;
       for (const depPath of dependencyPaths) {
-        const bytes = await readFile(depPath);
-        depBytes.push(toUint8(bytes));
+        totalDependencyBytes += await ensureSoWithinCap(depPath, NEMU_MAX_SO_BYTES);
+        if (totalDependencyBytes > NEMU_MAX_SO_BYTES) {
+          throw new Error(
+            `dependency .so chain total ${totalDependencyBytes} bytes exceeds the ${NEMU_MAX_SO_BYTES}-byte cap`,
+          );
+        }
       }
+      await ensureSoWithinCap(primaryPath, NEMU_MAX_SO_BYTES);
+
+      // Read all dependency bytes
+      const depBytes = await Promise.all(
+        dependencyPaths.map(async (depPath) => toUint8(await readFile(depPath))),
+      );
 
       // Read primary bytes
       const primaryBytes = toUint8(await readFile(primaryPath));
@@ -2640,9 +2673,24 @@ function decodeBionicOptions(
   extraSymbolsValue?: unknown,
 ): BionicOptions | undefined {
   const files = new Map<string, Uint8Array>();
+  let totalBytes = 0;
   if (typeof filesValue === 'object' && filesValue !== null && !Array.isArray(filesValue)) {
     for (const [path, encoded] of Object.entries(filesValue)) {
-      if (typeof encoded === 'string') files.set(path, toUint8(Buffer.from(encoded, 'base64')));
+      if (typeof encoded === 'string') {
+        const bytes = toUint8(Buffer.from(encoded, 'base64'));
+        if (bytes.length > NEMU_VFS_MAX_FILE_BYTES) {
+          throw new Error(
+            `VFS file "${path}" is ${bytes.length} bytes, which exceeds the ${NEMU_VFS_MAX_FILE_BYTES}-byte per-file cap`,
+          );
+        }
+        totalBytes += bytes.length;
+        if (totalBytes > NEMU_VFS_MAX_TOTAL_BYTES) {
+          throw new Error(
+            `VFS files total ${totalBytes} bytes exceeds the ${NEMU_VFS_MAX_TOTAL_BYTES}-byte cap`,
+          );
+        }
+        files.set(path, bytes);
+      }
     }
   }
   const extraSymbols = new Map<string, number>();
