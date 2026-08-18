@@ -1,4 +1,4 @@
-import type { MemoryScanner, ScanResult } from '@native/MemoryScanner';
+import type { MemoryScanner } from '@native/MemoryScanner';
 import type {
   ScanCompareMode,
   ScanOptions,
@@ -20,21 +20,7 @@ import {
 import { logger } from '@utils/logger';
 import { MemoryAuditTrail } from '@modules/process/memory/AuditTrail';
 import { validateHexAddress, requireStringArg, validateValueForType } from './validation';
-import {
-  createDiskScanSession,
-  appendToDiskScan,
-  MAX_DISK_SCAN_ADDRESSES,
-} from './scan-persistence';
-
-/**
- * `ScanResult` with the legacy per-address `results` detail array. The scanner
- * stopped returning per-address values (`results` is undefined at runtime), but
- * the handler still reads it defensively; it is typed separately here so the
- * handler compiles without changing its runtime behaviour.
- */
-type ScanResultWithValues = ScanResult & {
-  results?: Array<{ address: string; value: unknown }>;
-};
+import { createDiskScanSession, MAX_DISK_SCAN_ADDRESSES } from './scan-persistence';
 
 // ── AOB operator types ──
 
@@ -253,29 +239,13 @@ export class ScanHandlers {
           );
         }
 
-        // Stream results to disk if addresses are available
-        const diskResult = result as ScanResultWithValues;
-        if (diskResult.results && diskResult.results.length > 0) {
-          const records: Array<{ address: bigint; value: bigint }> = [];
-          const batchSize = 10000;
-          for (let i = 0; i < diskResult.results.length; i += 1) {
-            const r = diskResult.results[i]!;
-            try {
-              const addr = BigInt(r.address.replace(/^0x/i, '0x') || '0x0');
-              const valStr = typeof r.value === 'string' ? r.value : String(r.value ?? '0');
-              const val = BigInt(valStr.replace(/^0x/i, '0x') || '0x0');
-              records.push({ address: addr, value: val });
-            } catch {
-              // Skip unparseable entries
-            }
-            if (records.length >= batchSize || i === diskResult.results.length - 1) {
-              if (records.length > 0) {
-                appendToDiskScan(result.sessionId, records);
-                records.length = 0;
-              }
-            }
-          }
-        }
+        // Stream results to disk.
+        // TODO(disk-scan): the scanner no longer returns per-address `results`
+        // (it returns `addresses: string[]` only, with values held in the scan
+        // session's `previousValues`). Persisting address+value records here
+        // therefore had nothing to read — `appendToDiskScan` was never reached,
+        // so persisted files were silently empty. Re-wire value persistence
+        // from `scanSessionManager.previousValues` before re-enabling.
       }
 
       return {
@@ -543,6 +513,9 @@ export class ScanHandlers {
         length: number;
       }> = [];
 
+      const matchesPattern = (value: string): boolean =>
+        regex ? regex.test(value) : value.toLowerCase().includes(pattern.toLowerCase());
+
       // ── ASCII / UTF-8 scan via MemoryScanner valueType='string' ──
       try {
         const asciiResult = await this.scanner.firstScan(pid, pattern, {
@@ -551,20 +524,11 @@ export class ScanHandlers {
           maxResults,
           onProgress,
         });
-        const asciiResults = (asciiResult as ScanResultWithValues).results;
-        if (asciiResults) {
-          for (const r of asciiResults) {
-            const val = typeof r.value === 'string' ? r.value : String(r.value ?? '');
-            if (val.length < minLength) continue;
-            if (regex && !regex.test(val)) continue;
-            if (!regex && !useRegex && !val.toLowerCase().includes(pattern.toLowerCase())) continue;
-            allResults.push({
-              address: r.address,
-              value: val,
-              encoding: 'utf8',
-              length: val.length,
-            });
-          }
+        const strings = await readStringsAtAddresses(pid, asciiResult.addresses ?? [], 'utf8');
+        for (const { address, value } of strings) {
+          if (value.length < minLength) continue;
+          if (!matchesPattern(value)) continue;
+          allResults.push({ address, value, encoding: 'utf8', length: value.length });
         }
       } catch {
         // String scan can fail if the scanner doesn't support valueType='string'
@@ -589,23 +553,11 @@ export class ScanHandlers {
             maxResults: Math.min(remaining, maxResults),
             onProgress,
           });
-          const wideResults = (wideResult as ScanResultWithValues).results;
-          if (wideResults) {
-            for (const r of wideResults) {
-              const val = typeof r.value === 'string' ? r.value : String(r.value ?? '');
-              // Decode UTF-16LE from the found region
-              const decoded = decodeUTF16LEFromHex(val, pattern.length * 2);
-              if (decoded.length < minLength) continue;
-              if (regex && !regex.test(decoded)) continue;
-              if (!regex && !useRegex && !decoded.toLowerCase().includes(pattern.toLowerCase()))
-                continue;
-              allResults.push({
-                address: r.address,
-                value: decoded,
-                encoding: 'utf16le',
-                length: decoded.length,
-              });
-            }
+          const strings = await readStringsAtAddresses(pid, wideResult.addresses ?? [], 'utf16le');
+          for (const { address, value } of strings) {
+            if (value.length < minLength) continue;
+            if (!matchesPattern(value)) continue;
+            allResults.push({ address, value, encoding: 'utf16le', length: value.length });
           }
         } catch {
           // Wide scan best-effort — hex scan may not be supported on all platforms
@@ -781,11 +733,15 @@ export class ScanHandlers {
       // Read memory from process
       const { generateSignature } = await import('@native/SignatureGenerator');
       const { createPlatformProvider } = await import('@native/platform/factory.js');
+      const { parseAddress } = await import('@native/formatAddress');
 
       const provider = createPlatformProvider();
       const handle = provider.openProcess(pid, false);
       try {
-        const addrBig = BigInt(address.replace(/^0x/i, '0x'));
+        // parseAddress treats both "0x1000" and "1000" as hex — the previous
+        // BigInt(replace) parsed unprefixed values as decimal and silently
+        // read the wrong address.
+        const addrBig = parseAddress(address);
         const buf = (await provider.readMemory(handle, addrBig, size)).data;
 
         const result = generateSignature(buf, { wildcardRelOffsets });
@@ -800,24 +756,59 @@ export class ScanHandlers {
   }
 }
 
+/** Bytes read at each matched address when extracting a NUL-terminated string. */
+const SEARCH_STRING_READ_BYTES = 1024;
+
 /**
- * Decode a hex string (from a memory scan result) as UTF-16LE.
- * Reads pairs of bytes as little-endian 16-bit code units.
- * Stops at the first null terminator (0x0000).
+ * Extract a NUL-terminated string from a memory buffer using the given encoding.
+ * `utf16le` stops at the first `00 00` code unit; `utf8` stops at the first
+ * zero byte. The full buffer is decoded when no terminator is present.
  */
-function decodeUTF16LEFromHex(hex: string, maxPairs: number): string {
-  const parts = hex.trim().split(/\s+/);
-  const result: string[] = [];
-  const limit = Math.min(parts.length - 1, maxPairs * 2 - 1);
-  for (let i = 0; i < limit; i += 2) {
-    const lo = parseInt(parts[i] ?? '0', 16);
-    const hi = parseInt(parts[i + 1] ?? '0', 16);
-    if (Number.isNaN(lo) || Number.isNaN(hi)) break;
-    const code = lo | (hi << 8);
-    if (code === 0) break;
-    result.push(String.fromCharCode(code));
+function extractNullTerminatedString(buf: Buffer, encoding: 'utf8' | 'utf16le'): string {
+  if (encoding === 'utf16le') {
+    let end = buf.length;
+    for (let i = 0; i + 1 < buf.length; i += 2) {
+      if (buf[i] === 0 && buf[i + 1] === 0) {
+        end = i;
+        break;
+      }
+    }
+    return buf.subarray(0, end).toString('utf16le');
   }
-  return result.join('');
+  const nul = buf.indexOf(0);
+  return (nul === -1 ? buf : buf.subarray(0, nul)).toString('utf8');
+}
+
+/**
+ * Read NUL-terminated strings at the given addresses in the target process.
+ * Returns one entry per successfully-read address; unreadable addresses are
+ * skipped (best-effort). A single process handle is opened for the whole batch.
+ */
+async function readStringsAtAddresses(
+  pid: number,
+  addresses: string[],
+  encoding: 'utf8' | 'utf16le',
+): Promise<Array<{ address: string; value: string }>> {
+  if (addresses.length === 0) return [];
+  const { createPlatformProvider } = await import('@native/platform/factory.js');
+  const { parseAddress } = await import('@native/formatAddress');
+  const provider = createPlatformProvider();
+  const handle = provider.openProcess(pid, false);
+  try {
+    const out: Array<{ address: string; value: string }> = [];
+    for (const addressHex of addresses) {
+      try {
+        const addrBig = parseAddress(addressHex);
+        const buf = (await provider.readMemory(handle, addrBig, SEARCH_STRING_READ_BYTES)).data;
+        out.push({ address: addressHex, value: extractNullTerminatedString(buf, encoding) });
+      } catch {
+        // Unreadable address (e.g. region unmapped since the scan) — skip.
+      }
+    }
+    return out;
+  } finally {
+    provider.closeProcess(handle);
+  }
 }
 
 // ── AOB operator helpers (CE 7.6 parity) ──
