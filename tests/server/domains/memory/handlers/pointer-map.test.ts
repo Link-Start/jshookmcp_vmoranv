@@ -139,8 +139,9 @@ describe('PointerMapHandlers', () => {
       const parsed = parseResponse(response);
       expect(parsed.success).toBe(true);
       expect(parsed.map).toBeDefined();
-      expect(parsed.map.pid).toBe(5678);
-      expect(parsed.map.entries).toHaveLength(2);
+      const map = parsed.map as { pid: number; entries: unknown[] };
+      expect(map.pid).toBe(5678);
+      expect(map.entries).toHaveLength(2);
     });
 
     it('rejects non-existent file', async () => {
@@ -175,7 +176,7 @@ describe('PointerMapHandlers', () => {
 
       const parsed = parseResponse(response);
       expect(parsed.success).toBe(true);
-      expect(parsed.map.totalEntries).toBe(1);
+      expect((parsed.map as { totalEntries: number }).totalEntries).toBe(1);
     });
   });
 

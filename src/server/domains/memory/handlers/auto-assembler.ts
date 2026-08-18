@@ -32,6 +32,8 @@ function assertInjectionEnabled(): void {
   }
 }
 
+// Memory I/O still via MemoryController / Win32API (synchronous koffi) — not yet
+// migrated to createPlatformProvider(); see a4-01/b3-09 (commit c047a09b).
 export class AutoAssemblerHandlers {
   constructor(
     private readonly injector: CodeInjector,

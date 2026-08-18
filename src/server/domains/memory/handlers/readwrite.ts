@@ -71,6 +71,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Read/write still via MemoryController (win32 sync readBuffer/writeBuffer) —
+// not yet migrated to createPlatformProvider(); see a4-01/b3-09 (commit c047a09b).
 export class ReadWriteHandlers {
   private readonly auditTrail: MemoryAuditTrail | null;
 

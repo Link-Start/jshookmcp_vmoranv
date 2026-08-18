@@ -19,7 +19,7 @@ interface EmulatorInfo {
   memoryRegions: EmulatorMemoryRegion[];
 }
 
-interface EmulatorMemoryRegion {
+export interface EmulatorMemoryRegion {
   name: string;
   description: string;
   /** Start address relative to emulator process (0 = dynamic/resolved at runtime) */

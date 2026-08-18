@@ -17,12 +17,13 @@ import {
   getEmulatorMemoryLayout,
   listKnownEmulators,
 } from '../../../../../src/server/domains/memory/handlers/emulator';
+import type { InferredStruct } from '@native/StructureAnalyzer.types';
 
 // ── Feature 1: Rich Type System ──
 
 describe('composite-types — Rust export', () => {
   it('exports a simple struct as Rust #[repr(C)]', () => {
-    const struct = {
+    const struct: InferredStruct = {
       baseAddress: '0x0',
       totalSize: 16,
       fields: [
@@ -41,7 +42,7 @@ describe('composite-types — Rust export', () => {
   });
 
   it('emits padding for gaps between fields', () => {
-    const struct = {
+    const struct: InferredStruct = {
       baseAddress: '0x0',
       totalSize: 16,
       fields: [
@@ -60,7 +61,7 @@ describe('composite-types — Rust export', () => {
 
 describe('composite-types — C# export', () => {
   it('exports a simple struct with [StructLayout] and [FieldOffset]', () => {
-    const struct = {
+    const struct: InferredStruct = {
       baseAddress: '0x0',
       totalSize: 16,
       fields: [

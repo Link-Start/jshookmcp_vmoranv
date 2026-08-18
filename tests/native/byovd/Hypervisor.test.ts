@@ -943,7 +943,7 @@ describe('mapFieldConfigValue', () => {
   });
 
   it('PD entries cover full 1GB identity range via 512 x 2MB pages', () => {
-    if (!isWin32) return;
+    if (!RUN_KOFFI_TESTS) return;
 
     const koffi = require('koffi');
     const kernel32 = koffi.load('kernel32.dll');

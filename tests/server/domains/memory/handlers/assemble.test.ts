@@ -1,5 +1,22 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { assembleAsm } from '../../../../../src/server/domains/memory/handlers/assemble';
+
+const factoryState = vi.hoisted(() => ({
+  openProcess: vi.fn(),
+  writeMemory: vi.fn(),
+  closeProcess: vi.fn(),
+}));
+
+// Lock the assemble_at write path onto a fake provider so the b3-09/a4-01
+// createPlatformProvider() migration is exercised (not the real FFI provider).
+// Mirrors tests/modules/process/memory/reader.test.ts:35.
+vi.mock('@native/platform/factory.js', () => ({
+  createPlatformProvider: vi.fn(() => ({
+    openProcess: factoryState.openProcess,
+    writeMemory: factoryState.writeMemory,
+    closeProcess: factoryState.closeProcess,
+  })),
+}));
 
 function parseResponse(response: unknown): Record<string, unknown> {
   const r = response as { content: Array<{ type: string; text: string }> };
@@ -181,5 +198,38 @@ describe('AssembleHandlers (handler-level)', () => {
     const parsed = parseResponse(response);
     expect(parsed.success).toBe(false);
     expect(parsed.error).toContain('code');
+  });
+
+  it('handleAssemble assemble_at writes via platform provider and records audit', async () => {
+    const handle = { pid: 1234, writeAccess: true };
+    factoryState.openProcess.mockReturnValue(handle);
+    factoryState.writeMemory.mockResolvedValue({ bytesWritten: 1 });
+
+    const record = vi.fn();
+    const { AssembleHandlers } =
+      await import('../../../../../src/server/domains/memory/handlers/assemble');
+    handlers = new AssembleHandlers(undefined, undefined, { record } as any);
+
+    const response = await handlers.handleAssemble({
+      action: 'assemble_at',
+      code: 'nop',
+      targetAddress: '0x7FF612340000',
+      pid: 1234,
+    });
+    const parsed = parseResponse(response);
+
+    expect(parsed.success).toBe(true);
+    // Lock: the write path must route through the platform provider
+    // (b3-09/a4-01 async migration), not a synchronous MemoryController call.
+    expect(factoryState.openProcess).toHaveBeenCalledWith(1234, true);
+    expect(factoryState.writeMemory).toHaveBeenCalledTimes(1);
+    expect(factoryState.writeMemory.mock.calls[0]![0]).toEqual(handle);
+    expect(factoryState.writeMemory.mock.calls[0]![1]).toBe(BigInt('0x7FF612340000'));
+    expect(factoryState.writeMemory.mock.calls[0]![2]).toEqual(Buffer.from([0x90]));
+    expect(factoryState.closeProcess).toHaveBeenCalledWith(handle);
+    // Audit call preserved through the provider migration.
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'assemble_at', result: 'success', pid: 1234 }),
+    );
   });
 });

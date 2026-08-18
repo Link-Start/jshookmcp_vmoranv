@@ -7,6 +7,7 @@
 
 import type { DomainManifest } from '@server/registry/contracts';
 import type { MCPServerContext } from '@server/MCPServer.context';
+import type { HardwareBreakpointEngine } from '@native/HardwareBreakpoint';
 import { memoryScanToolDefinitions } from './definitions';
 import type { MemoryScanHandlers } from './handlers.impl';
 import { UnifiedProcessManager } from '@server/domains/shared/modules/native';
@@ -105,7 +106,7 @@ async function ensure(ctx: MCPServerContext): Promise<H> {
       scanSessionManager.scanSessionManager,
       pointerChainEngine.pointerChainEngine,
       structureAnalyzer.structureAnalyzer,
-      crossPlatformBp.crossPlatformBreakpointEngine,
+      crossPlatformBp.crossPlatformBreakpointEngine as unknown as HardwareBreakpointEngine,
       null, // vehDebuggerEngine — Win32 VEH only; requires code injection
       null, // softBpEngine — Win32 INT3 only; requires Win32 debug APIs
       codeInjector.codeInjector,

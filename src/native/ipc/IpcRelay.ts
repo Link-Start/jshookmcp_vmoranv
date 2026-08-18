@@ -115,7 +115,7 @@ export class IpcRelay extends EventEmitter {
   async connect(): Promise<void> {
     if (this.connected) return;
 
-    const { net } = await import('node:net');
+    const { default: net } = await import('node:net');
     const path = this.resolvePath();
     const connectTimeout = this.config.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
 

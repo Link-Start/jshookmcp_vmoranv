@@ -244,9 +244,9 @@ export class TraceCodeHandlers {
             break;
           }
 
-          const { processId, threadId, code, exceptionCode, exceptionAddress } = evt;
+          const { processId, threadId, debugEventCode, exceptionCode, exceptionAddress } = evt;
 
-          if (code === DEBUG_EVENT_CODE.EXCEPTION_DEBUG_EVENT) {
+          if (debugEventCode === DEBUG_EVENT_CODE.EXCEPTION_DEBUG_EVENT) {
             if (exceptionCode === EXCEPTION_CODE.BREAKPOINT) {
               // INT3 hit — our breakpoint
               const addrKey = `0x${(exceptionAddress ?? 0n).toString(16).toUpperCase()}`;
@@ -283,7 +283,7 @@ export class TraceCodeHandlers {
                     SuspendThread(tHandle);
                     const ctxBuf = GetThreadContext(tHandle, CONTEXT_FLAGS.CONTROL);
                     const ctx = parseContext(ctxBuf);
-                    ctx.eflags |= 0x100n; // TF (Trap Flag)
+                    ctx.eflags |= 0x100; // TF (Trap Flag)
                     writeContext(ctxBuf, ctx);
                     SetThreadContext(tHandle, ctxBuf);
                     ResumeThread(tHandle);
@@ -312,7 +312,7 @@ export class TraceCodeHandlers {
                     SuspendThread(tHandle);
                     const ctxBuf = GetThreadContext(tHandle, CONTEXT_FLAGS.CONTROL);
                     const ctx = parseContext(ctxBuf);
-                    ctx.eflags &= ~0x100n;
+                    ctx.eflags &= ~0x100;
                     writeContext(ctxBuf, ctx);
                     SetThreadContext(tHandle, ctxBuf);
                     ResumeThread(tHandle);

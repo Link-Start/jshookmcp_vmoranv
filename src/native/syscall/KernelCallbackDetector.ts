@@ -284,7 +284,7 @@ function fallbackDriverEnumeration(): { drivers: DetectedDriver[]; error?: strin
     }
 
     return { drivers };
-  } catch {
+  } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { drivers: [], error: `Driver enumeration failed: ${msg}` };
   }

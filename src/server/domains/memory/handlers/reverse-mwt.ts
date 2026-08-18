@@ -122,6 +122,8 @@ export function parseAccessedAddresses(
 
 // ── Handler ──
 
+// Instruction-byte read still via MemoryController.dumpMemory (sync on win32) —
+// not yet migrated to createPlatformProvider(); see a4-01/b3-09 (commit c047a09b).
 export class ReverseMWTHandlers {
   constructor(
     private readonly memCtrl: MemoryController,
@@ -150,7 +152,7 @@ export class ReverseMWTHandlers {
       // ── Read instruction bytes from process memory ──
       let rawBytes: Buffer;
       try {
-        rawBytes = await this.memCtrl.dumpMemory(pid, addrNum, MAX_INSN_BYTES);
+        rawBytes = await this.memCtrl.dumpMemory(pid, addressStr, MAX_INSN_BYTES);
       } catch (err) {
         throw new Error(
           `${TOOL_NAME}: failed to read memory at ${addressStr}: ` +

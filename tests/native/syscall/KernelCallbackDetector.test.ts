@@ -4,7 +4,6 @@ import {
   enumerateHandleOwners,
   resetKernelCallbackCache,
 } from '@src/native/syscall/KernelCallbackDetector';
-import type { KernelCallbackReport } from '@src/native/syscall/KernelCallbackDetector';
 
 describe('KernelCallbackDetector', () => {
   beforeEach(() => {

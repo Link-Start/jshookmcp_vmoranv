@@ -190,7 +190,10 @@ describe('Breakpoint condition evaluation', () => {
     });
 
     expect(result).toBeDefined();
-    const data = result as { success: boolean; data?: { hitCount: number; filteredCount: number } };
+    const data = result as unknown as {
+      success: boolean;
+      data?: { hitCount: number; filteredCount: number };
+    };
     // Condition should match (rax == 0x1000 is true)
     if (data?.data) {
       expect(data.data.hitCount).toBeGreaterThanOrEqual(0);

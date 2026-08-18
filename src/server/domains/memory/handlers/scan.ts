@@ -1,4 +1,4 @@
-import type { MemoryScanner } from '@native/MemoryScanner';
+import type { MemoryScanner, ScanResult } from '@native/MemoryScanner';
 import type {
   ScanCompareMode,
   ScanOptions,
@@ -25,6 +25,16 @@ import {
   appendToDiskScan,
   MAX_DISK_SCAN_ADDRESSES,
 } from './scan-persistence';
+
+/**
+ * `ScanResult` with the legacy per-address `results` detail array. The scanner
+ * stopped returning per-address values (`results` is undefined at runtime), but
+ * the handler still reads it defensively; it is typed separately here so the
+ * handler compiles without changing its runtime behaviour.
+ */
+type ScanResultWithValues = ScanResult & {
+  results?: Array<{ address: string; value: unknown }>;
+};
 
 // ── AOB operator types ──
 
@@ -244,11 +254,12 @@ export class ScanHandlers {
         }
 
         // Stream results to disk if addresses are available
-        if (result.results && result.results.length > 0) {
+        const diskResult = result as ScanResultWithValues;
+        if (diskResult.results && diskResult.results.length > 0) {
           const records: Array<{ address: bigint; value: bigint }> = [];
           const batchSize = 10000;
-          for (let i = 0; i < result.results.length; i += 1) {
-            const r = result.results[i]!;
+          for (let i = 0; i < diskResult.results.length; i += 1) {
+            const r = diskResult.results[i]!;
             try {
               const addr = BigInt(r.address.replace(/^0x/i, '0x') || '0x0');
               const valStr = typeof r.value === 'string' ? r.value : String(r.value ?? '0');
@@ -257,7 +268,7 @@ export class ScanHandlers {
             } catch {
               // Skip unparseable entries
             }
-            if (records.length >= batchSize || i === result.results.length - 1) {
+            if (records.length >= batchSize || i === diskResult.results.length - 1) {
               if (records.length > 0) {
                 appendToDiskScan(result.sessionId, records);
                 records.length = 0;
@@ -540,8 +551,9 @@ export class ScanHandlers {
           maxResults,
           onProgress,
         });
-        if (asciiResult.results) {
-          for (const r of asciiResult.results) {
+        const asciiResults = (asciiResult as ScanResultWithValues).results;
+        if (asciiResults) {
+          for (const r of asciiResults) {
             const val = typeof r.value === 'string' ? r.value : String(r.value ?? '');
             if (val.length < minLength) continue;
             if (regex && !regex.test(val)) continue;
@@ -577,8 +589,9 @@ export class ScanHandlers {
             maxResults: Math.min(remaining, maxResults),
             onProgress,
           });
-          if (wideResult.results) {
-            for (const r of wideResult.results) {
+          const wideResults = (wideResult as ScanResultWithValues).results;
+          if (wideResults) {
+            for (const r of wideResults) {
               const val = typeof r.value === 'string' ? r.value : String(r.value ?? '');
               // Decode UTF-16LE from the found region
               const decoded = decodeUTF16LEFromHex(val, pattern.length * 2);

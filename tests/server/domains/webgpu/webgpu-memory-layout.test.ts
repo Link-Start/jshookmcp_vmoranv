@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { MCPServerContext } from '@server/domains/shared/registry';
 import { WebGPUHandlers } from '@server/domains/webgpu/index';
 import { ResponseBuilder } from '@server/domains/shared/ResponseBuilder';
+import { TEST_URLS } from '@tests/shared/test-urls';
 
 /**
  * Build a mock page whose `evaluate` returns `allocations` for the hook-state
@@ -206,11 +207,11 @@ describe('webgpu_memory_layout', () => {
     it('keeps per-page snapshots isolated by canvas id (page url)', async () => {
       const pageA = {
         ...makeMockPage([{ size: 64, usage: 'VERTEX', type: 'buffer', alive: true }]),
-        url: () => 'https://a.example/',
+        url: () => TEST_URLS.a,
       };
       const pageB = {
         ...makeMockPage([{ size: 128, usage: 'VERTEX', type: 'buffer', alive: true }]),
-        url: () => 'https://b.example/',
+        url: () => TEST_URLS.b,
       };
 
       const firstA = ResponseBuilder.parse(

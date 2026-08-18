@@ -1,6 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { StructureHandlers } from '../../../../../src/server/domains/memory/handlers/structure';
 
+const factoryState = vi.hoisted(() => ({
+  openProcess: vi.fn(),
+  readMemory: vi.fn(),
+  closeProcess: vi.fn(),
+}));
+
+// Lock the group-comparison read path onto a fake provider so the
+// b3-09/a4-01 createPlatformProvider() migration is exercised (not the real
+// Win32/Darwin/Linux FFI provider). Mirrors tests/modules/process/memory/reader.test.ts:35.
+vi.mock('@native/platform/factory.js', () => ({
+  createPlatformProvider: vi.fn(() => ({
+    openProcess: factoryState.openProcess,
+    readMemory: factoryState.readMemory,
+    closeProcess: factoryState.closeProcess,
+  })),
+}));
+
 describe('StructureHandlers', () => {
   let handlers: StructureHandlers;
   const dummyArgs = {
@@ -236,6 +253,38 @@ describe('StructureHandlers', () => {
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(false);
       expect(parsed.error).toMatch(/address2|invalid required/);
+      expect(mockstructAnalyzer.compareInstances).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleStructureCompare — group mode (provider migration lock)', () => {
+    it('reads group instances via createPlatformProvider and releases the handle', async () => {
+      const handle = { pid: 1234, writeAccess: false };
+      factoryState.openProcess.mockReturnValue(handle);
+      factoryState.readMemory.mockImplementation(async (_handle, _addr, size) => ({
+        data: Buffer.alloc(size, 0x41),
+        bytesRead: size,
+      }));
+      mockstructAnalyzer.compareInstances = vi.fn();
+
+      const response = await handlers.handleStructureCompare({
+        pid: 1234,
+        address1: '0x7FF612340000',
+        address2: '0x7FF612341000',
+        group1Addresses: ['0x7FF612340000', '0x7FF612340010'],
+        group2Addresses: ['0x7FF612341000'],
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+
+      expect(parsed.success).toBe(true);
+      expect(parsed.totalInstances).toBe(3);
+      expect(parsed.group1Count).toBe(2);
+      expect(parsed.group2Count).toBe(1);
+      // Lock: the group read path must route through the platform provider
+      // (b3-09/a4-01 async migration), not structAnalyzer.compareInstances.
+      expect(factoryState.openProcess).toHaveBeenCalledWith(1234, false);
+      expect(factoryState.readMemory).toHaveBeenCalledTimes(3);
+      expect(factoryState.closeProcess).toHaveBeenCalledWith(handle);
       expect(mockstructAnalyzer.compareInstances).not.toHaveBeenCalled();
     });
   });

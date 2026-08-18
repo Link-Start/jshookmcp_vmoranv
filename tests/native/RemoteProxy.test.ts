@@ -13,6 +13,10 @@ import {
   removeRemoteProxy,
   listRemoteProxies,
 } from '@native/RemoteProxy';
+import type { RemoteProxyConfig } from '@native/RemoteProxy';
+
+/** Structural WebSocket shape expected by RemoteProxy's `wsFactory`. */
+type WsLike = ReturnType<NonNullable<RemoteProxyConfig['wsFactory']>>;
 
 // ── mock WebSocket ─────────────────────────────────────────────────────────
 
@@ -106,7 +110,7 @@ describe('RemoteProxy connect flow (mock ws)', () => {
     proxy = new RemoteProxy({
       url: 'ws://127.0.0.1:17171',
       connectTimeoutMs: 5000,
-      wsFactory: () => mockWs as unknown as WebSocket,
+      wsFactory: () => mockWs as unknown as WsLike,
     });
   });
 
@@ -130,11 +134,11 @@ describe('RemoteProxy connect flow (mock ws)', () => {
       url: 'ws://127.0.0.1:17171',
       authToken: 'secret-token-123',
       connectTimeoutMs: 5000,
-      wsFactory: (url, opts) => {
+      wsFactory: (_url, opts) => {
         expect(opts).toBeDefined();
         expect(opts!.headers).toBeDefined();
         expect(opts!.headers!['Authorization']).toBe('Bearer secret-token-123');
-        return mockWs as unknown as WebSocket;
+        return mockWs as unknown as WsLike;
       },
     });
 
@@ -150,7 +154,7 @@ describe('RemoteProxy connect flow (mock ws)', () => {
       connectTimeoutMs: 100,
       wsFactory: () => {
         // Never trigger open — timeout should fire
-        return mockWs as unknown as WebSocket;
+        return mockWs as unknown as WsLike;
       },
     });
 
@@ -204,7 +208,7 @@ describe('RemoteProxy forward tool call (mock ws)', () => {
     proxy = new RemoteProxy({
       url: 'ws://127.0.0.1:17171',
       requestTimeoutMs: 5000,
-      wsFactory: () => mockWs as unknown as WebSocket,
+      wsFactory: () => mockWs as unknown as WsLike,
     });
     const p = proxy.connect();
     setTimeout(() => mockWs.triggerOpen(), 10);
@@ -258,7 +262,7 @@ describe('RemoteProxy forward tool call (mock ws)', () => {
     const timeoutProxy = new RemoteProxy({
       url: 'ws://127.0.0.1:17171',
       requestTimeoutMs: 100,
-      wsFactory: () => mockWs as unknown as WebSocket,
+      wsFactory: () => mockWs as unknown as WsLike,
     });
     const p = timeoutProxy.connect();
     setTimeout(() => mockWs.triggerOpen(), 10);
@@ -276,7 +280,7 @@ describe('RemoteProxy forward tool call (mock ws)', () => {
     const freshProxy = new RemoteProxy({
       url: 'ws://127.0.0.1:17171',
       requestTimeoutMs: 5000,
-      wsFactory: () => freshMockWs as unknown as WebSocket,
+      wsFactory: () => freshMockWs as unknown as WsLike,
     });
     freshProxy.on('error', () => {});
 
@@ -321,7 +325,7 @@ describe('RemoteProxy reconnect and disconnect cleanup', () => {
     proxy = new RemoteProxy({
       url: 'ws://127.0.0.1:17171',
       requestTimeoutMs: 5000,
-      wsFactory: () => mockWs as unknown as WebSocket,
+      wsFactory: () => mockWs as unknown as WsLike,
     });
     const p = proxy.connect();
     setTimeout(() => mockWs.triggerOpen(), 10);

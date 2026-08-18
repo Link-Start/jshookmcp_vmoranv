@@ -777,8 +777,9 @@ describe('NativeEmulatorHandlers — nemu_trace profile mode', () => {
     expect(String(hot[0]!.asm)).toContain('add');
     expect(hot[1]).toMatchObject({ count: 1, percentage: 50 });
     expect(res.summary).toMatchObject({ totalInstructions: 2, uniqueInstructions: 2 });
-    expect(String(res.summary.topHotPc)).toBe('0x1000');
-    expect(String(res.summary.topHotAsm)).toContain('add');
+    const summary = res.summary as { topHotPc: unknown; topHotAsm: unknown };
+    expect(String(summary.topHotPc)).toBe('0x1000');
+    expect(String(summary.topHotAsm)).toContain('add');
   });
 
   it('builds a call tree from BL targets with best-effort symbol names', async () => {

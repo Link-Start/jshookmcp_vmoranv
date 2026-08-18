@@ -529,12 +529,24 @@ export class AssembleHandlers {
       };
     }
 
-    // Write assembled bytes to target process
+    // Write assembled bytes to target process via the platform provider
+    // (b3-09/a4-01 async migration, commit c047a09b): writeMemory routes through
+    // the `.async` worker path instead of MemoryController's synchronous koffi
+    // write, keeping the event loop responsive during remote patching. (Hygiene
+    // debt: MemoryController's win32 writeBuffer stays synchronous for low-frequency
+    // write_value/undo/redo — this destructive patch path bypasses it directly.)
     const start = Date.now();
     try {
-      const { memoryController } = await import('@native/MemoryController');
+      const { createPlatformProvider } = await import('@native/platform/factory.js');
+      const provider = createPlatformProvider();
       const memBuf = Buffer.from(result.bytes);
-      await memoryController.writeMemory(pid, targetAddress, memBuf);
+      const addrBig = BigInt(targetAddress.startsWith('0x') ? targetAddress : `0x${targetAddress}`);
+      const handle = provider.openProcess(pid, true);
+      try {
+        await provider.writeMemory(handle, addrBig, memBuf);
+      } finally {
+        provider.closeProcess(handle);
+      }
 
       this.recordAudit({
         operation: 'assemble_at',

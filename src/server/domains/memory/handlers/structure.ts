@@ -404,29 +404,43 @@ export class StructureHandlers {
       );
     }
 
-    // Read all instances
+    // Read all instances via the platform provider (b3-09/a4-01 async migration,
+    // commit c047a09b): the previous structAnalyzer.readMemory path called koffi
+    // synchronously on the event loop. createPlatformProvider().readMemory routes
+    // through the `.async` worker path so per-instance group reads do not block.
+    // (Hygiene debt: MemoryController's win32 readBuffer stays synchronous for
+    // low-frequency single reads — this hot multi-read path bypasses it directly.)
+    const { createPlatformProvider } = await import('@native/platform/factory.js');
+    const provider = createPlatformProvider();
+    const handle = provider.openProcess(pid, false);
     const instances: Array<{ group: 1 | 2; bytes: Buffer }> = [];
-    for (let i = 0; i < group1Raw.length; i++) {
-      const addr = group1Raw[i]!;
-      const formula = parseAddressFormula(addr);
-      if (!formula.address) {
-        throw new Error(
-          `${TOOL_STRUCTURE_COMPARE}: invalid group1 address at index ${i}: ${formula.error}`,
-        );
+    try {
+      for (let i = 0; i < group1Raw.length; i++) {
+        const addr = group1Raw[i]!;
+        const formula = parseAddressFormula(addr);
+        if (!formula.address) {
+          throw new Error(
+            `${TOOL_STRUCTURE_COMPARE}: invalid group1 address at index ${i}: ${formula.error}`,
+          );
+        }
+        const raw = (await provider.readMemory(handle, BigInt(formula.address), effectiveSize))
+          .data;
+        instances.push({ group: 1, bytes: Buffer.from(raw) });
       }
-      const raw = await this.structAnalyzer.readMemory(pid, formula.address, effectiveSize);
-      instances.push({ group: 1, bytes: Buffer.from(raw) });
-    }
-    for (let i = 0; i < group2Raw.length; i++) {
-      const addr = group2Raw[i]!;
-      const formula = parseAddressFormula(addr);
-      if (!formula.address) {
-        throw new Error(
-          `${TOOL_STRUCTURE_COMPARE}: invalid group2 address at index ${i}: ${formula.error}`,
-        );
+      for (let i = 0; i < group2Raw.length; i++) {
+        const addr = group2Raw[i]!;
+        const formula = parseAddressFormula(addr);
+        if (!formula.address) {
+          throw new Error(
+            `${TOOL_STRUCTURE_COMPARE}: invalid group2 address at index ${i}: ${formula.error}`,
+          );
+        }
+        const raw = (await provider.readMemory(handle, BigInt(formula.address), effectiveSize))
+          .data;
+        instances.push({ group: 2, bytes: Buffer.from(raw) });
       }
-      const raw = await this.structAnalyzer.readMemory(pid, formula.address, effectiveSize);
-      instances.push({ group: 2, bytes: Buffer.from(raw) });
+    } finally {
+      provider.closeProcess(handle);
     }
 
     const group1Instances = instances.filter((i) => i.group === 1);

@@ -290,7 +290,7 @@ export interface CompositeTypeDetection {
  * sequence of inferred structure fields.
  */
 export function detectCompositeTypes(
-  fields: Array<{ offset: number; size: number; type: string; value?: string }>,
+  fields: Array<{ offset: number; size: number; type: string; name: string; value?: string }>,
 ): CompositeTypeDetection[] {
   const results: CompositeTypeDetection[] = [];
   if (fields.length < 2) return results;
