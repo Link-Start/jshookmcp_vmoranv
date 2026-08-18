@@ -24,6 +24,7 @@ import {
 } from './snapshot-persistence';
 import { resolveArtifactPath } from '@utils/artifacts';
 import { getToolRequestContext } from '@server/runtime/ToolRequestContext';
+import { cdpLimit } from '@utils/concurrency';
 
 export interface V8InspectorDomainDependencies {
   ctx: MCPServerContext;
@@ -134,7 +135,7 @@ export class V8InspectorHandlers {
   // ── Standard dispatch: heap snapshot capture ──
   async v8_deopt_trace(args: ToolArgs): Promise<unknown> {
     const { handleDeoptTrace } = await import('@server/domains/v8-inspector/handlers/deopt-trace');
-    return handleDeoptTrace(args, createTargetSessionResolver(this.deps.ctx));
+    return cdpLimit(() => handleDeoptTrace(args, createTargetSessionResolver(this.deps.ctx)));
   }
 
   async v8_turbofan_inspect(args: ToolArgs): Promise<unknown> {
@@ -146,7 +147,7 @@ export class V8InspectorHandlers {
   async v8_turbofan_graph(args: ToolArgs): Promise<unknown> {
     const { handleTurbofanGraph } =
       await import('@server/domains/v8-inspector/handlers/turbofan-graph');
-    return handleTurbofanGraph(args);
+    return cdpLimit(() => handleTurbofanGraph(args));
   }
 
   async v8_heap_sampling(args: ToolArgs): Promise<ToolResponse> {
@@ -154,7 +155,7 @@ export class V8InspectorHandlers {
       requirePageController(this.deps.ctx);
       const { handleHeapSampling } =
         await import('@server/domains/v8-inspector/handlers/heap-sampling');
-      return handleHeapSampling(args, createTargetSessionResolver(this.deps.ctx));
+      return cdpLimit(() => handleHeapSampling(args, createTargetSessionResolver(this.deps.ctx)));
     });
   }
 
@@ -163,7 +164,9 @@ export class V8InspectorHandlers {
       requirePageController(this.deps.ctx);
       const { handleAllocationTrack } =
         await import('@server/domains/v8-inspector/handlers/allocation-track');
-      return handleAllocationTrack(args, createTargetSessionResolver(this.deps.ctx));
+      return cdpLimit(() =>
+        handleAllocationTrack(args, createTargetSessionResolver(this.deps.ctx)),
+      );
     });
   }
 
@@ -218,28 +221,30 @@ export class V8InspectorHandlers {
 
       const persist = typeof args.persist === 'boolean' ? args.persist : true;
 
-      const result = await handleHeapSnapshotCapture(args, {
-        getPage,
-        getSnapshot: () => this.currentSnapshotIds.get(this.getCurrentSessionId()) ?? null,
-        setSnapshot: (id: string | null) => {
-          const sessionId = this.getCurrentSessionId();
-          if (id) this.currentSnapshotIds.set(sessionId, id);
-          else this.currentSnapshotIds.delete(sessionId);
-        },
-        client: this.deps.client,
-        persist,
-        resolver: createTargetSessionResolver(this.deps.ctx),
-        getTargetUrl: persist
-          ? async () => {
-              try {
-                const page = await getPage();
-                return (page as { url?: () => string })?.url?.() ?? null;
-              } catch {
-                return null;
+      const result = await cdpLimit(() =>
+        handleHeapSnapshotCapture(args, {
+          getPage,
+          getSnapshot: () => this.currentSnapshotIds.get(this.getCurrentSessionId()) ?? null,
+          setSnapshot: (id: string | null) => {
+            const sessionId = this.getCurrentSessionId();
+            if (id) this.currentSnapshotIds.set(sessionId, id);
+            else this.currentSnapshotIds.delete(sessionId);
+          },
+          client: this.deps.client,
+          persist,
+          resolver: createTargetSessionResolver(this.deps.ctx),
+          getTargetUrl: persist
+            ? async () => {
+                try {
+                  const page = await getPage();
+                  return (page as { url?: () => string })?.url?.() ?? null;
+                } catch {
+                  return null;
+                }
               }
-            }
-          : undefined,
-      });
+            : undefined,
+        }),
+      );
 
       // handleHeapSnapshotCapture always returns {success:true,…} (graceful
       // degradation); reflect its success flag so handleSafe merge is honest.

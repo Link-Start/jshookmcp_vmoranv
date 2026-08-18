@@ -276,11 +276,18 @@ export async function deleteAllPersistedSnapshots(): Promise<{
 /**
  * Enforce retention by evicting oldest snapshots until under both caps.
  * Zero/negative caps are ignored (no eviction on that axis).
+ *
+ * When `memoryCache` is provided, evicted snapshots are also dropped from the
+ * in-memory cache so its chunks do not linger after the on-disk files are gone.
  */
-export async function enforceSnapshotRetention(options: {
-  maxCount?: number;
-  maxTotalBytes?: number;
-}): Promise<{ evictedIds: string[]; freedBytes: number }> {
+export async function enforceSnapshotRetention(
+  options: {
+    maxCount?: number;
+    maxTotalBytes?: number;
+    /** In-memory cache kept in lockstep with disk deletions. */
+    memoryCache?: { delete(key: string): boolean };
+  } = {},
+): Promise<{ evictedIds: string[]; freedBytes: number }> {
   const maxCount = options.maxCount ?? 0;
   const maxTotalBytes = options.maxTotalBytes ?? 0;
   if (maxCount <= 0 && maxTotalBytes <= 0) {
@@ -296,6 +303,7 @@ export async function enforceSnapshotRetention(options: {
     const toEvict = current.slice(0, current.length - maxCount);
     for (const meta of toEvict) {
       const res = await deletePersistedSnapshot(meta.id);
+      options.memoryCache?.delete(meta.id);
       if (res.deleted) {
         evictedIds.push(meta.id);
         freedBytes += res.freedBytes;
@@ -310,6 +318,7 @@ export async function enforceSnapshotRetention(options: {
     while (i < current.length && total > maxTotalBytes) {
       const meta = current[i]!;
       const res = await deletePersistedSnapshot(meta.id);
+      options.memoryCache?.delete(meta.id);
       if (res.deleted) {
         evictedIds.push(meta.id);
         freedBytes += res.freedBytes;

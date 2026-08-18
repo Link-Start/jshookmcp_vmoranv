@@ -200,12 +200,15 @@ export const MCP_LOG_FILE_DIR = str('MCP_LOG_FILE_DIR', '');
 /* ================================================================== */
 
 /**
- * Retention caps for persisted v8_inspector heap snapshots. Both default to 0
- * (no eviction) so persistence never surprises the user with deletions; set
- * MCP_V8_HEAP_SNAPSHOT_MAX_COUNT / MCP_V8_HEAP_SNAPSHOT_MAX_TOTAL_MB to bound
- * the on-disk and in-memory snapshot store.
+ * Retention caps for v8_inspector heap snapshots.
+ *
+ * `MCP_V8_HEAP_SNAPSHOT_MAX_COUNT` bounds both the on-disk and in-memory
+ * snapshot store. It defaults to 3 so a long-lived process never retains every
+ * captured snapshot's chunks in memory (each capture is GB-scale); set it to 0
+ * to opt out of eviction, or raise it via env. `MCP_V8_HEAP_SNAPSHOT_MAX_TOTAL_MB`
+ * additionally bounds the on-disk bytes and defaults to 0 (disabled).
  */
-export const MCP_V8_HEAP_SNAPSHOT_MAX_COUNT = int('MCP_V8_HEAP_SNAPSHOT_MAX_COUNT', 0);
+export const MCP_V8_HEAP_SNAPSHOT_MAX_COUNT = int('MCP_V8_HEAP_SNAPSHOT_MAX_COUNT', 3);
 export const MCP_V8_HEAP_SNAPSHOT_MAX_TOTAL_MB = int('MCP_V8_HEAP_SNAPSHOT_MAX_TOTAL_MB', 0);
 
 /* ================================================================== */
