@@ -666,6 +666,74 @@ describe('NetworkMonitor.impl – response body cache and persistence', () => {
     });
   });
 
+  // ── explicit getResponseBody content-length pre-check ──────────────────
+  describe('getResponseBody explicit content-length pre-check', () => {
+    it('returns null without fetching when content-length exceeds the single-body cap', async () => {
+      const { session, send, emit } = createMockSession();
+      const monitor = new NetworkMonitor(session);
+      await monitor.enable();
+
+      emit('Network.requestWillBeSent', {
+        requestId: 'r1',
+        request: { url: `${testUrls.TEST_URLS.root}/big`, method: 'GET' },
+        timestamp: 1,
+      });
+      emit('Network.responseReceived', {
+        requestId: 'r1',
+        response: {
+          url: `${testUrls.TEST_URLS.root}/big`,
+          status: 200,
+          statusText: 'OK',
+          mimeType: 'application/octet-stream',
+          headers: { 'Content-Length': String(2 * 1024 * 1024) },
+        },
+        timestamp: 2,
+      });
+
+      send.mockClear();
+      send.mockResolvedValueOnce({ body: 'oversized', base64Encoded: false });
+      const body = await monitor.getResponseBody('r1');
+
+      expect(body).toBeNull();
+      const getBodyCalls = send.mock.calls.filter(
+        ([method]) => method === 'Network.getResponseBody',
+      );
+      expect(getBodyCalls).toHaveLength(0);
+    });
+
+    it('still fetches when content-length is within the single-body cap', async () => {
+      const { session, send, emit } = createMockSession();
+      const monitor = new NetworkMonitor(session);
+      await monitor.enable();
+
+      emit('Network.requestWillBeSent', {
+        requestId: 'r1',
+        request: { url: `${testUrls.TEST_URLS.root}/api`, method: 'GET' },
+        timestamp: 1,
+      });
+      emit('Network.responseReceived', {
+        requestId: 'r1',
+        response: {
+          url: `${testUrls.TEST_URLS.root}/api`,
+          status: 200,
+          statusText: 'OK',
+          mimeType: 'application/json',
+          headers: { 'content-length': '123' },
+        },
+        timestamp: 2,
+      });
+
+      send.mockResolvedValueOnce({ body: '{"ok":true}', base64Encoded: false });
+      const body = await monitor.getResponseBody('r1');
+
+      expect(body).toMatchObject({ body: '{"ok":true}', base64Encoded: false });
+      const getBodyCalls = send.mock.calls.filter(
+        ([method]) => method === 'Network.getResponseBody',
+      );
+      expect(getBodyCalls).toHaveLength(1);
+    });
+  });
+
   describe('auto-capture concurrency cap', () => {
     it('caps concurrent auto-capture at 4 in-flight fetches', async () => {
       const { session, send, emit } = createMockSession();

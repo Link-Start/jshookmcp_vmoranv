@@ -581,6 +581,16 @@ export class NetworkMonitor implements NetworkMonitorLike {
       return null;
     }
 
+    // Pre-check content-length so an explicit getResponseBody doesn't pull an
+    // oversized body into memory (b1-06 guarded auto-capture; this guards the
+    // direct path). Reuses the skipBodyCapture set populated on responseReceived.
+    if (this.skipBodyCapture.has(requestId)) {
+      logger.warn(
+        `Response body skipped for ${requestId}: content-length exceeds the single-body cap`,
+      );
+      return null;
+    }
+
     try {
       const rawResult = (await this.sendCdp('Network.getResponseBody', {
         requestId: this.toRawRequestId(requestId),

@@ -17,6 +17,7 @@ import {
 import { Readable } from 'node:stream';
 
 import { ToolError } from '@errors/ToolError';
+import { int } from '@src/constants';
 
 /** Only this ABI is loadable — the emulated CPU is AArch64. */
 export const LOADABLE_ABI = 'arm64-v8a';
@@ -24,6 +25,14 @@ export const LOADABLE_ABI = 'arm64-v8a';
 const ARM64_SO_RE = /^lib\/arm64-v8a\/(lib[^/]+\.so)$/i;
 /** Guard against a zip bomb: refuse to buffer more than this per extracted lib. */
 const MAX_SO_BYTES = 256 * 1024 * 1024;
+/**
+ * Guard against a zip bomb: refuse to buffer more than this across all
+ * extracted libs combined. Exceeding it stops extraction early and marks the
+ * result truncated instead of accumulating unbounded memory.
+ *
+ * @env NEMU_APK_MAX_TOTAL_SO_BYTES
+ */
+const MAX_TOTAL_SO_BYTES = int('NEMU_APK_MAX_TOTAL_SO_BYTES', 512 * 1024 * 1024);
 
 /** One extracted native library: its basename and raw bytes. */
 export interface ExtractedLib {
@@ -33,15 +42,54 @@ export interface ExtractedLib {
 }
 
 /**
+ * Result of an APK lib extraction, including whether it stopped early.
+ */
+export interface ExtractArm64LibsResult {
+  /** Extracted libraries in archive order (partial when `truncated`). */
+  libs: ExtractedLib[];
+  /** True when extraction stopped early because the aggregate byte cap was reached. */
+  truncated: boolean;
+  /** Total bytes buffered across all returned libs. */
+  totalBytes: number;
+}
+
+/** Options for {@link extractArm64LibsDetailed}. */
+export interface ExtractArm64LibsOptions {
+  /**
+   * Override the aggregate byte cap. Defaults to the runtime-tunable
+   * `NEMU_APK_MAX_TOTAL_SO_BYTES` (512 MB).
+   */
+  maxTotalBytes?: number;
+}
+
+/**
  * Extract every `lib/arm64-v8a/*.so` from an APK as raw bytes. Returns them in
  * archive order; callers pick the target (e.g. skip libflutter.so, route
  * libapp.so to the Dart layer, load a third-party/hardening lib here).
+ *
+ * Kept array-returning for existing callers (nemu_extract_apk_libs /
+ * nemu_load_apk_library / DartAotLoader). Use {@link extractArm64LibsDetailed}
+ * when you need the `truncated` flag.
  */
 export async function extractArm64Libs(apkPath: string): Promise<ExtractedLib[]> {
+  return (await extractArm64LibsDetailed(apkPath)).libs;
+}
+
+/**
+ * Extract `lib/arm64-v8a/*.so` with an aggregate byte cap so a zip bomb can't
+ * exhaust memory: once the running total would exceed `maxTotalBytes`,
+ * extraction stops and the already-collected libs are returned with
+ * `truncated: true`.
+ */
+export async function extractArm64LibsDetailed(
+  apkPath: string,
+  options: ExtractArm64LibsOptions = {},
+): Promise<ExtractArm64LibsResult> {
   if (!apkPath || apkPath.length === 0) {
     throw new ToolError('VALIDATION', 'apkPath must be a non-empty string');
   }
-  return new Promise<ExtractedLib[]>((resolve, reject) => {
+  const maxTotalBytes = options.maxTotalBytes ?? MAX_TOTAL_SO_BYTES;
+  return new Promise<ExtractArm64LibsResult>((resolve, reject) => {
     openZipArchive(apkPath, { lazyEntries: true, autoClose: true }, (err, zipFile) => {
       if (err || !zipFile) {
         reject(
@@ -54,6 +102,8 @@ export async function extractArm64Libs(apkPath: string): Promise<ExtractedLib[]>
       }
       const zip = zipFile as YauzlZipFile;
       const collected: ExtractedLib[] = [];
+      let totalBytes = 0;
+      let truncated = false;
 
       const onEntry = (entry: ZipEntry): void => {
         const match = ARM64_SO_RE.exec(entry.fileName);
@@ -80,6 +130,16 @@ export async function extractArm64Libs(apkPath: string): Promise<ExtractedLib[]>
           }
           readStreamCapped(stream, MAX_SO_BYTES).then(
             (bytes) => {
+              // Aggregate cap: stop before buffering a lib that would push the
+              // running total over the limit (zip-bomb guard).
+              if (totalBytes + bytes.length > maxTotalBytes) {
+                truncated = true;
+                cleanup();
+                zip.close();
+                resolve({ libs: collected, truncated, totalBytes });
+                return;
+              }
+              totalBytes += bytes.length;
               collected.push({ name, bytes });
               zip.readEntry();
             },
@@ -98,7 +158,7 @@ export async function extractArm64Libs(apkPath: string): Promise<ExtractedLib[]>
       };
       const onEnd = (): void => {
         cleanup();
-        resolve(collected);
+        resolve({ libs: collected, truncated, totalBytes });
       };
       const onError = (e: Error): void => {
         cleanup();
