@@ -1,5 +1,10 @@
-import type { RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { McpError, ErrorCode, type Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import {
+  McpError,
+  ErrorCode,
+  ListToolsRequestSchema,
+  type Tool,
+} from '@modelcontextprotocol/sdk/types.js';
 import { ZodError, type z } from 'zod';
 import { logger } from '@utils/logger';
 import { ToolError, type ToolErrorCode } from '@errors/ToolError';
@@ -97,6 +102,61 @@ function stripParamDescriptions(schema: JsonSchemaObj): JsonSchemaObj {
   return clone;
 }
 
+/** Minimal surface of the SDK's inner `Server` that the cache installer reaches into. */
+interface SdkServerInternals {
+  _requestHandlers?: Map<string, (request: unknown, extra?: unknown) => unknown>;
+  setRequestHandler(schema: unknown, handler: (request: unknown, extra?: unknown) => unknown): void;
+}
+
+/** Servers that already have a cached tools/list handler installed. */
+const installedCachedListHandlers = new WeakSet<object>();
+
+/**
+ * Install a memoized tools/list handler that reuses the serialized tool list
+ * until the tool set mutates.
+ *
+ * The MCP SDK's built-in tools/list handler re-serializes every registered
+ * tool's Zod schema into JSON Schema on each call — ~370KB across 711 tools,
+ * ~55ms CPU per list. The serialized result only changes when a tool is
+ * registered / updated / removed, so caching it collapses repeat lists to a
+ * single serialization.
+ *
+ * Invalidation signal: the SDK calls `sendToolListChanged()` on every
+ * register/update/remove/enable/disable, so wrapping it captures every mutation
+ * in one place without touching individual registration call sites.
+ *
+ * Idempotent per server; a no-op when the SDK handler is not yet registered
+ * (it is installed lazily on first `registerTool`, so `registerSingleTool` calls
+ * this after registration).
+ */
+export function installCachedToolListHandler(server: McpServer): void {
+  if (installedCachedListHandlers.has(server)) return;
+
+  const inner = (server as unknown as { server: SdkServerInternals }).server;
+  const original = inner?.['_requestHandlers']?.get('tools/list');
+  if (typeof original !== 'function') return; // SDK internals changed — keep default.
+
+  installedCachedListHandlers.add(server);
+
+  let version = 0;
+  let cached: { tools: unknown[] } | null = null;
+  let cachedVersion = -1;
+
+  const originalSend = server.sendToolListChanged.bind(server);
+  server.sendToolListChanged = () => {
+    version += 1;
+    originalSend();
+  };
+
+  inner.setRequestHandler(ListToolsRequestSchema, async (request, extra) => {
+    if (cached === null || version !== cachedVersion) {
+      cached = (await original(request, extra)) as { tools: unknown[] };
+      cachedVersion = version;
+    }
+    return cached;
+  });
+}
+
 export function registerSingleTool(ctx: MCPServerContext, toolDef: Tool): RegisteredTool {
   const builtTool = toolDef as BuiltTool;
   if (builtTool.autocompleteHandlers) {
@@ -137,6 +197,8 @@ export function registerSingleTool(ctx: MCPServerContext, toolDef: Tool): Regist
       }
     }
 
+    installCachedToolListHandler(ctx.server);
+
     return registeredTool;
   }
 
@@ -161,6 +223,8 @@ export function registerSingleTool(ctx: MCPServerContext, toolDef: Tool): Regist
       sdkInternalMap[toolDef.name].execution = builtTool.execution;
     }
   }
+
+  installCachedToolListHandler(ctx.server);
 
   return registeredTool;
 }
