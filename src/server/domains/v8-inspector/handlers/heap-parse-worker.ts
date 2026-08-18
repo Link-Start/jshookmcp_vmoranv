@@ -33,6 +33,14 @@ const HEAP_PARSE_POOL_MIN_WORKERS = 1;
 const HEAP_PARSE_POOL_MAX_WORKERS = 2;
 const HEAP_PARSE_POOL_IDLE_TIMEOUT_MS = 30_000;
 export const HEAP_PARSE_JOB_TIMEOUT_MS = 60_000;
+/**
+ * Old-gen heap cap (MB) for heap-parse workers. A full tracking snapshot is
+ * GB-scale, so the parse worker needs a large old-gen ceiling — contrast the
+ * transform crypto-harness's 64MB cap, which only runs small test snippets.
+ */
+const HEAP_PARSE_POOL_MAX_OLD_GEN_MB = 512;
+/** Young-gen heap cap (MB) for heap-parse workers. */
+const HEAP_PARSE_POOL_MAX_YOUNG_GEN_MB = 64;
 
 /**
  * Minimal pool surface the allocation-track handler depends on. Decoupled from
@@ -294,6 +302,10 @@ export function getHeapParsePool(): HeapParsePool {
       minWorkers: HEAP_PARSE_POOL_MIN_WORKERS,
       maxWorkers: HEAP_PARSE_POOL_MAX_WORKERS,
       idleTimeoutMs: HEAP_PARSE_POOL_IDLE_TIMEOUT_MS,
+      resourceLimits: {
+        maxOldGenerationSizeMb: HEAP_PARSE_POOL_MAX_OLD_GEN_MB,
+        maxYoungGenerationSizeMb: HEAP_PARSE_POOL_MAX_YOUNG_GEN_MB,
+      },
     });
   }
   return sharedPool as HeapParsePool;

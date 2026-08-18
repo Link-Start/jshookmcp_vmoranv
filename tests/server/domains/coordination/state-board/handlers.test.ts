@@ -543,15 +543,15 @@ describe('SharedStateBoardHandlers', () => {
       expect(getExpired.found).toBe(false);
     });
 
-    it('records expire action in history', async () => {
+    it('deletes history for expired keys (history shares the entry lifecycle)', async () => {
       await handler.handleSet({ key: 'will-expire', value: 'x', ttlSeconds: -1 });
       handler.cleanupExpired();
       const history = (await handler.handleHistory({ key: 'will-expire' })) as Record<
         string,
         unknown
       >;
-      const records = history.history as Array<Record<string, unknown>>;
-      expect(records.some((r) => r.action === 'expire')).toBe(true);
+      expect(history.total).toBe(0);
+      expect(history.history).toEqual([]);
     });
   });
 });

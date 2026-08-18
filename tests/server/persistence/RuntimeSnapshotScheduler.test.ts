@@ -170,6 +170,18 @@ describe('RuntimeSnapshotScheduler', () => {
     // Should not throw or hang
   });
 
+  it('unrefs the periodic flush interval so it does not block graceful exit', async () => {
+    const scheduler = new RuntimeSnapshotScheduler({ periodicMs: 60_000 });
+    await scheduler.start();
+    const timer = (scheduler as unknown as { periodicTimer: ReturnType<typeof setInterval> | null })
+      .periodicTimer;
+    expect(timer).toBeTruthy();
+    if (timer && typeof timer.hasRef === 'function') {
+      expect(timer.hasRef()).toBe(false);
+    }
+    scheduler.dispose();
+  });
+
   it('flushes dirty sources after the default debounce window', async () => {
     const scheduler = new RuntimeSnapshotScheduler();
     const store = new StateBoardStore();

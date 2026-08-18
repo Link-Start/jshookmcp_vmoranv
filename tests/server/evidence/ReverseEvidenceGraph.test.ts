@@ -300,6 +300,25 @@ describe('ReverseEvidenceGraph (EVID-01~03, EVID-05)', () => {
       graph2.restoreSnapshot({ schemaVersion: 2, graph: { nodes: [], edges: [] } });
       expect(graph2.nodeCount).toBe(0);
     });
+
+    it('trims restored nodes and edges back to the configured caps', () => {
+      const source = new ReverseEvidenceGraph();
+      const nodes = Array.from({ length: 6 }, (_, i) => source.addNode('request', `n${i}`, {}));
+      for (let i = 0; i < nodes.length - 1; i++) {
+        source.addEdge(nodes[i]!.id, nodes[i + 1]!.id, 'triggers');
+      }
+      const snapshot = source.exportSnapshot();
+      resetIdCounter();
+
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const capped = new ReverseEvidenceGraph({ maxNodes: 3, maxEdges: 2 });
+      capped.restoreSnapshot(snapshot);
+      warnSpy.mockRestore();
+
+      expect(capped.nodeCount).toBe(3);
+      expect(capped.edgeCount).toBe(2);
+      expect(capped.droppedNodeCount).toBe(3);
+    });
   });
 
   describe('unbounded growth caps (a3-02)', () => {

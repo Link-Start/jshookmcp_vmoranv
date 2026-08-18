@@ -511,6 +511,11 @@ export class ReverseEvidenceGraph {
     for (const edge of edges) {
       this.edges.set(edge.id, edge);
     }
+    // Trim restored data back to the configured caps. A hostile or oversized
+    // snapshot can inject more nodes/edges than the cap allows; without this
+    // they would stay resident until the next add.
+    this.evictOldestNodes();
+    this.evictOldestEdges();
     // Re-seed the module-level ID counter from the restored ids. Without this a
     // restore into a fresh process (counter reset) would generate colliding ids
     // for new nodes/edges and silently overwrite restored Map entries.

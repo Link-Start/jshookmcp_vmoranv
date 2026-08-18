@@ -149,6 +149,10 @@ export class StateBoardStore {
       .slice(0, excess);
     for (const [fullKey] of oldest) {
       this.state.delete(fullKey);
+      // History shares the entry's lifecycle: an evicted key must not leave an
+      // orphaned history array (up to `maxHistoryPerKey` full oldValue copies)
+      // pinning memory for the life of the process.
+      this.history.delete(fullKey);
       this.evictedEntries++;
     }
   }
@@ -234,14 +238,12 @@ export class StateBoardStore {
     for (const [fullKey, entry] of this.state.entries()) {
       if (entry.expiresAt && now > entry.expiresAt) {
         this.state.delete(fullKey);
-        this.recordChange(fullKey, {
-          id: randomUUID().slice(0, 8),
-          key: entry.key,
-          namespace: entry.namespace,
-          action: 'expire',
-          oldValue: entry.value,
-          timestamp: now,
-        });
+        // History shares the entry's lifecycle. Previously an `expire` record
+        // (with the full `oldValue` copy) was written here and left behind, so
+        // every distinct key that ever expired permanently retained up to
+        // `maxHistoryPerKey` copies of its value.
+        this.history.delete(fullKey);
+        this.markDirty();
         cleaned++;
       }
     }
@@ -278,14 +280,14 @@ export class StateBoardStore {
     };
   }
 
-  restoreSnapshot(data: unknown): void {
-    if (!data || typeof data !== 'object') return;
+  restoreSnapshot(data: unknown): { evictedHistoryKeys: number } {
+    if (!data || typeof data !== 'object') return { evictedHistoryKeys: 0 };
     const snapshot = data as {
       schemaVersion?: number;
       entries?: [string, StateEntry][];
       history?: [string, StateChangeRecord[]][];
     };
-    if (snapshot.schemaVersion !== 1) return;
+    if (snapshot.schemaVersion !== 1) return { evictedHistoryKeys: 0 };
     const now = Date.now();
     this.state.clear();
     this.history.clear();
@@ -296,12 +298,28 @@ export class StateBoardStore {
         this.state.set(key, entry);
       }
     }
+    // Restore history only for keys that have a live state entry. A hostile or
+    // corrupt snapshot can carry history arrays for keys with no state entry
+    // (delete/expire audit records, or injected pure-history keys) — those
+    // would otherwise bypass the LRU cap and pin unbounded memory (up to
+    // `maxHistoryPerKey` full oldValue copies per orphan key, with no bound on
+    // the number of keys).
+    let evictedHistoryKeys = 0;
     if (snapshot.history) {
       for (const [key, records] of snapshot.history) {
+        if (!this.state.has(key)) {
+          evictedHistoryKeys++;
+          continue;
+        }
         this.history.set(key, records);
       }
     }
+    // A hostile or oversized snapshot can inject more entries than the cap
+    // allows. Trim back to `maxEntries` (evicting history alongside state) so
+    // restore cannot bypass the same bound that normal inserts enforce.
+    this.evictLruIfNeeded();
     this.mutationSeq = this.state.size;
     this.lastPersistedSeq = this.mutationSeq;
+    return { evictedHistoryKeys };
   }
 }

@@ -62,6 +62,10 @@ export class RuntimeSnapshotScheduler {
     this.periodicTimer = setInterval(() => {
       this.scheduleFlush().catch((err) => logger.warn('periodic snapshot failed:', err));
     }, this.periodicMs);
+    // unref so a running periodic flush never blocks graceful process exit.
+    if (this.periodicTimer.unref) {
+      this.periodicTimer.unref();
+    }
   }
 
   notifyDirty(): void {
