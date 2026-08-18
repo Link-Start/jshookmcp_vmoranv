@@ -336,6 +336,35 @@ describe('MCPServer', () => {
     expect(server).toBeDefined();
   });
 
+  it('samples info logs while always forwarding warn and error', () => {
+    const server = new MCPServer(baseConfig);
+    const mcp = mocks.mcpInstances[0];
+    mcp.server.oninitialized?.();
+
+    const listener = mocks.logListener;
+    expect(listener).toBeTypeOf('function');
+
+    // 25 info lines → only the 1st, 11th, and 21st are forwarded (every 10th).
+    for (let i = 0; i < 25; i++) {
+      listener!('info', `info ${i}`, []);
+    }
+    expect(mocks.sendLoggingMessage).toHaveBeenCalledTimes(3);
+
+    mocks.sendLoggingMessage.mockClear();
+    for (let i = 0; i < 5; i++) {
+      listener!('warn', `warn ${i}`, []);
+    }
+    expect(mocks.sendLoggingMessage).toHaveBeenCalledTimes(5);
+
+    mocks.sendLoggingMessage.mockClear();
+    for (let i = 0; i < 5; i++) {
+      listener!('error', `error ${i}`, []);
+    }
+    expect(mocks.sendLoggingMessage).toHaveBeenCalledTimes(5);
+
+    expect(server).toBeDefined();
+  });
+
   it('registers server resources on construction', () => {
     const server = new MCPServer(baseConfig);
     const mcp = mocks.mcpInstances[0];

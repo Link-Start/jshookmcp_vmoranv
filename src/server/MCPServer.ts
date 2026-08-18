@@ -76,6 +76,15 @@ import {
 } from '@server/extensions/ExtensionManager';
 import { executeToolWithTracking as executeToolWithTrackingImpl } from '@server/MCPServer.execution';
 
+/**
+ * Info-level logs are forwarded to the MCP client at a reduced rate: lines
+ * whose count is 1 modulo INFO_LOG_FORWARD_EVERY (the 1st, 11th, 21st, ...)
+ * are sent, so a noisy info stream can't amplify into O(log lines × active
+ * sessions) notifications. warn/error always forward; debug is dropped
+ * entirely.
+ */
+const INFO_LOG_FORWARD_EVERY = 10;
+
 export interface MCPServerRuntimeOptions {
   browserFleetLeaseStore?: BrowserFleetLeaseStore;
 }
@@ -421,12 +430,19 @@ export class MCPServer implements MCPServerContext {
     this.server.server.oninitialized = () => {
       this.clientInitialized = true;
     };
+    // Rate-limit the info forward path (see INFO_LOG_FORWARD_EVERY) while
+    // always forwarding warn/error; debug is dropped entirely.
+    let infoLogCount = 0;
     logger.onLog((level, message, args) => {
       if (!this.clientInitialized) return;
       // Drop debug — forwarding every debug/info line as an MCP notification
       // broadcast to all HTTP sessions is a quadratic amplification risk
       // (O(log lines × sessions)) under load.
       if (level === 'debug') return;
+      if (level === 'info') {
+        infoLogCount += 1;
+        if (infoLogCount % INFO_LOG_FORWARD_EVERY !== 1) return;
+      }
       try {
         const mcpLevel = level === 'warn' ? 'Warning' : level === 'error' ? 'Error' : 'Info';
 

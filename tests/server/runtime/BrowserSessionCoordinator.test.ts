@@ -1,10 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BrowserSessionCoordinator,
   parseBrowserSessionSnapshot,
 } from '@server/runtime/BrowserSessionCoordinator';
 
 describe('BrowserSessionCoordinator', () => {
+  // Restore real timers even when a sweep test fails mid-body; a leaked fake
+  // clock would otherwise hang or mis-time every subsequent test in the file.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('provides isolated TabRegistry instances per session', () => {
     const collector = {
       selectPage: vi.fn(async () => undefined),
@@ -528,6 +534,29 @@ describe('BrowserSessionCoordinator', () => {
       totalOwners: 0,
     });
     expect(coordinator.dropSession('kept')).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it('sweeps a session idle for exactly TTL but keeps one idle for TTL-1', async () => {
+    vi.useFakeTimers();
+    const coordinator = new BrowserSessionCoordinator(() => null, {
+      maxSessions: 8,
+      idleTtlMs: 1_000,
+      sweepIntervalMs: 100,
+    });
+
+    coordinator.getTabRegistry('at-ttl'); // lastTouchedMs = 0
+    coordinator.getTabRegistry('ttl-minus-one');
+
+    // Nudge 'ttl-minus-one' to lastTouchedMs = 1 so that at the t=1000 sweep
+    // tick its idle age is exactly 999 (TTL-1), pinning the keep/sweep boundary.
+    await vi.advanceTimersByTimeAsync(1);
+    coordinator.getTabRegistry('ttl-minus-one');
+
+    await vi.advanceTimersByTimeAsync(999); // now t=1000
+
+    expect(coordinator.dropSession('at-ttl')).toBe(false); // idle == TTL → swept
+    expect(coordinator.dropSession('ttl-minus-one')).toBe(true); // idle == TTL-1 → kept
     vi.useRealTimers();
   });
 
