@@ -79,6 +79,21 @@ export const NEMU_SESSION_SWEEP_MS = int('NEMU_SESSION_SWEEP_MS', 60_000);
 /** Max concurrent native-emulator sessions (bounds memory). Default: 64. */
 export const NEMU_MAX_SESSIONS = int('NEMU_MAX_SESSIONS', 64);
 
+/**
+ * Hard ceiling on the instruction budget a caller may request for one native
+ * call (`nemu_call_symbol` / `nemu_call_jni_export` / `nemu_call_address`).
+ * Values above this are clamped and the response carries `clamped: true`.
+ * `0` keeps its documented "unlimited" escape hatch (never clamped). Default: 10M.
+ */
+export const NEMU_CALL_MAX_STEPS = int('NEMU_CALL_MAX_STEPS', 10_000_000);
+
+/**
+ * Instruction budget cap for profile-mode traces (`nemu_trace` mode='profile').
+ * Frequency statistics need no per-step rows, so the cap is far below the
+ * call ceiling. Default: 500K.
+ */
+export const NEMU_PROFILE_MAX_STEPS = int('NEMU_PROFILE_MAX_STEPS', 500_000);
+
 /* ================================================================== */
 /*  Binary string extraction                                           */
 /* ================================================================== */

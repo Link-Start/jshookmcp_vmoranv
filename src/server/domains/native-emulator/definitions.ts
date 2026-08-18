@@ -176,6 +176,10 @@ export const nativeEmulatorTools: Tool[] = [
       .string('symbol', 'Exported `Java_*` JNI function name')
       .array('javaArgs', { type: 'number' }, 'Java arguments (ints or jobject handles) after thiz')
       .number('thiz', 'Receiver handle (jobject/jclass); 0 for static/none', { default: 0 })
+      .number(
+        'maxSteps',
+        'Max instruction steps before aborting (default: 1M, 0=unlimited). Values above the server cap are clamped and the response carries clamped:true.',
+      )
       .required('sessionId', 'symbol'),
   ),
   tool('nemu_call_address', (t) =>
@@ -307,7 +311,7 @@ export const nativeEmulatorTools: Tool[] = [
       )
       .number(
         'maxSteps',
-        'Maximum trace events to return (default: 1000; profile mode default and cap: 5,000,000 — frequency statistics need no per-step rows)',
+        'Maximum trace events to return (default: 1000; profile mode default and cap: 500,000 — frequency statistics need no per-step rows)',
         { default: 1000 },
       )
       .boolean(

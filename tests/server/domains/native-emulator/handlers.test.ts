@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { NativeEmulatorHandlers } from '@server/domains/native-emulator/handlers.impl';
 import { SessionManager } from '@modules/native-emulator/SessionManager';
 import { getGdbServer } from '@native/GdbRspServer';
-import { NEMU_SESSION_SWEEP_MS } from '@src/constants';
+import { NEMU_CALL_MAX_STEPS, NEMU_SESSION_SWEEP_MS } from '@src/constants';
 
 const EM_AARCH64 = 183;
 const PT_LOAD = 1;
@@ -121,6 +121,7 @@ let soPath: string;
 let nullCallSoPath: string;
 let callerSoPath: string;
 let loopSoPath: string;
+let countJniSoPath: string;
 // add_two: add x0, x0, x1 ; ret
 const ADD_TWO = [0x00, 0x00, 0x01, 0x8b, 0xc0, 0x03, 0x5f, 0xd6];
 // call_null: movz x8,#0 ; blr x8
@@ -169,6 +170,31 @@ const COUNT_LOOP = [
   0x5f,
   0xd6, // +0x08: ret
 ];
+// Java_com_app_count: movz x0,#0 ; add x0,x0,#1 ; subs x2,x2,#1 ; b.ne -2 ; ret
+// 3 steps per iteration; with x2 = 1000000 it returns x0 = 1000000 if it runs to
+// completion, and a tiny value if the step budget aborts it early.
+const COUNT_RETURN_JNI = [
+  0x00,
+  0x00,
+  0x80,
+  0xd2, // +0x00: movz x0, #0
+  0x00,
+  0x04,
+  0x00,
+  0x91, // +0x04: add x0, x0, #1
+  0x42,
+  0x04,
+  0x00,
+  0xf1, // +0x08: subs x2, x2, #1
+  0xc1,
+  0xff,
+  0xff,
+  0x54, // +0x0c: b.ne -2 (back to add)
+  0xc0,
+  0x03,
+  0x5f,
+  0xd6, // +0x10: ret
+];
 
 beforeAll(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), 'nemu-handlers-'));
@@ -176,6 +202,7 @@ beforeAll(async () => {
   nullCallSoPath = join(tmpDir, 'lib-null-call.so');
   callerSoPath = join(tmpDir, 'libcaller.so');
   loopSoPath = join(tmpDir, 'libloop.so');
+  countJniSoPath = join(tmpDir, 'libcountjni.so');
   await writeFile(soPath, buildSo(ADD_TWO, [{ name: 'add_two', codeOffset: 0 }]));
   await writeFile(nullCallSoPath, buildSo(CALL_NULL, [{ name: 'call_null', codeOffset: 0 }]));
   await writeFile(
@@ -186,6 +213,10 @@ beforeAll(async () => {
     ]),
   );
   await writeFile(loopSoPath, buildSo(COUNT_LOOP, [{ name: 'count_loop', codeOffset: 0 }]));
+  await writeFile(
+    countJniSoPath,
+    buildSo(COUNT_RETURN_JNI, [{ name: 'Java_com_app_count', codeOffset: 0 }]),
+  );
 });
 
 afterAll(async () => {
@@ -791,5 +822,116 @@ describe('NativeEmulatorHandlers — nemu_trace profile mode', () => {
     expect(res.totalInstructions).toBe(5);
     expect(res.truncated).toBe(true);
     expect((res.hotInstructions as unknown[]).length).toBeGreaterThan(0);
+  });
+});
+
+describe('NativeEmulatorHandlers — native-call step budget clamping', () => {
+  let handlers: NativeEmulatorHandlers;
+  afterEach(() => handlers.dispose());
+
+  async function freshSession(): Promise<string> {
+    handlers = new NativeEmulatorHandlers(
+      new SessionManager({ emulatorOptions: { syscalls: false } }),
+    );
+    const created = payload(await handlers.handleCreateSession({ installSyscalls: false }));
+    return created.sessionId as string;
+  }
+
+  it('clamps an oversized call_symbol maxSteps and marks the response', async () => {
+    const sessionId = await freshSession();
+    await handlers.handleLoadLibrary({ sessionId, soPath });
+    const res = payload(
+      await handlers.handleCallSymbol({
+        sessionId,
+        symbol: 'add_two',
+        args: [40, 2],
+        maxSteps: NEMU_CALL_MAX_STEPS + 1,
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.result).toBe(42);
+    expect(res.clamped).toBe(true);
+  });
+
+  it('leaves a call_symbol maxSteps under the cap unclamped', async () => {
+    const sessionId = await freshSession();
+    await handlers.handleLoadLibrary({ sessionId, soPath });
+    const res = payload(
+      await handlers.handleCallSymbol({
+        sessionId,
+        symbol: 'add_two',
+        args: [40, 2],
+        maxSteps: 100,
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.result).toBe(42);
+    expect(res.clamped).toBeUndefined();
+  });
+
+  it('preserves the documented 0=unlimited escape hatch without clamping', async () => {
+    const sessionId = await freshSession();
+    await handlers.handleLoadLibrary({ sessionId, soPath });
+    const res = payload(
+      await handlers.handleCallSymbol({
+        sessionId,
+        symbol: 'add_two',
+        args: [40, 2],
+        maxSteps: 0,
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.result).toBe(42);
+    expect(res.clamped).toBeUndefined();
+  });
+
+  it('clamps an oversized call_address maxSteps and marks the response', async () => {
+    const sessionId = await freshSession();
+    await handlers.handleLoadLibrary({ sessionId, soPath });
+    const res = payload(
+      await handlers.handleCallAddress({
+        sessionId,
+        address: 0x1000, // add_two entry (segVaddr)
+        args: [40, 2],
+        maxSteps: NEMU_CALL_MAX_STEPS + 1,
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.result).toBe(42);
+    expect(res.clamped).toBe(true);
+  });
+
+  it('clamps an oversized call_jni_export maxSteps and marks the response', async () => {
+    const sessionId = await freshSession();
+    await handlers.handleLoadLibrary({ sessionId, soPath });
+    const res = payload(
+      await handlers.handleCallJniExport({
+        sessionId,
+        symbol: 'add_two',
+        javaArgs: [40, 2],
+        maxSteps: NEMU_CALL_MAX_STEPS + 1,
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.clamped).toBe(true);
+  });
+
+  it('forwards a small call_jni_export maxSteps to the engine and aborts a counting loop', async () => {
+    const sessionId = await freshSession();
+    await handlers.handleLoadLibrary({ sessionId, soPath: countJniSoPath });
+    // Pre-fix callJniExport ignored maxSteps entirely: the 1M-iteration loop
+    // would run to completion and return x0 = 1000000. With maxSteps=10 the
+    // engine must abort it early, leaving x0 far below that.
+    const res = payload(
+      await handlers.handleCallJniExport({
+        sessionId,
+        symbol: 'Java_com_app_count',
+        javaArgs: [1000000],
+        maxSteps: 10,
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.result).toBeLessThan(1000);
+    expect(res.clamped).toBeUndefined();
   });
 });

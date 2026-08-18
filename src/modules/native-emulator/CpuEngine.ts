@@ -98,7 +98,7 @@ export interface NativeRuntimeImportDiagnostic {
 }
 
 const EM_AARCH64 = 183;
-const MAX_STEPS = 100_000_000; // Runaway guard for the M0 linear executor.
+const MAX_STEPS = 1_000_000; // Runaway guard for the M0 linear executor.
 const RETURN_SENTINEL = 0; // LR value that marks "return out of callSymbol".
 const STACK_BASE = 0x7fff_0000; // Guest stack region base (grows down from the top).
 const STACK_SIZE = 0x20000; // 128 KiB (some .so's need deeper stacks).

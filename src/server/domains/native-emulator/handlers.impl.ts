@@ -41,6 +41,7 @@ import {
 } from '@server/domains/shared/parse-args';
 import type { ToolArgs, ToolResponse } from '@server/types';
 import { getReverseEngineeringConfig } from '@utils/reverseEngineeringConfig';
+import { NEMU_CALL_MAX_STEPS, NEMU_PROFILE_MAX_STEPS } from '@src/constants';
 import { nativeCallFailure, nativeDiagnostics } from './handler-call';
 import { formatOpcodeInput, parseOpcodeInput, parseProgramCounter } from './handler-disasm';
 import { buildJavaFieldValue, buildJavaMockImpl } from './handler-java';
@@ -56,9 +57,25 @@ import {
 
 /** Cap on instruction-trace events returned, regardless of requested maxSteps. */
 const TRACE_HARD_CAP = 100_000;
-/** Instruction budget cap for profile-mode traces (frequency stats need no per-step rows). */
-const PROFILE_MAX_STEPS = 5_000_000;
 const DISASM_ARCHITECTURES = new Set(SUPPORTED_DISASSEMBLY_ARCHITECTURES);
+
+/**
+ * Clamp a caller-supplied native-call step budget to the server ceiling
+ * (`NEMU_CALL_MAX_STEPS`). Values at or under the ceiling pass through
+ * untouched; oversized values are capped and flagged so the response can carry
+ * a `clamped: true` marker. `0` and negative values keep their documented
+ * "unlimited" escape hatch and are never clamped.
+ */
+function clampNativeMaxSteps(raw: number | undefined): {
+  maxSteps: number | undefined;
+  clamped: boolean;
+} {
+  if (raw === undefined) return { maxSteps: undefined, clamped: false };
+  if (raw > 0 && raw > NEMU_CALL_MAX_STEPS) {
+    return { maxSteps: NEMU_CALL_MAX_STEPS, clamped: true };
+  }
+  return { maxSteps: raw, clamped: false };
+}
 
 /** One node of the profile-mode call tree (BL/BLR targets aggregated). */
 interface ProfileCallNode {
@@ -906,28 +923,39 @@ export class NativeEmulatorHandlers {
   }
 
   handleCallSymbol(args: ToolArgs): Promise<ToolResponse> {
-    return this.handleNativeCall(args, 'call_symbol', (session, symbol) => {
-      const callArgs = argNumberArray(args, 'args');
-      const injectJni = argBool(args, 'injectJni'); // undefined → auto-detect
-      const maxSteps = argNumber(args, 'maxSteps');
-      const initRegsRaw = args.initRegisters as Record<string, number> | undefined;
-      const initRegs = initRegsRaw
-        ? Object.fromEntries(Object.entries(initRegsRaw).map(([k, v]) => [Number(k), BigInt(v)]))
-        : undefined;
-      return session.emulator.call(symbol, callArgs, {
-        injectJni,
-        initRegisters: initRegs,
-        maxSteps,
-      });
-    });
+    const { maxSteps, clamped } = clampNativeMaxSteps(argNumber(args, 'maxSteps'));
+    return this.handleNativeCall(
+      args,
+      'call_symbol',
+      (session, symbol) => {
+        const callArgs = argNumberArray(args, 'args');
+        const injectJni = argBool(args, 'injectJni'); // undefined → auto-detect
+        const initRegsRaw = args.initRegisters as Record<string, number> | undefined;
+        const initRegs = initRegsRaw
+          ? Object.fromEntries(Object.entries(initRegsRaw).map(([k, v]) => [Number(k), BigInt(v)]))
+          : undefined;
+        return session.emulator.call(symbol, callArgs, {
+          injectJni,
+          initRegisters: initRegs,
+          maxSteps,
+        });
+      },
+      clamped,
+    );
   }
 
   handleCallJniExport(args: ToolArgs): Promise<ToolResponse> {
-    return this.handleNativeCall(args, 'call_jni_export', (session, symbol) => {
-      const javaArgs = argNumberArray(args, 'javaArgs');
-      const thiz = argNumber(args, 'thiz', 0);
-      return session.emulator.callJniExport(symbol, javaArgs, thiz);
-    });
+    const { maxSteps, clamped } = clampNativeMaxSteps(argNumber(args, 'maxSteps'));
+    return this.handleNativeCall(
+      args,
+      'call_jni_export',
+      (session, symbol) => {
+        const javaArgs = argNumberArray(args, 'javaArgs');
+        const thiz = argNumber(args, 'thiz', 0);
+        return session.emulator.callJniExport(symbol, javaArgs, thiz, undefined, maxSteps);
+      },
+      clamped,
+    );
   }
 
   handleCallAddress(args: ToolArgs): Promise<ToolResponse> {
@@ -937,14 +965,19 @@ export class NativeEmulatorHandlers {
       if (address === undefined) throw new Error('Missing required number argument: "address"');
       const callArgs = argNumberArray(args, 'args');
       const injectJni = argBool(args, 'injectJni');
-      const maxSteps = argNumber(args, 'maxSteps');
+      const { maxSteps, clamped } = clampNativeMaxSteps(argNumber(args, 'maxSteps'));
       // When injectJni is set, prepend JNI env + 0 to args (standard JNI method convention).
       const effectiveArgs = injectJni
         ? [session.emulator.jni.envPointer(), 0, ...callArgs]
         : callArgs;
       const result = session.emulator.callAddress(address, effectiveArgs, maxSteps);
       return R.ok()
-        .merge({ sessionId: session.id, address: `0x${address.toString(16)}`, result })
+        .merge({
+          sessionId: session.id,
+          address: `0x${address.toString(16)}`,
+          result,
+          ...(clamped ? { clamped: true } : {}),
+        })
         .json();
     });
   }
@@ -953,6 +986,7 @@ export class NativeEmulatorHandlers {
     args: ToolArgs,
     phase: 'call_symbol' | 'call_jni_export',
     invoke: (session: EmulatorSession, symbol: string) => number,
+    clamped = false,
   ): Promise<ToolResponse> {
     let session: EmulatorSession | undefined;
     let symbol = '';
@@ -974,6 +1008,7 @@ export class NativeEmulatorHandlers {
           symbol,
           result,
           diagnostics: nativeDiagnostics(session),
+          ...(clamped ? { clamped: true } : {}),
         })
         .json();
     } catch (error) {
@@ -1109,8 +1144,8 @@ export class NativeEmulatorHandlers {
       const profileMode = mode === 'profile';
       // Profile mode trades per-step rows for volume: a much larger default budget.
       const maxSteps = Math.min(
-        argNumber(args, 'maxSteps', profileMode ? PROFILE_MAX_STEPS : 1000),
-        profileMode ? PROFILE_MAX_STEPS : TRACE_HARD_CAP,
+        argNumber(args, 'maxSteps', profileMode ? NEMU_PROFILE_MAX_STEPS : 1000),
+        profileMode ? NEMU_PROFILE_MAX_STEPS : TRACE_HARD_CAP,
       );
       const topN = Math.min(Math.max(Math.trunc(argNumber(args, 'topN', 20) || 20), 1), 1000);
       const tableRegRaw = argNumber(args, 'tableReg');
