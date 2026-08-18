@@ -314,10 +314,10 @@ export class DetailedDataManager {
     return (Object(value) as Record<string, unknown>)[key];
   }
 
-  smartHandle<T>(
+  async smartHandle<T>(
     data: T,
     threshold = DETAILED_DATA_SMART_THRESHOLD_BYTES,
-  ): T | DetailedDataResponse {
+  ): Promise<T | DetailedDataResponse> {
     // SECURITY: Check strings against threshold — they can be arbitrarily large.
     // Only skip serialization for true primitives (number, boolean, null, undefined).
     if (data === null || data === undefined) return data;
@@ -337,12 +337,12 @@ export class DetailedDataManager {
     return this.createDetailedResponseWithSize(data, jsonStr, size);
   }
 
-  private createDetailedResponseWithSize(
+  private async createDetailedResponseWithSize(
     data: unknown,
     jsonStr: string,
     size: number,
-  ): DetailedDataResponse {
-    const detailId = this.storeWithSize(data, size, undefined, jsonStr);
+  ): Promise<DetailedDataResponse> {
+    const detailId = await this.storeWithSize(data, size, undefined, jsonStr);
     const summary = this.generateSummaryFromJson(data, jsonStr, size);
 
     return {
@@ -356,17 +356,17 @@ export class DetailedDataManager {
     };
   }
 
-  store<T>(data: T, customTTL?: number): string {
+  async store<T>(data: T, customTTL?: number): Promise<string> {
     const { json, size } = this.serializeWithMemo(data);
     return this.storeWithSize(data, size, customTTL, json);
   }
 
-  private storeWithSize(
+  private async storeWithSize(
     data: unknown,
     size: number,
     customTTL?: number,
     precomputedJson?: string,
-  ): string {
+  ): Promise<string> {
     if (this.cache.size >= this.MAX_CACHE_SIZE) {
       this.evictLRU();
     }
@@ -376,7 +376,7 @@ export class DetailedDataManager {
     // retrieval can never re-emit multi-MB blobs into the LLM context window.
     // sanitizeForCache returns the same reference when nothing needed offloading,
     // so the common path stays a cheap no-op with no size recomputation.
-    const sanitized = sanitizeForCache(data);
+    const sanitized = await sanitizeForCache(data);
     // Reuse the caller's serialization when sanitization was a no-op (a2-07:
     // persistToDisk used to stringify a second time); only re-serialize when
     // offloading actually rewrote the payload.

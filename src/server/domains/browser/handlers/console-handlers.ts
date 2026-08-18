@@ -38,7 +38,7 @@ export class ConsoleHandlers {
 
       const logs = this.deps.consoleMonitor.getLogs({ type, limit, since });
       // Threshold follows DETAILED_DATA_SMART_THRESHOLD_BYTES (env-configurable).
-      const result = this.deps.detailedDataManager.smartHandle({ count: logs.length, logs });
+      const result = await this.deps.detailedDataManager.smartHandle({ count: logs.length, logs });
       return result as Record<string, unknown>;
     });
   }
@@ -52,7 +52,7 @@ export class ConsoleHandlers {
       if (!expression.trim()) throw new Error('expression is required');
 
       const raw = await this.deps.consoleMonitor.execute(expression);
-      const processed = applyEvaluationPostFilters(raw, this.deps.detailedDataManager, {
+      const processed = await applyEvaluationPostFilters(raw, this.deps.detailedDataManager, {
         autoSummarize: true,
         maxSize,
         stripBase64,

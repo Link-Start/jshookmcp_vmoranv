@@ -59,11 +59,11 @@ export class ProtocolAnalysisPcapngHandlers extends ProtocolAnalysisFingerprintH
       // retrievable detailId) instead of inline `dataHex`, keeping multi-MB
       // captures out of the LLM context window (matches the project's
       // response-offload pipeline, issue #62).
-      const offloadPacket = (hex: string, packetIndex: number): string => {
+      const offloadPacket = (hex: string, packetIndex: number): Promise<string> => {
         const detailId = this.detailedDataManager.store({ packetIndex, hex });
         return detailId;
       };
-      const result = parsePcapng(buffer, {
+      const result = await parsePcapng(buffer, {
         maxPackets,
         maxBytesPerPacket,
         interfaceFilter,

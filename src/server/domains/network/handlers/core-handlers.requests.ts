@@ -383,7 +383,7 @@ export async function handleNetworkGetRequests(
       deduplicateUrls,
     });
 
-    const processedResult = detailedDataManager.smartHandle(
+    const processedResult = await detailedDataManager.smartHandle(
       result.finalPayload,
       NETWORK_SMART_HANDLE_THRESHOLD_BYTES,
     );

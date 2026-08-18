@@ -117,7 +117,7 @@ export class ReplayHandlers {
           .json();
       }
 
-      const result = this.detailedDataManager.smartHandle(
+      const result = await this.detailedDataManager.smartHandle(
         {
           entryCount: har.log.entries.length,
           har,

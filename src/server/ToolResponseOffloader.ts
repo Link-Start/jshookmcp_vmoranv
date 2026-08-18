@@ -78,8 +78,12 @@ export class LargeDataOffloader {
   /**
    * Store structured data in DetailedDataManager. Returns the placeholder.
    */
-  private storeInDetailManager(data: unknown, _toolName: string, _idx: number): OffloadPlaceholder {
-    const detailId = this.detailedData.store(data);
+  private async storeInDetailManager(
+    data: unknown,
+    _toolName: string,
+    _idx: number,
+  ): Promise<OffloadPlaceholder> {
+    const detailId = await this.detailedData.store(data);
     const entry = (
       this.detailedData as unknown as { cache: Map<string, { size: number }> }
     ).cache.get(detailId);
@@ -202,7 +206,7 @@ export class LargeDataOffloader {
       // but this also catches any future path that bypasses the cache.
       const detailWrapper = this.tryParseJson(text);
       if (detailWrapper !== null && this.isDetailWrapper(detailWrapper)) {
-        const sanitized = sanitizeForCache(detailWrapper);
+        const sanitized = await sanitizeForCache(detailWrapper);
         if (sanitized !== detailWrapper) {
           content[i] = { ...record, text: JSON.stringify(sanitized, null, 2) };
           changed = true;
@@ -251,7 +255,7 @@ export class LargeDataOffloader {
         try {
           content[i] = {
             ...record,
-            text: JSON.stringify(this.storeInDetailManager(parsed, toolName, i), null, 2),
+            text: JSON.stringify(await this.storeInDetailManager(parsed, toolName, i), null, 2),
           };
           changed = true;
         } catch (error) {

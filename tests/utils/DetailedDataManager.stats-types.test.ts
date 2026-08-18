@@ -22,9 +22,9 @@ describe('utils/DetailedDataManager getStats types', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns numeric metrics as numbers, not formatted strings', () => {
-    manager.store({ a: 1 });
-    manager.store({ b: 2 });
+  it('returns numeric metrics as numbers, not formatted strings', async () => {
+    await manager.store({ a: 1 });
+    await manager.store({ b: 2 });
     try {
       manager.retrieve('does-not-exist');
     } catch {
@@ -67,8 +67,8 @@ describe('utils/DetailedDataManager getStats types', () => {
     }
   });
 
-  it('getDetailedStats entries carry numeric fields', () => {
-    manager.store({ x: 1 }, 60_000);
+  it('getDetailedStats entries carry numeric fields', async () => {
+    await manager.store({ x: 1 }, 60_000);
     const entry = manager.getDetailedStats()[0]!;
     expect(typeof entry.sizeKB).toBe('string'); // human-readable label
     expect(typeof entry.accessCount).toBe('number');

@@ -21,10 +21,10 @@ export class ScriptManagementHandlers {
         SCRIPTS_MAX_CAP,
       );
       const scripts = await this.deps.scriptManager.getAllScripts(includeSource, maxScripts);
-      return this.deps.detailedDataManager.smartHandle({
+      return (await this.deps.detailedDataManager.smartHandle({
         count: scripts.length,
         scripts,
-      }) as Record<string, unknown>;
+      })) as Record<string, unknown>;
     });
   }
 
@@ -79,7 +79,7 @@ export class ScriptManagementHandlers {
         };
       }
 
-      return this.deps.detailedDataManager.smartHandle(script) as unknown as Record<
+      return (await this.deps.detailedDataManager.smartHandle(script)) as unknown as Record<
         string,
         unknown
       >;

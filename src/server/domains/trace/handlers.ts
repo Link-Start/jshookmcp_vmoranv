@@ -546,7 +546,7 @@ export class TraceToolHandlers {
         ? await readTraceBody(resource, { maxBodyBytes, returnSummary })
         : null;
 
-      const flowData = smartHandleDetailed(this.ctx, {
+      const flowData = await smartHandleDetailed(this.ctx, {
         requestId,
         request: formatNetworkResource(resource),
         body,

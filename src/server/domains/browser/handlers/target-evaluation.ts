@@ -43,12 +43,16 @@ export class TargetEvaluationHandlers {
         awaitPromise,
       });
 
-      const processedResult = applyEvaluationPostFilters(rawResult, this.deps.detailedDataManager, {
-        autoSummarize,
-        maxSize,
-        fieldFilter: fieldFilterArg ?? undefined,
-        stripBase64: doStripBase64,
-      });
+      const processedResult = await applyEvaluationPostFilters(
+        rawResult,
+        this.deps.detailedDataManager,
+        {
+          autoSummarize,
+          maxSize,
+          fieldFilter: fieldFilterArg ?? undefined,
+          stripBase64: doStripBase64,
+        },
+      );
 
       return R.ok().build({
         target: activeTarget,

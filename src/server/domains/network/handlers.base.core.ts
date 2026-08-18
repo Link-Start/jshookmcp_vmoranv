@@ -391,7 +391,7 @@ export class NetworkHandlersCore {
           }),
       };
 
-      const processedResult = this.detailedDataManager.smartHandle(
+      const processedResult = await this.detailedDataManager.smartHandle(
         finalPayload,
         NETWORK_SMART_HANDLE_THRESHOLD_BYTES,
       );

@@ -59,7 +59,7 @@ describe('DetailedDataManager disk lifecycle', () => {
   });
 
   it('cleanup unlinks persisted files and removes them from metadata (a2-03/a3-05)', async () => {
-    const id = manager.store({ expired: true }, 100);
+    const id = await manager.store({ expired: true }, 100);
     const persistPath = join(PERSIST_DIR, `${id}.json`);
 
     // Persist + metadata append both complete before the entry expires.
@@ -76,8 +76,8 @@ describe('DetailedDataManager disk lifecycle', () => {
   });
 
   it('cleanup keeps live entries and their files untouched', async () => {
-    const keep = manager.store({ keep: true }, 60_000);
-    const drop = manager.store({ drop: true }, 100);
+    const keep = await manager.store({ keep: true }, 60_000);
+    const drop = await manager.store({ drop: true }, 100);
     await waitFor(() => existsSync(join(PERSIST_DIR, `${keep}.json`)));
     await waitFor(() => existsSync(join(PERSIST_DIR, `${drop}.json`)));
 
@@ -94,12 +94,12 @@ describe('DetailedDataManager disk lifecycle', () => {
   });
 
   it('evictLRU unlinks the evicted entry persisted file (a2-03)', async () => {
-    const first = manager.store({ first: true });
+    const first = await manager.store({ first: true });
     await waitFor(() => existsSync(join(PERSIST_DIR, `${first}.json`)));
     await waitFor(() => readFileSync(METADATA_PATH, 'utf-8').includes(first));
 
     for (let i = 0; i < 100; i++) {
-      manager.store({ i });
+      await manager.store({ i });
       await sleep(1);
     }
 
@@ -112,7 +112,7 @@ describe('DetailedDataManager disk lifecycle', () => {
 
   it('retrieveAsync lazily loads a gzip-persisted entry after restart (a2-04)', async () => {
     const large = { payload: 'x'.repeat(5000) };
-    const id = manager.store(large, 60_000);
+    const id = await manager.store(large, 60_000);
     await waitFor(() => existsSync(join(PERSIST_DIR, `${id}.gz`)));
     await waitFor(() => readFileSync(METADATA_PATH, 'utf-8').includes(id));
     manager.shutdown();
@@ -134,7 +134,7 @@ describe('DetailedDataManager disk lifecycle', () => {
   });
 
   it('retrieveAsync behaves like retrieve for in-memory entries', async () => {
-    const id = manager.store({ nested: { value: 42 } });
+    const id = await manager.store({ nested: { value: 42 } });
 
     expect(await manager.retrieveAsync(id)).toEqual({ nested: { value: 42 } });
     expect(await manager.retrieveAsync(id, 'nested.value')).toBe(42);
@@ -145,7 +145,7 @@ describe('DetailedDataManager disk lifecycle', () => {
     // Simulate a saturated queue: MAX_PENDING_PERSISTS writes in flight.
     (manager as any).pendingPersistCount = 8;
 
-    const id = manager.store({ big: 'x'.repeat(500) }, 60_000);
+    const id = await manager.store({ big: 'x'.repeat(500) }, 60_000);
 
     // Degradation is synchronous: counted, memory-only, still retrievable.
     expect(manager.getStats().metrics.persistDeferredCount).toBe(1);
@@ -154,7 +154,7 @@ describe('DetailedDataManager disk lifecycle', () => {
   });
 
   it('pendingPersistCount drains back to zero after writes complete', async () => {
-    const id = manager.store({ drain: true });
+    const id = await manager.store({ drain: true });
     await waitFor(() => existsSync(join(PERSIST_DIR, `${id}.json`)));
     await waitFor(() => (manager as any).pendingPersistCount === 0);
     expect(manager.getStats().metrics.diskWriteCount).toBe(1);
@@ -162,7 +162,7 @@ describe('DetailedDataManager disk lifecycle', () => {
   });
 
   it('retrieveAsync expired path fire-and-forgets disk cleanup (maintenance never blocks access)', async () => {
-    const id = manager.store({ short: true }, 100);
+    const id = await manager.store({ short: true }, 100);
     const persistPath = join(PERSIST_DIR, `${id}.json`);
     await waitFor(() => existsSync(persistPath));
     await waitFor(() => readFileSync(METADATA_PATH, 'utf-8').includes(id));
@@ -177,7 +177,7 @@ describe('DetailedDataManager disk lifecycle', () => {
   });
 
   it('discardPersistedEntries is a no-op after shutdown', async () => {
-    const id = manager.store({ a: 1 });
+    const id = await manager.store({ a: 1 });
     await waitFor(() => existsSync(join(PERSIST_DIR, `${id}.json`)));
     manager.shutdown();
     await (manager as any).discardPersistedEntries([

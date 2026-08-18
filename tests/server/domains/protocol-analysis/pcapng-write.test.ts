@@ -129,7 +129,7 @@ describe('ProtocolAnalysisHandlers — handlePcapngWrite', () => {
     });
 
     const buffer = await fsReadFile(path);
-    const result = parsePcapng(buffer);
+    const result = await parsePcapng(buffer);
 
     expect(result.blockCount).toBe(3);
     expect(result.sections).toHaveLength(1);

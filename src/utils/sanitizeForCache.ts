@@ -15,12 +15,13 @@
  *   - cycle-safe (WeakSet guards against circular references)
  *   - idempotent (an existing `{ _offload }` placeholder is returned untouched)
  *   - cheap for primitives / small strings (returned as-is, no allocation)
- *   - synchronous disk write (mkdirSync + writeFileSync) so callers like
- *     DetailedDataManager.store() keep their synchronous signature — matching the
- *     existing sync-write precedent in McpLogTransport / PersistentCache.
+ *   - asynchronous disk write (await fs.promises.mkdir + fs.promises.writeFile)
+ *     so the event loop is never frozen by a request-path offload write (a4-02/a2-02).
+ *     Callers await sanitizeForCache — the placeholder still carries a fully-written
+ *     file before the response is returned, only the blocking is removed.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, relative, isAbsolute, sep } from 'node:path';
 import { generateShortId, getArtifactDir, getArtifactsRoot } from '@utils/artifacts';
 import { getProjectRoot } from '@utils/outputPaths';
@@ -84,8 +85,12 @@ function isOffloadPlaceholder(value: object): boolean {
 }
 
 /** Write raw string bytes to artifacts/offloaded and return the project-relative path. */
-function writeOffloadFile(raw: string, mimeType: string | undefined, outputDir: string): string {
-  mkdirSync(outputDir, { recursive: true });
+async function writeOffloadFile(
+  raw: string,
+  mimeType: string | undefined,
+  outputDir: string,
+): Promise<string> {
+  await mkdir(outputDir, { recursive: true });
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
   const ext = mimeType ? 'bin' : 'txt';
@@ -101,7 +106,7 @@ function writeOffloadFile(raw: string, mimeType: string | undefined, outputDir: 
   for (let attempt = 0; attempt < 2; attempt++) {
     const absolutePath = resolve(outputDir, `offload-${ts}-${generateShortId()}.${ext}`);
     try {
-      writeFileSync(absolutePath, payload, { encoding: 'utf8', flag: 'wx' });
+      await writeFile(absolutePath, payload, { encoding: 'utf8', flag: 'wx' });
       return relative(getProjectRoot(), absolutePath).replace(/\\/g, '/');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST' && attempt === 0) {
@@ -115,14 +120,17 @@ function writeOffloadFile(raw: string, mimeType: string | undefined, outputDir: 
 }
 
 /** Build the compact placeholder for an oversized string, optionally writing the original to disk. */
-function offloadString(value: string, opts: Required<SanitizeOptions>): OffloadFilePlaceholder {
+async function offloadString(
+  value: string,
+  opts: Required<SanitizeOptions>,
+): Promise<OffloadFilePlaceholder> {
   const mimeType = value.match(DATA_URI_RE)?.[1];
   const sample = value.slice(0, SAMPLE_LENGTH);
 
   let path = '';
   if (opts.writeFile) {
     try {
-      path = writeOffloadFile(value, mimeType, opts.outputDir);
+      path = await writeOffloadFile(value, mimeType, opts.outputDir);
     } catch (error) {
       logger.warn(`[sanitizeForCache] Failed to offload field to disk: ${String(error)}`);
     }
@@ -144,13 +152,13 @@ function shouldOffloadString(value: string, threshold: number): boolean {
   return DATA_URI_RE.test(value) || value.length > threshold;
 }
 
-function sanitizeValue(
+async function sanitizeValue(
   value: unknown,
   opts: Required<SanitizeOptions>,
   seen: WeakSet<object>,
-): unknown {
+): Promise<unknown> {
   if (typeof value === 'string') {
-    return shouldOffloadString(value, opts.threshold) ? offloadString(value, opts) : value;
+    return shouldOffloadString(value, opts.threshold) ? await offloadString(value, opts) : value;
   }
 
   if (value === null || typeof value !== 'object') {
@@ -174,11 +182,12 @@ function sanitizeValue(
 
   if (Array.isArray(value)) {
     let mutated = false;
-    const result = value.map((item) => {
-      const sanitized = sanitizeValue(item, opts, seen);
-      if (sanitized !== item) mutated = true;
-      return sanitized;
-    });
+    const result: unknown[] = [];
+    for (let i = 0; i < value.length; i++) {
+      const sanitized = await sanitizeValue(value[i], opts, seen);
+      if (sanitized !== value[i]) mutated = true;
+      result.push(sanitized);
+    }
     seen.delete(value);
     return mutated ? result : value;
   }
@@ -191,7 +200,7 @@ function sanitizeValue(
       skippedUnsafe = true;
       continue;
     }
-    const sanitized = sanitizeValue(item, opts, seen);
+    const sanitized = await sanitizeValue(item, opts, seen);
     if (sanitized !== item) mutated = true;
     result[key] = sanitized;
   }
@@ -216,9 +225,11 @@ function isUserAbsolutePath(inputPath: string): boolean {
  * Recursively sanitize a value for caching. Oversized strings and data: URIs are
  * replaced with disk-backed `{ _offload }` placeholders. Returns the original
  * reference unchanged when nothing needed offloading (so callers can cheaply
- * detect "no-op").
+ * detect "no-op"). The write is asynchronous (a4-02/a2-02): callers await this
+ * so the placeholder's file is fully written before the response is returned,
+ * but the event loop is never blocked by a synchronous disk write.
  */
-export function sanitizeForCache<T>(data: T, options: SanitizeOptions = {}): T {
+export async function sanitizeForCache<T>(data: T, options: SanitizeOptions = {}): Promise<T> {
   const projectRoot = getProjectRoot();
   const requestedDir = options.outputDir ?? getArtifactDir('offloaded');
   // Path-guard: offload files are only ever written inside the project root,
@@ -241,7 +252,7 @@ export function sanitizeForCache<T>(data: T, options: SanitizeOptions = {}): T {
     outputDir,
     writeFile: options.writeFile ?? true,
   };
-  return sanitizeValue(data, opts, new WeakSet<object>()) as T;
+  return (await sanitizeValue(data, opts, new WeakSet<object>())) as T;
 }
 
 /** Exposed for tests / callers that need the default offload directory. */

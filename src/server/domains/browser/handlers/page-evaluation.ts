@@ -103,12 +103,16 @@ export class PageEvaluationHandlers {
         const { evaluateFunction } = transformCodeForCamoufox({ code });
 
         const result = await context.evaluate(evaluateFunction as () => unknown);
-        const processedResult = applyEvaluationPostFilters(result, this.deps.detailedDataManager, {
-          autoSummarize,
-          maxSize,
-          fieldFilter: fieldFilterArg ?? undefined,
-          stripBase64: doStripBase64,
-        });
+        const processedResult = await applyEvaluationPostFilters(
+          result,
+          this.deps.detailedDataManager,
+          {
+            autoSummarize,
+            maxSize,
+            fieldFilter: fieldFilterArg ?? undefined,
+            stripBase64: doStripBase64,
+          },
+        );
         return R.ok().build({
           driver: 'camoufox',
           ...(frameOptions ? { frame: frameOptions } : {}),
@@ -120,12 +124,16 @@ export class PageEvaluationHandlers {
         ? await this.deps.pageController.evaluate(code, frameOptions)
         : await this.deps.pageController.evaluate(code);
 
-      const processedResult = applyEvaluationPostFilters(result, this.deps.detailedDataManager, {
-        autoSummarize,
-        maxSize,
-        fieldFilter: fieldFilterArg ?? undefined,
-        stripBase64: doStripBase64,
-      });
+      const processedResult = await applyEvaluationPostFilters(
+        result,
+        this.deps.detailedDataManager,
+        {
+          autoSummarize,
+          maxSize,
+          fieldFilter: fieldFilterArg ?? undefined,
+          stripBase64: doStripBase64,
+        },
+      );
 
       return R.ok().build({
         ...(frameOptions ? { frame: frameOptions } : {}),
