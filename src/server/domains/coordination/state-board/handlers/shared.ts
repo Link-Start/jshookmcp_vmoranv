@@ -5,6 +5,24 @@
 import { randomUUID } from 'node:crypto';
 import { escapeRegexStr } from '@utils/escapeForRegex';
 
+/** Hard cap on live state-board entries before least-recently-used eviction. */
+const MAX_ENTRIES = 10_000;
+/** Default TTL (ms) applied to entries set without an explicit TTL. */
+const DEFAULT_ENTRY_TTL_MS = 24 * 60 * 60 * 1000;
+/** Interval (ms) between automatic expired-entry sweeps. */
+const CLEANUP_INTERVAL_MS = 60_000;
+
+/** Resolve the default entry TTL, overridable via env for ops/tests. */
+function resolveDefaultTtlMs(): number {
+  const raw = process.env.JSHOOK_STATE_BOARD_DEFAULT_TTL_MS;
+  if (typeof raw === 'string' && raw.trim() !== '') {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_ENTRY_TTL_MS;
+}
+const defaultEntryTtlMs = resolveDefaultTtlMs();
+
 export interface StateEntry {
   key: string;
   value: unknown;
@@ -46,6 +64,8 @@ export interface StateBoardStats {
   expiredEntries: number;
   totalWatches: number;
   historySize: number;
+  /** Number of entries removed by the least-recently-used cap. */
+  evictedEntries: number;
 }
 
 type PersistNotifier = () => void;
@@ -61,6 +81,11 @@ export function matchesKeyPattern(key: string, keyPattern?: string): boolean {
   return regex.test(key);
 }
 
+export interface StateBoardStoreOptions {
+  /** Cap on live entries before least-recently-used eviction. */
+  maxEntries?: number;
+}
+
 export class StateBoardStore {
   readonly state = new Map<string, StateEntry>();
   readonly history = new Map<string, StateChangeRecord[]>();
@@ -70,9 +95,71 @@ export class StateBoardStore {
   readonly maxWatches = 200;
   /** Watch is auto-evicted if not polled within this duration (ms). */
   readonly watchIdleTtlMs = 30 * 60_000;
+  private readonly maxEntries: number;
+  private evictedEntries = 0;
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private mutationSeq = 0;
   private lastPersistedSeq = 0;
   private persistNotifier?: PersistNotifier;
+
+  constructor(options: StateBoardStoreOptions = {}) {
+    this.maxEntries = options.maxEntries ?? MAX_ENTRIES;
+    // Wire periodic expired-entry cleanup at construction time so immortal
+    // entries (and already-expired ones) cannot accumulate between explicit
+    // sweeps. unref'd so it never blocks process exit.
+    this.cleanupTimer = setInterval(() => {
+      this.cleanupExpired();
+    }, CLEANUP_INTERVAL_MS);
+    if (this.cleanupTimer.unref) {
+      this.cleanupTimer.unref();
+    }
+  }
+
+  /** Number of entries removed by the least-recently-used cap. */
+  getEvictedEntries(): number {
+    return this.evictedEntries;
+  }
+
+  /**
+   * Insert an entry and evict the least-recently-used entries when over the cap.
+   *
+   * TTL resolution: `ttlSeconds === 0` marks the entry explicitly permanent
+   * (no `expiresAt`; the LRU cap still bounds memory). When both `ttlSeconds`
+   * and `expiresAt` are absent, the bounded default TTL is applied so the key
+   * space cannot grow without limit. Any other value is honored verbatim.
+   */
+  setEntry(fullKey: string, entry: StateEntry): void {
+    if (entry.ttlSeconds === 0) {
+      // Explicit permanent — the LRU cap remains the only bound on memory.
+      entry.expiresAt = undefined;
+    } else if (entry.expiresAt === undefined && entry.ttlSeconds === undefined) {
+      entry.expiresAt = Date.now() + defaultEntryTtlMs;
+      entry.ttlSeconds = Math.floor(defaultEntryTtlMs / 1000);
+    }
+    this.state.set(fullKey, entry);
+    this.evictLruIfNeeded();
+  }
+
+  /** Evict the least-recently-used entries (by updatedAt) when over the cap. */
+  private evictLruIfNeeded(): void {
+    const excess = this.state.size - this.maxEntries;
+    if (excess <= 0) return;
+    const oldest = [...this.state.entries()]
+      .toSorted((a, b) => a[1].updatedAt - b[1].updatedAt)
+      .slice(0, excess);
+    for (const [fullKey] of oldest) {
+      this.state.delete(fullKey);
+      this.evictedEntries++;
+    }
+  }
+
+  /** Stop the periodic cleanup timer. Idempotent. */
+  dispose(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
 
   /** Evict expired or excess watches. Called on watch/poll/list paths. */
   pruneExpiredWatches(): number {

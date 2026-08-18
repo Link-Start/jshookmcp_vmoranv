@@ -20,7 +20,9 @@ describe('SharedStateBoardHandlers', () => {
       expect(result.key).toBe('name');
       expect(result.namespace).toBe('default');
       expect(result.version).toBe(1);
-      expect(result.expiresAt).toBeUndefined();
+      // No explicit TTL → default TTL applied so the key space cannot grow unbounded.
+      expect(result.expiresAt).toEqual(expect.any(String));
+      expect(() => new Date(result.expiresAt as string)).not.toThrow();
     });
 
     it('sets a value with a custom namespace', async () => {
@@ -51,6 +53,22 @@ describe('SharedStateBoardHandlers', () => {
       expect(result.success).toBe(true);
       expect(result.expiresAt).toEqual(expect.any(String));
       expect(() => new Date(result.expiresAt as string)).not.toThrow();
+    });
+
+    it('sets a permanent key with ttlSeconds: 0 and returns no expiresAt', async () => {
+      const result = (await handler.handleSet({
+        key: 'permanent',
+        value: 'immortal',
+        ttlSeconds: 0,
+      })) as Record<string, unknown>;
+      expect(result.success).toBe(true);
+      expect(result.expiresAt).toBeUndefined();
+
+      // The key stays retrievable and never expires.
+      const getResult = (await handler.handleGet({ key: 'permanent' })) as Record<string, unknown>;
+      expect(getResult.found).toBe(true);
+      expect(getResult.value).toBe('immortal');
+      expect(getResult.expiresAt).toBeUndefined();
     });
 
     it('rejects a missing (empty) key', async () => {
