@@ -319,6 +319,48 @@ describe('ReverseEvidenceGraph (EVID-01~03, EVID-05)', () => {
       expect(capped.edgeCount).toBe(2);
       expect(capped.droppedNodeCount).toBe(3);
     });
+
+    it('restoreSnapshot returns the counts dropped by the restore trim', () => {
+      const source = new ReverseEvidenceGraph();
+      const nodes = Array.from({ length: 6 }, (_, i) => source.addNode('request', `n${i}`, {}));
+      for (let i = 0; i < nodes.length - 1; i++) {
+        source.addEdge(nodes[i]!.id, nodes[i + 1]!.id, 'triggers');
+      }
+      const snapshot = source.exportSnapshot();
+      resetIdCounter();
+
+      const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const capped = new ReverseEvidenceGraph({ maxNodes: 3, maxEdges: 2 });
+      const dropped = capped.restoreSnapshot(snapshot);
+      warnSpy.mockRestore();
+
+      // 3 oldest nodes evicted, cascading 3 connected edges; the 2 surviving
+      // edges stay under the edge cap.
+      expect(dropped).toEqual({ droppedNodes: 3, droppedEdges: 3 });
+    });
+
+    it('restoreSnapshot reports zero drops for a snapshot within the caps', () => {
+      const source = new ReverseEvidenceGraph();
+      source.addNode('request', 'a', {});
+      source.addNode('request', 'b', {});
+      const snapshot = source.exportSnapshot();
+      resetIdCounter();
+
+      const restored = new ReverseEvidenceGraph();
+      const dropped = restored.restoreSnapshot(snapshot);
+      expect(dropped).toEqual({ droppedNodes: 0, droppedEdges: 0 });
+    });
+
+    it('restoreSnapshot reports zero drops for an invalid snapshot', () => {
+      const graph2 = new ReverseEvidenceGraph();
+      expect(graph2.restoreSnapshot(null)).toEqual({ droppedNodes: 0, droppedEdges: 0 });
+      expect(graph2.restoreSnapshot({ schemaVersion: 2, graph: { nodes: [], edges: [] } })).toEqual(
+        {
+          droppedNodes: 0,
+          droppedEdges: 0,
+        },
+      );
+    });
   });
 
   describe('unbounded growth caps (a3-02)', () => {

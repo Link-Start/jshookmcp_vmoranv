@@ -110,6 +110,8 @@ const __bootstrap = async () => {
         payload && typeof payload.webcrackUrl === 'string' ? payload.webcrackUrl : '';
       const options = (payload && payload.options) || {};
       if (!webcrackUrl) throw new Error('webcrackUrl is required');
+      if (!webcrackUrl.startsWith('file://'))
+        throw new Error('webcrackUrl must be a file:// URL');
 
       const mod = await import(webcrackUrl);
       const webcrack = mod.webcrack ?? (mod.default && mod.default.webcrack) ?? mod.default;

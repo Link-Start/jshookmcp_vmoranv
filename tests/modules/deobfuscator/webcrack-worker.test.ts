@@ -142,4 +142,26 @@ describe('webcrack worker runtime', () => {
 
     expect(workerResult.code).toBe(mainThread.code);
   });
+
+  it('rejects a non-file:// webcrackUrl', async () => {
+    const pool = new WorkerPool<Record<string, unknown>, WebcrackWorkerResult>({
+      name: 'webcrack-reject-test',
+      workerScript: WEBCRACK_WORKER_SCRIPT,
+      minWorkers: 0,
+      maxWorkers: 1,
+      idleTimeoutMs: 1000,
+    });
+    pools.push(pool);
+
+    await expect(
+      pool.submit(
+        {
+          code: 'var x = 1;',
+          webcrackUrl: 'https://example.com/webcrack.js',
+          options: { jsx: false, unpack: false, unminify: false, mangle: false },
+        },
+        WEBCRACK_JOB_TIMEOUT_MS,
+      ),
+    ).rejects.toThrow('file://');
+  });
 });

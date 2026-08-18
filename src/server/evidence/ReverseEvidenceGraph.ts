@@ -496,10 +496,12 @@ export class ReverseEvidenceGraph {
     };
   }
 
-  restoreSnapshot(data: unknown): void {
-    if (!data || typeof data !== 'object') return;
+  restoreSnapshot(data: unknown): { droppedNodes: number; droppedEdges: number } {
+    if (!data || typeof data !== 'object') return { droppedNodes: 0, droppedEdges: 0 };
     const snapshot = data as { schemaVersion?: number; graph?: EvidenceGraphSnapshot };
-    if (snapshot.schemaVersion !== 1 || !snapshot.graph) return;
+    if (snapshot.schemaVersion !== 1 || !snapshot.graph) {
+      return { droppedNodes: 0, droppedEdges: 0 };
+    }
     const { nodes, edges } = snapshot.graph;
     this.nodes.clear();
     this.edges.clear();
@@ -529,5 +531,8 @@ export class ReverseEvidenceGraph {
     this.mutationSeq = nodes.length + edges.length;
     this.lastPersistedSeq = this.mutationSeq;
     this.isDirty = false;
+    // The evict calls above reset `droppedNodes`/`droppedEdges` to zero first,
+    // so these counters reflect exactly what this restore trimmed away.
+    return { droppedNodes: this.droppedNodes, droppedEdges: this.droppedEdges };
   }
 }

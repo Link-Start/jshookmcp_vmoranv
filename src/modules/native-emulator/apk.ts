@@ -17,6 +17,7 @@ import {
 import { Readable } from 'node:stream';
 
 import { ToolError } from '@errors/ToolError';
+import { logger } from '@utils/logger';
 import { int } from '@src/constants';
 
 /** Only this ABI is loadable — the emulated CPU is AArch64. */
@@ -32,7 +33,7 @@ const MAX_SO_BYTES = 256 * 1024 * 1024;
  *
  * @env NEMU_APK_MAX_TOTAL_SO_BYTES
  */
-const MAX_TOTAL_SO_BYTES = int('NEMU_APK_MAX_TOTAL_SO_BYTES', 512 * 1024 * 1024);
+export const MAX_TOTAL_SO_BYTES = int('NEMU_APK_MAX_TOTAL_SO_BYTES', 512 * 1024 * 1024);
 
 /** One extracted native library: its basename and raw bytes. */
 export interface ExtractedLib {
@@ -72,7 +73,13 @@ export interface ExtractArm64LibsOptions {
  * when you need the `truncated` flag.
  */
 export async function extractArm64Libs(apkPath: string): Promise<ExtractedLib[]> {
-  return (await extractArm64LibsDetailed(apkPath)).libs;
+  const { libs, truncated, totalBytes } = await extractArm64LibsDetailed(apkPath);
+  if (truncated) {
+    logger.warn(
+      `[apk] extractArm64Libs truncated at ${totalBytes} bytes (${libs.length} lib(s) returned before the aggregate cap)`,
+    );
+  }
+  return libs;
 }
 
 /**

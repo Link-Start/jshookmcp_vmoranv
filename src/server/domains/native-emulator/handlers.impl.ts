@@ -19,7 +19,7 @@ import {
   type SessionManagerOptions,
 } from '@modules/native-emulator/SessionManager';
 import type { BionicOptions } from '@modules/native-emulator/bionic';
-import { extractArm64Libs } from '@modules/native-emulator/apk';
+import { extractArm64LibsDetailed, MAX_TOTAL_SO_BYTES } from '@modules/native-emulator/apk';
 import { inspectElfImports } from '@modules/native-emulator/import-inspector';
 import { dumpGot } from '@modules/native-emulator/got-inspector';
 import { UnsupportedOpcodeError } from '@modules/native-emulator/CpuEngine';
@@ -338,12 +338,14 @@ export class NativeEmulatorHandlers {
   handleExtractApkLibs(args: ToolArgs): Promise<ToolResponse> {
     return handleSafe(async () => {
       const apkPath = argStringRequired(args, 'apkPath');
-      const libs = await extractArm64Libs(apkPath);
+      const { libs, truncated, totalBytes } = await extractArm64LibsDetailed(apkPath);
       return {
         apkPath,
         abi: 'arm64-v8a',
         libs: libs.map((l) => ({ name: l.name, bytes: l.bytes.length })),
         count: libs.length,
+        truncated,
+        totalBytes,
       };
     });
   }
@@ -928,7 +930,12 @@ export class NativeEmulatorHandlers {
       const session = this.requireSession(args);
       const apkPath = argStringRequired(args, 'apkPath');
       const libName = argStringRequired(args, 'libName');
-      const libs = await extractArm64Libs(apkPath);
+      const { libs, truncated, totalBytes } = await extractArm64LibsDetailed(apkPath);
+      if (truncated) {
+        throw new Error(
+          `APK extraction truncated at ${Math.round(MAX_TOTAL_SO_BYTES / (1024 * 1024))} MB cap (${totalBytes} bytes read, ${libs.length} lib(s) returned) — library "${libName}" may be incomplete or missing; re-extract with a higher cap`,
+        );
+      }
       const lib = libs.find((l) => l.name === libName);
       if (!lib) {
         throw new Error(
