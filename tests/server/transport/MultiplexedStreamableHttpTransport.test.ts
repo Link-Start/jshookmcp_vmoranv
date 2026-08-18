@@ -326,6 +326,134 @@ describe('MultiplexedStreamableHttpTransport', () => {
     await Promise.allSettled([first, second, third]);
   });
 
+  it('does not count SSE GET streams against POST in-flight capacity', async () => {
+    const transport = new MultiplexedStreamableHttpTransport({ maxInFlight: 1 });
+    await transport.start();
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    const session = mocks.innerTransports[0];
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    session.handleRequest.mockImplementationOnce(async () => await gate);
+
+    const sse = transport.handleRequest(createReq('GET', session.sessionId), createRes(), {});
+    await vi.waitFor(() => expect(session.handleRequest).toHaveBeenCalledTimes(2));
+
+    // A hanging SSE GET must not consume POST in-flight capacity.
+    expect(transport.getStats().inFlight).toBe(0);
+
+    // A POST is still admitted while an SSE GET is open.
+    const postRes = createRes();
+    await transport.handleRequest(createReq('POST', session.sessionId), postRes, {});
+    expect(postRes.writeHead).not.toHaveBeenCalledWith(503, expect.any(Object));
+
+    release();
+    await sse;
+  });
+
+  it('bounds concurrent SSE GET streams with a separate small cap', async () => {
+    const transport = new MultiplexedStreamableHttpTransport({ maxSseInFlight: 2 });
+    await transport.start();
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    const session = mocks.innerTransports[0];
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    session.handleRequest.mockImplementation(async () => await gate);
+
+    const first = transport.handleRequest(createReq('GET', session.sessionId), createRes(), {});
+    const second = transport.handleRequest(createReq('GET', session.sessionId), createRes(), {});
+    await vi.waitFor(() => expect(session.handleRequest).toHaveBeenCalledTimes(3));
+
+    const overloaded = createRes();
+    const third = transport.handleRequest(createReq('GET', session.sessionId), overloaded, {});
+    const outcome = await Promise.race([
+      third.then(() => 'resolved'),
+      new Promise<string>((resolve) => setTimeout(() => resolve('hung'), 500)),
+    ]);
+
+    expect(outcome).toBe('resolved');
+    expect(overloaded.writeHead).toHaveBeenCalledWith(503, {
+      'Content-Type': 'application/json',
+      'Retry-After': '1',
+    });
+
+    release();
+    await Promise.allSettled([first, second, third]);
+  });
+
+  it('does not evict a session while an SSE GET stream is open', async () => {
+    let now = 0;
+    const onSessionClosed = vi.fn();
+    const transport = new MultiplexedStreamableHttpTransport({
+      maxSessions: 1,
+      sessionIdleTtlMs: 100,
+      now: () => now,
+      onSessionClosed,
+    });
+    await transport.start();
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    const session = mocks.innerTransports[0];
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    session.handleRequest.mockImplementationOnce(async () => await gate);
+
+    const sse = transport.handleRequest(createReq('GET', session.sessionId), createRes(), {});
+    await vi.waitFor(() => expect(session.handleRequest).toHaveBeenCalledTimes(2));
+
+    now = 200;
+    // With the SSE GET open, the session is not idle even though inFlight is 0.
+    const probe = createRes();
+    await transport.handleRequest(createReq('POST', session.sessionId), probe, {});
+    expect(probe.writeHead).not.toHaveBeenCalledWith(404, expect.any(Object));
+    expect(session.close).not.toHaveBeenCalled();
+
+    release();
+    await sse;
+  });
+
+  it('does not evict an SSE-open session through the admission sweeper', async () => {
+    let now = 0;
+    const onSessionClosed = vi.fn();
+    const transport = new MultiplexedStreamableHttpTransport({
+      maxSessions: 1,
+      sessionIdleTtlMs: 100,
+      now: () => now,
+      onSessionClosed,
+    });
+    await transport.start();
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    const session = mocks.innerTransports[0];
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    session.handleRequest.mockImplementationOnce(async () => await gate);
+
+    const sse = transport.handleRequest(createReq('GET', session.sessionId), createRes(), {});
+    await vi.waitFor(() => expect(session.handleRequest).toHaveBeenCalledTimes(2));
+
+    // Advance past the idle TTL, then force the admission-pressure sweeper
+    // (maxSessions:1) by registering a fresh session. The open SSE GET must
+    // keep the first session alive even though its POST inFlight is 0.
+    now = 200;
+    const overloaded = createRes();
+    await transport.handleRequest(createReq('POST'), overloaded, {});
+    expect(overloaded.writeHead).toHaveBeenCalledWith(503, expect.any(Object));
+    expect(session.close).not.toHaveBeenCalled();
+
+    release();
+    await sse;
+  });
+
   it('routes same client request ids from different sessions back to the correct inner transport', async () => {
     const transport = new MultiplexedStreamableHttpTransport();
     await transport.start();

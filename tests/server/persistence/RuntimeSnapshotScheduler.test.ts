@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { RuntimeSnapshotScheduler } from '@server/persistence/RuntimeSnapshotScheduler';
+import { logger } from '@utils/logger';
 import { StateBoardStore } from '@server/domains/coordination/state-board/handlers/shared';
 import { SharedStateBoardHandlers } from '@server/domains/coordination/state-board';
 import { ReverseEvidenceGraph, resetIdCounter } from '@server/evidence/ReverseEvidenceGraph';
@@ -125,6 +126,31 @@ describe('RuntimeSnapshotScheduler', () => {
 
     await waitForCondition(() => freshGraph.nodeCount === 1);
     scheduler.dispose();
+  });
+
+  it('reports restore summary counts in the log', async () => {
+    const filePath = resolve(tmpDir, 'summary', 'current.json');
+    await mkdir(resolve(tmpDir, 'summary'), { recursive: true });
+    await writeFile(filePath, JSON.stringify({ schemaVersion: 1 }), 'utf-8');
+
+    const infoSpy = vi.spyOn(logger, 'info');
+    try {
+      const source = {
+        isPersistDirty: () => false,
+        exportSnapshot: () => ({}),
+        restoreSnapshot: () => ({ droppedNodes: 2, droppedEdges: 1 }),
+        markPersisted: () => undefined,
+      };
+      const scheduler = new RuntimeSnapshotScheduler();
+      scheduler.register(filePath, source);
+      await scheduler.start();
+      scheduler.dispose();
+
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('droppedNodes=2'));
+      expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('droppedEdges=1'));
+    } finally {
+      infoSpy.mockRestore();
+    }
   });
 
   it('skips duplicate registrations for the same source and path', async () => {

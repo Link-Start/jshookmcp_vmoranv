@@ -34,11 +34,25 @@ const DEFAULT_MAX_INFLIGHT = (() => {
   return Number.isFinite(envVal) && envVal > 0 ? envVal : 64;
 })();
 
+/**
+ * Per-session cap on concurrent SSE GET streams (the server→client event
+ * channel). A client holds one GET open while awaiting notifications, so these
+ * are long-lived. Counting them against `maxInFlight` would let 64 idle GETs
+ * self-DoS a session (every subsequent POST gets 503), so they are bounded
+ * separately at a small limit — this also prevents a hostile client from
+ * holding open unbounded half-open streams. Overridable via MCP_HTTP_MAX_SSE_INFLIGHT.
+ */
+const DEFAULT_MAX_SSE_INFLIGHT = (() => {
+  const envVal = parseInt(process.env.MCP_HTTP_MAX_SSE_INFLIGHT ?? '', 10);
+  return Number.isFinite(envVal) && envVal > 0 ? envVal : 8;
+})();
+
 interface SessionRecord {
   sessionId: string;
   transport: StreamableHTTPServerTransport;
   lastTouchedAt: number;
   inFlight: number;
+  sseInFlight: number;
 }
 
 interface RequestRouteRecord {
@@ -52,6 +66,7 @@ export interface MultiplexedStreamableHttpTransportOptions {
   onSessionOpened?: (sessionId: string) => void | Promise<void>;
   maxSessions?: number;
   maxInFlight?: number;
+  maxSseInFlight?: number;
   capacityRetryAfterMs?: number;
   sessionIdleTtlMs?: number;
   broadcastIdleTtlMs?: number;
@@ -171,7 +186,11 @@ export class MultiplexedStreamableHttpTransport implements Transport {
       }
       const now = this.getNow();
       const idleTtlMs = this.options.sessionIdleTtlMs ?? Number.POSITIVE_INFINITY;
-      if (existing.inFlight === 0 && now - existing.lastTouchedAt >= idleTtlMs) {
+      if (
+        existing.inFlight === 0 &&
+        existing.sseInFlight === 0 &&
+        now - existing.lastTouchedAt >= idleTtlMs
+      ) {
         this.dropSession(sessionId);
         await existing.transport.close().catch(() => undefined);
         res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -188,38 +207,77 @@ export class MultiplexedStreamableHttpTransport implements Transport {
         );
         return;
       }
-      const maxInFlight = this.options.maxInFlight ?? DEFAULT_MAX_INFLIGHT;
-      if (existing.inFlight >= maxInFlight) {
-        const retryAfterMs = this.options.capacityRetryAfterMs ?? HTTP_CAPACITY_RETRY_AFTER_MS;
-        res.writeHead(503, {
-          'Content-Type': 'application/json',
-          'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1000))),
-        });
-        res.end(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            error: {
-              code: -32001,
-              message: 'MCP session in-flight capacity reached',
-              data: {
-                code: 'MCP_SESSION_INFLIGHT_CAPACITY',
-                retryAfterMs,
-                inFlight: existing.inFlight,
-                inFlightLimit: maxInFlight,
-                sessionId,
+
+      // SSE GET streams are long-lived and must not count against the POST
+      // in-flight cap (they would self-DoS the session); they get their own
+      // small limit instead.
+      const isGet = (req.method ?? '').toUpperCase() === 'GET';
+      if (isGet) {
+        const maxSseInFlight = this.options.maxSseInFlight ?? DEFAULT_MAX_SSE_INFLIGHT;
+        if (existing.sseInFlight >= maxSseInFlight) {
+          const retryAfterMs = this.options.capacityRetryAfterMs ?? HTTP_CAPACITY_RETRY_AFTER_MS;
+          res.writeHead(503, {
+            'Content-Type': 'application/json',
+            'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1000))),
+          });
+          res.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32001,
+                message: 'MCP session SSE stream capacity reached',
+                data: {
+                  code: 'MCP_SESSION_SSE_CAPACITY',
+                  retryAfterMs,
+                  sseInFlight: existing.sseInFlight,
+                  sseInFlightLimit: maxSseInFlight,
+                  sessionId,
+                },
               },
-            },
-            id: null,
-          }),
-        );
-        return;
+              id: null,
+            }),
+          );
+          return;
+        }
+        existing.sseInFlight += 1;
+      } else {
+        const maxInFlight = this.options.maxInFlight ?? DEFAULT_MAX_INFLIGHT;
+        if (existing.inFlight >= maxInFlight) {
+          const retryAfterMs = this.options.capacityRetryAfterMs ?? HTTP_CAPACITY_RETRY_AFTER_MS;
+          res.writeHead(503, {
+            'Content-Type': 'application/json',
+            'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1000))),
+          });
+          res.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32001,
+                message: 'MCP session in-flight capacity reached',
+                data: {
+                  code: 'MCP_SESSION_INFLIGHT_CAPACITY',
+                  retryAfterMs,
+                  inFlight: existing.inFlight,
+                  inFlightLimit: maxInFlight,
+                  sessionId,
+                },
+              },
+              id: null,
+            }),
+          );
+          return;
+        }
+        existing.inFlight += 1;
       }
-      existing.inFlight += 1;
       existing.lastTouchedAt = now;
       try {
         await existing.transport.handleRequest(req, res, parsedBody);
       } finally {
-        existing.inFlight = Math.max(0, existing.inFlight - 1);
+        if (isGet) {
+          existing.sseInFlight = Math.max(0, existing.sseInFlight - 1);
+        } else {
+          existing.inFlight = Math.max(0, existing.inFlight - 1);
+        }
         existing.lastTouchedAt = this.getNow();
       }
       return;
@@ -296,6 +354,7 @@ export class MultiplexedStreamableHttpTransport implements Transport {
             transport,
             lastTouchedAt: this.getNow(),
             inFlight: 0,
+            sseInFlight: 0,
           });
           registered = true;
         }
@@ -483,7 +542,9 @@ export class MultiplexedStreamableHttpTransport implements Transport {
     const cutoff = this.getNow() - idleTtlMs;
     const expired: SessionRecord[] = [];
     for (const session of this.sessions.values()) {
-      if (session.inFlight === 0 && session.lastTouchedAt <= cutoff) expired.push(session);
+      if (session.inFlight === 0 && session.sseInFlight === 0 && session.lastTouchedAt <= cutoff) {
+        expired.push(session);
+      }
     }
     for (const session of expired) this.dropSession(session.sessionId);
     await Promise.allSettled(expired.map(async (session) => await session.transport.close()));

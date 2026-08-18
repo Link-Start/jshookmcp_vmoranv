@@ -140,6 +140,51 @@ describe('native-emulator byte caps (b3-05 / b3-06)', () => {
     }
   });
 
+  it('rejects an over-cap VFS file before decoding (no base64 buffer allocation)', async () => {
+    const { NativeEmulatorHandlers } = await loadHandlers({
+      NEMU_VFS_MAX_FILE_BYTES: '10',
+      NEMU_VFS_MAX_TOTAL_BYTES: '1000',
+    });
+    const fromSpy = vi.spyOn(Buffer, 'from');
+    const handlers = new NativeEmulatorHandlers();
+    try {
+      const big = Buffer.alloc(11).toString('base64'); // 11 bytes decoded > 10
+      const res = payload(await handlers.handleCreateSession({ files: { '/tmp/big': big } }));
+      expect(res.success).toBe(false);
+      expect(String(res.error)).toContain('exceeds');
+      // The per-file cap is detected from the encoded length BEFORE Buffer.from
+      // allocates a decoded buffer.
+      expect(fromSpy).not.toHaveBeenCalledWith(big, 'base64');
+    } finally {
+      handlers.dispose();
+      fromSpy.mockRestore();
+    }
+  });
+
+  it('rejects an over-total VFS file before decoding the overflowing file', async () => {
+    const { NativeEmulatorHandlers } = await loadHandlers({
+      NEMU_VFS_MAX_FILE_BYTES: '10',
+      NEMU_VFS_MAX_TOTAL_BYTES: '10',
+    });
+    const fromSpy = vi.spyOn(Buffer, 'from');
+    const handlers = new NativeEmulatorHandlers();
+    try {
+      const f1 = Buffer.from([1, 2, 3, 4]).toString('base64');
+      const f2 = Buffer.from([5, 6, 7, 8]).toString('base64');
+      const f3 = Buffer.from([9, 10, 11, 12]).toString('base64'); // 12 bytes total > 10
+      const res = payload(
+        await handlers.handleCreateSession({ files: { '/a': f1, '/b': f2, '/c': f3 } }),
+      );
+      expect(res.success).toBe(false);
+      expect(String(res.error)).toContain('exceeds');
+      // f3 would push the total over the cap; it must be rejected before decode.
+      expect(fromSpy).not.toHaveBeenCalledWith(f3, 'base64');
+    } finally {
+      handlers.dispose();
+      fromSpy.mockRestore();
+    }
+  });
+
   it('accepts create_session VFS files under both caps', async () => {
     const { NativeEmulatorHandlers } = await loadHandlers({
       NEMU_VFS_MAX_FILE_BYTES: '10',

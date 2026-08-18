@@ -3,10 +3,23 @@ import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { logger } from '@utils/logger';
 
+/**
+ * Counts reported by a snapshot restore — the number of records dropped or
+ * evicted while trimming a restored snapshot back to its configured caps.
+ * The shape is intentionally loose: each source reports its own subset of keys
+ * (e.g. `{ droppedNodes, droppedEdges }` for the evidence graph, or
+ * `{ evictedHistoryKeys }` for the state board).
+ */
+export interface SnapshotRestoreSummary {
+  droppedNodes?: number;
+  droppedEdges?: number;
+  evictedHistoryKeys?: number;
+}
+
 export interface SnapshotSource {
   isPersistDirty(): boolean;
   exportSnapshot(): unknown;
-  restoreSnapshot(data: unknown): void;
+  restoreSnapshot(data: unknown): void | SnapshotRestoreSummary;
   markPersisted(): void;
 }
 
@@ -106,8 +119,8 @@ export class RuntimeSnapshotScheduler {
     try {
       const data = await readFile(entry.filePath, 'utf-8');
       const parsed = JSON.parse(data);
-      entry.source.restoreSnapshot(parsed);
-      logger.info(`restored snapshot from ${entry.filePath}`);
+      const summary = entry.source.restoreSnapshot(parsed);
+      logger.info(`restored snapshot from ${entry.filePath}${describeRestoreSummary(summary)}`);
     } catch {
       // No snapshot file or corrupt — start fresh (normal on first run)
     }
@@ -145,4 +158,13 @@ export function getStateDir(): string {
     return resolve(homedir(), overridden);
   }
   return resolve(homedir(), '.jshookmcp', 'state');
+}
+
+/** Renders restore summary counts as a compact ` (key=value, ...)` log suffix. */
+function describeRestoreSummary(summary: void | SnapshotRestoreSummary): string {
+  if (!summary || typeof summary !== 'object') return '';
+  const parts = Object.entries(summary)
+    .filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+    .map(([key, value]) => `${key}=${value}`);
+  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
 }

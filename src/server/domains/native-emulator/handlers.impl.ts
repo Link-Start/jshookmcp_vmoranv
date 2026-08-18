@@ -19,7 +19,7 @@ import {
   type SessionManagerOptions,
 } from '@modules/native-emulator/SessionManager';
 import type { BionicOptions } from '@modules/native-emulator/bionic';
-import { extractArm64LibsDetailed, MAX_TOTAL_SO_BYTES } from '@modules/native-emulator/apk';
+import { extractArm64LibsDetailed } from '@modules/native-emulator/apk';
 import { inspectElfImports } from '@modules/native-emulator/import-inspector';
 import { dumpGot } from '@modules/native-emulator/got-inspector';
 import { UnsupportedOpcodeError } from '@modules/native-emulator/CpuEngine';
@@ -42,6 +42,7 @@ import {
 import type { ToolArgs, ToolResponse } from '@server/types';
 import { getReverseEngineeringConfig } from '@utils/reverseEngineeringConfig';
 import {
+  NEMU_APK_MAX_TOTAL_SO_BYTES,
   NEMU_CALL_MAX_STEPS,
   NEMU_PROFILE_MAX_STEPS,
   NEMU_MAX_SO_BYTES,
@@ -933,7 +934,7 @@ export class NativeEmulatorHandlers {
       const { libs, truncated, totalBytes } = await extractArm64LibsDetailed(apkPath);
       if (truncated) {
         throw new Error(
-          `APK extraction truncated at ${Math.round(MAX_TOTAL_SO_BYTES / (1024 * 1024))} MB cap (${totalBytes} bytes read, ${libs.length} lib(s) returned) — library "${libName}" may be incomplete or missing; re-extract with a higher cap`,
+          `APK extraction truncated at ${Math.round(NEMU_APK_MAX_TOTAL_SO_BYTES / (1024 * 1024))} MB cap (${totalBytes} bytes read, ${libs.length} lib(s) returned) — library "${libName}" may be incomplete or missing; re-extract with a higher cap`,
         );
       }
       const lib = libs.find((l) => l.name === libName);
@@ -2675,6 +2676,17 @@ function pct(count: number, total: number): number {
 // RSP helpers (decodeRspPacket, encodeRspPacket, parseRspFields, bytesToHex,
 // hexToBytes, GDB_REG_NAMES) are now imported from @native/GdbRspProtocol.
 
+/**
+ * Exact decoded byte count of a base64 string, computed without allocating a
+ * buffer. Mirrors `Buffer.from(encoded, 'base64').length` for well-formed
+ * base64 (the shape produced by `Buffer#toString('base64')`).
+ */
+function base64DecodedLength(encoded: string): number {
+  const len = encoded.length;
+  const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
+  return Math.floor(((len - padding) * 3) / 4);
+}
+
 function decodeBionicOptions(
   filesValue: unknown,
   extraSymbolsValue?: unknown,
@@ -2684,19 +2696,22 @@ function decodeBionicOptions(
   if (typeof filesValue === 'object' && filesValue !== null && !Array.isArray(filesValue)) {
     for (const [path, encoded] of Object.entries(filesValue)) {
       if (typeof encoded === 'string') {
-        const bytes = toUint8(Buffer.from(encoded, 'base64'));
-        if (bytes.length > NEMU_VFS_MAX_FILE_BYTES) {
+        // Reject oversized payloads from their encoded length BEFORE decoding:
+        // otherwise an attacker can submit N×16MB base64 blobs and force every
+        // one to be allocated before the total-cap check throws.
+        const decodedLength = base64DecodedLength(encoded);
+        if (decodedLength > NEMU_VFS_MAX_FILE_BYTES) {
           throw new Error(
-            `VFS file "${path}" is ${bytes.length} bytes, which exceeds the ${NEMU_VFS_MAX_FILE_BYTES}-byte per-file cap`,
+            `VFS file "${path}" is ${decodedLength} bytes, which exceeds the ${NEMU_VFS_MAX_FILE_BYTES}-byte per-file cap`,
           );
         }
-        totalBytes += bytes.length;
+        totalBytes += decodedLength;
         if (totalBytes > NEMU_VFS_MAX_TOTAL_BYTES) {
           throw new Error(
             `VFS files total ${totalBytes} bytes exceeds the ${NEMU_VFS_MAX_TOTAL_BYTES}-byte cap`,
           );
         }
-        files.set(path, bytes);
+        files.set(path, toUint8(Buffer.from(encoded, 'base64')));
       }
     }
   }

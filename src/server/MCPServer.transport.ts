@@ -446,6 +446,23 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
       ctx.collector = undefined;
     }
 
+    // Release the lazily-created deobfuscation / heap-parse worker pools
+    // (best-effort, fire-and-forget). Each pool module keeps a shared
+    // singleton whose min-1 warm worker is never idle-evicted at the
+    // `minWorkers` floor; `dispose*()` closes it and resets the singleton.
+    // Not awaited: the workers are unref'd and ProcessRegistry.terminateAll()
+    // below already guarantees termination, so this must not delay shutdown.
+    void Promise.allSettled([
+      import('@modules/deobfuscator/webcrack-worker').then((m) => m.disposeWebcrackPool()),
+      import('@modules/deobfuscator/jscrambler-worker').then((m) => m.disposeJscramblerPool()),
+      import('@modules/deobfuscator/decode-string-array-worker').then((m) =>
+        m.disposeDecodeStringArrayPool(),
+      ),
+      import('@server/domains/v8-inspector/handlers/heap-parse-worker').then((m) =>
+        m.disposeHeapParsePool(),
+      ),
+    ]);
+
     try {
       await ctx.server.close();
     } catch (error) {
