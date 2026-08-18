@@ -33,6 +33,8 @@ describe('SessionHandlers', () => {
       const response = await handlers.handleScanList(dummyArgs);
       expect(response).toEqual({
         content: [expect.objectContaining({ type: 'text' })],
+        // ResponseBuilder.json() carries a top-level success flag (a1-02 fix).
+        success: true,
       });
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);

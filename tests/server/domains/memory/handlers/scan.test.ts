@@ -1,6 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ScanHandlers } from '../../../../../src/server/domains/memory/handlers/scan';
 
+const factoryState = vi.hoisted(() => ({
+  openProcess: vi.fn(),
+  readMemory: vi.fn(),
+  closeProcess: vi.fn(),
+}));
+
+// Lock the search-string memory-read path onto a fake provider so the
+// b3-09/a4-01 createPlatformProvider() migration is exercised (not the real
+// Win32/Darwin/Linux FFI provider). Mirrors structure.test.ts:13.
+vi.mock('@native/platform/factory.js', () => ({
+  createPlatformProvider: vi.fn(() => ({
+    openProcess: factoryState.openProcess,
+    readMemory: factoryState.readMemory,
+    closeProcess: factoryState.closeProcess,
+  })),
+}));
+
 describe('ScanHandlers', () => {
   let handlers: ScanHandlers;
   // Valid args covering every field the handlers read. Individual tests override
@@ -41,6 +58,8 @@ describe('ScanHandlers', () => {
       const response = await handlers.handleFirstScan(dummyArgs);
       expect(response).toEqual({
         content: [expect.objectContaining({ type: 'text' })],
+        // ResponseBuilder.json() carries a top-level success flag (a1-02 fix).
+        success: true,
       });
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);
@@ -302,14 +321,27 @@ describe('ScanHandlers', () => {
   });
 
   describe('handleSearchString', () => {
-    it('returns success response with substring match results', async () => {
-      mockscanner.firstScan = vi.fn().mockReturnValue({
-        totalMatches: 2,
-        results: [
-          { address: '0x1000', value: 'hello_world' },
-          { address: '0x2000', value: 'hello_test' },
-        ],
+    const handle = { pid: 1234, writeAccess: false };
+
+    /** Serve NUL-terminated UTF-8 strings keyed by address hex from the fake provider. */
+    const serveStrings = (map: Record<string, string>) => {
+      factoryState.readMemory.mockImplementation(async (_h, addr, size) => {
+        const buf = Buffer.alloc(size, 0);
+        const hex = `0x${(addr as bigint).toString(16).toUpperCase()}`;
+        const value = map[hex];
+        if (value) buf.write(value, 'utf8');
+        return { data: buf, bytesRead: size };
       });
+    };
+
+    beforeEach(() => {
+      factoryState.openProcess.mockReturnValue(handle);
+      factoryState.closeProcess.mockClear();
+    });
+
+    it('returns a real hit by reading NUL-terminated bytes at matched addresses', async () => {
+      mockscanner.firstScan = vi.fn().mockResolvedValue({ addresses: ['0x1000'] });
+      serveStrings({ '0x1000': 'hello_world' });
 
       const response = await handlers.handleSearchString({
         pid: 1234,
@@ -318,24 +350,52 @@ describe('ScanHandlers', () => {
       });
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);
-      expect(parsed.totalFound).toBe(2);
-      expect(parsed.results[0].encoding).toBe('utf8');
-      expect(parsed.results[0].value).toBe('hello_world');
+      expect(parsed.totalFound).toBe(1);
+      expect(parsed.results[0]).toMatchObject({
+        address: '0x1000',
+        value: 'hello_world',
+        encoding: 'utf8',
+        length: 11,
+      });
       expect(mockscanner.firstScan).toHaveBeenCalledWith(
         1234,
         'hello',
         expect.objectContaining({ valueType: 'string', alignment: 1 }),
       );
+      expect(factoryState.openProcess).toHaveBeenCalledWith(1234, false);
+      expect(factoryState.closeProcess).toHaveBeenCalledWith(handle);
+    });
+
+    it('parses unprefixed addresses as hex when reading strings', async () => {
+      // Scanner addresses are normally 0x-prefixed, but the read path must not
+      // depend on that: "1000" must resolve to 0x1000 (hex), not 1000 (decimal).
+      mockscanner.firstScan = vi.fn().mockResolvedValue({ addresses: ['1000'] });
+      serveStrings({ '0x1000': 'hello_world' });
+
+      const response = await handlers.handleSearchString({
+        pid: 1234,
+        pattern: 'hello',
+        wide: false,
+      });
+      const parsed = JSON.parse((response.content[0] as any).text);
+      expect(parsed.success).toBe(true);
+      expect(parsed.totalFound).toBe(1);
+      expect(parsed.results[0]).toMatchObject({
+        address: '1000',
+        value: 'hello_world',
+        encoding: 'utf8',
+        length: 11,
+      });
     });
 
     it('post-filters results by substring match', async () => {
-      mockscanner.firstScan = vi.fn().mockReturnValue({
-        totalMatches: 3,
-        results: [
-          { address: '0x1000', value: 'TargetValue' },
-          { address: '0x2000', value: 'OtherStuff' },
-          { address: '0x3000', value: 'target_again' },
-        ],
+      mockscanner.firstScan = vi.fn().mockResolvedValue({
+        addresses: ['0x1000', '0x2000', '0x3000'],
+      });
+      serveStrings({
+        '0x1000': 'TargetValue',
+        '0x2000': 'OtherStuff',
+        '0x3000': 'target_again',
       });
 
       const response = await handlers.handleSearchString({
@@ -350,14 +410,10 @@ describe('ScanHandlers', () => {
     });
 
     it('supports regex mode', async () => {
-      mockscanner.firstScan = vi.fn().mockReturnValue({
-        totalMatches: 3,
-        results: [
-          { address: '0x1000', value: 'foo123' },
-          { address: '0x2000', value: 'bar456' },
-          { address: '0x3000', value: 'baz789' },
-        ],
+      mockscanner.firstScan = vi.fn().mockResolvedValue({
+        addresses: ['0x1000', '0x2000', '0x3000'],
       });
+      serveStrings({ '0x1000': 'foo123', '0x2000': 'bar456', '0x3000': 'baz789' });
 
       const response = await handlers.handleSearchString({
         pid: 1234,
@@ -394,14 +450,10 @@ describe('ScanHandlers', () => {
     });
 
     it('enforces minLength filter', async () => {
-      mockscanner.firstScan = vi.fn().mockReturnValue({
-        totalMatches: 3,
-        results: [
-          { address: '0x1000', value: 'ab' },
-          { address: '0x2000', value: 'abc' },
-          { address: '0x3000', value: 'abcd' },
-        ],
+      mockscanner.firstScan = vi.fn().mockResolvedValue({
+        addresses: ['0x1000', '0x2000', '0x3000'],
       });
+      serveStrings({ '0x1000': 'ab', '0x2000': 'abc', '0x3000': 'abcd' });
 
       const response = await handlers.handleSearchString({
         pid: 1234,
@@ -415,18 +467,15 @@ describe('ScanHandlers', () => {
     });
 
     it('scans wide strings when wide=true', async () => {
-      // First call: ASCII scan
       mockscanner.firstScan = vi
         .fn()
-        .mockReturnValueOnce({
-          totalMatches: 0,
-          results: [],
-        })
-        // Second call: UTF-16LE hex scan
-        .mockReturnValueOnce({
-          totalMatches: 1,
-          results: [{ address: '0x4000', value: '48 00 65 00 6C 00 6C 00 6F 00' }],
-        });
+        .mockResolvedValueOnce({ addresses: [] })
+        .mockResolvedValueOnce({ addresses: ['0x4000'] });
+      factoryState.readMemory.mockImplementation(async (_h, addr, size) => {
+        const buf = Buffer.alloc(size, 0);
+        if ((addr as bigint) === 0x4000n) buf.write('Hello', 'utf16le');
+        return { data: buf, bytesRead: size };
+      });
 
       const response = await handlers.handleSearchString({
         pid: 1234,
@@ -435,20 +484,22 @@ describe('ScanHandlers', () => {
       });
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);
-      // The decoded UTF-16LE value should contain "Hello"
       expect(parsed.totalFound).toBe(1);
       expect(parsed.results[0].encoding).toBe('utf16le');
+      expect(parsed.results[0].value).toBe('Hello');
     });
 
     it('caps results to maxResults', async () => {
-      const manyResults = Array.from({ length: 100 }, (_, i) => ({
-        address: `0x${(0x1000 + i * 8).toString(16)}`,
-        value: `pattern_match_${i}`,
-      }));
-      mockscanner.firstScan = vi.fn().mockReturnValue({
-        totalMatches: 100,
-        results: manyResults,
-      });
+      const addresses = Array.from(
+        { length: 100 },
+        (_, i) => `0x${(0x1000 + i * 8).toString(16).toUpperCase()}`,
+      );
+      const map: Record<string, string> = {};
+      for (let i = 0; i < addresses.length; i += 1) {
+        map[addresses[i]!] = `pattern_match_${i}`;
+      }
+      mockscanner.firstScan = vi.fn().mockResolvedValue({ addresses });
+      serveStrings(map);
 
       const response = await handlers.handleSearchString({
         pid: 1234,

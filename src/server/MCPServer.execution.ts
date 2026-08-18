@@ -230,10 +230,17 @@ export async function executeToolWithTracking(ctx: MCPServerContext, name: strin
       refreshDomainTtlForTool(ctx, name);
     }
     let toolResultSuccess = !enriched.isError;
-    if (enriched?.structuredContent && typeof enriched.structuredContent === 'object') {
+    const successFlag = enriched?.success;
+    if (typeof successFlag === 'boolean') {
+      // ResponseBuilder carries the payload's `success` boolean on the envelope,
+      // so we can read it without a full JSON.parse of the text content.
+      toolResultSuccess = successFlag;
+    } else if (enriched?.structuredContent && typeof enriched.structuredContent === 'object') {
       const resultPayload = enriched.structuredContent as Record<string, unknown>;
       toolResultSuccess = resultPayload.success !== false;
     } else if (enriched?.content?.[0]?.type === 'text' && 'text' in enriched.content[0]) {
+      // Fallback for raw (non-ResponseBuilder) handlers that still encode
+      // `success` inside the text payload.
       try {
         const parsed = JSON.parse(enriched.content[0].text) as Record<string, unknown>;
         toolResultSuccess = parsed.success !== false;

@@ -98,11 +98,21 @@ export class ResponseBuilder {
     }
     const textContent: TextContent = { type: 'text', text: JSON.stringify(this.payload, null, 2) };
     const content = [textContent, ...this.additionalContent];
+    // Carry the payload's `success` boolean on the envelope so the execution
+    // pipeline can read it without re-parsing the text content (see
+    // MCPServer.execution.ts success extraction). Note: the MCP SDK's
+    // CallToolResultSchema extends ResultSchema = z.looseObject(...) (zod
+    // passthrough), so it does NOT strip this unknown field — `success` reaches
+    // the client as-is. Clients parse tool results leniently, so the extra
+    // boolean is harmless. Keep the field: removing it would reintroduce the
+    // JSON.parse of the text content that the pipeline is avoiding.
+    const success = typeof this.payload.success === 'boolean' ? this.payload.success : undefined;
 
     return {
       content,
       ...(this.hasMcpError ? { isError: true } : {}),
       ...(this.useStructuredContent ? { structuredContent: this.payload } : {}),
+      ...(success !== undefined ? { success } : {}),
     } as ToolResponse;
   }
 

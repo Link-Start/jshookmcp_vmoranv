@@ -114,6 +114,17 @@ const isResponseBodyPayload = (value: unknown): value is CDPResponseBodyPayload 
 const asStringRecord = (value: unknown): Record<string, string> =>
   isObjectRecord(value) ? (value as Record<string, string>) : {};
 
+/** Case-insensitive header lookup over a CDP headers record. */
+const getHeaderValue = (headers: UnknownRecord | undefined, name: string): string | undefined => {
+  if (!headers) return undefined;
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === name && typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
+};
+
 const toRuntimeEvaluateValue = (value: unknown): unknown => {
   if (!isObjectRecord(value)) {
     return undefined;
@@ -172,6 +183,12 @@ export class NetworkMonitor implements NetworkMonitorLike {
   private MAX_BODY_CACHE_ENTRIES = NETWORK_BODY_CACHE_MAX_ENTRIES;
   private MAX_BODY_CACHE_BYTES = NETWORK_BODY_CACHE_MAX_TOTAL_BYTES;
   private MAX_SINGLE_BODY_CACHE_BYTES = NETWORK_BODY_CACHE_MAX_BODY_BYTES;
+
+  /** RequestIds pre-marked oversized via content-length (skip auto-capture fetch). */
+  private readonly skipBodyCapture = new Set<string>();
+  /** In-flight auto-capture fetches, bounded to avoid a getResponseBody flood. */
+  private autoCaptureInFlight = 0;
+  private readonly AUTO_CAPTURE_MAX_CONCURRENCY = 4;
 
   private networkListeners: {
     requestWillBeSent?: (params: unknown) => void;
@@ -287,12 +304,27 @@ export class NetworkMonitor implements NetworkMonitorLike {
           ) as NetworkResponse['remoteAddress'],
         };
 
+        // Pre-check content-length so we never fetch an oversized body into
+        // memory during auto-capture (b1-06). Without content-length we keep
+        // the post-fetch size check as a fallback.
+        const contentLengthRaw = getHeaderValue(params.response.headers, 'content-length');
+        if (contentLengthRaw !== undefined) {
+          const contentLength = Number(contentLengthRaw);
+          if (Number.isFinite(contentLength) && contentLength > this.MAX_SINGLE_BODY_CACHE_BYTES) {
+            this.skipBodyCapture.add(scopedRequestId);
+            logger.debug(
+              `[BodyCache] Pre-skipping oversized body for ${scopedRequestId} (content-length=${contentLength})`,
+            );
+          }
+        }
+
         this.responses.set(scopedRequestId, response);
 
         if (this.responses.size > this.MAX_NETWORK_RECORDS) {
           const firstKey = this.responses.keys().next().value;
           if (firstKey) {
             this.responses.delete(firstKey);
+            this.skipBodyCapture.delete(firstKey);
           }
         }
 
@@ -352,6 +384,24 @@ export class NetworkMonitor implements NetworkMonitorLike {
     // Skip non-content responses
     if (response.fromCache) return;
 
+    // Skip bodies pre-marked oversized via the content-length pre-check (b1-06).
+    if (this.skipBodyCapture.has(requestId)) {
+      logger.debug(
+        `[BodyCache] Skipping oversized body for ${requestId} (content-length pre-check)`,
+      );
+      return;
+    }
+
+    // Bound concurrent auto-capture fetches so a burst of loadingFinished
+    // events cannot flood the CDP connection (b1-06).
+    if (this.autoCaptureInFlight >= this.AUTO_CAPTURE_MAX_CONCURRENCY) {
+      logger.debug(
+        `[BodyCache] Skipping auto-capture for ${requestId} (concurrency limit reached)`,
+      );
+      return;
+    }
+    this.autoCaptureInFlight++;
+
     try {
       const rawResult = (await this.sendCdp('Network.getResponseBody', {
         requestId: this.toRawRequestId(requestId),
@@ -395,6 +445,8 @@ export class NetworkMonitor implements NetworkMonitorLike {
       logger.debug(
         `[BodyCache] Could not capture body for ${requestId}: ${err instanceof Error ? err.message : String(err)}`,
       );
+    } finally {
+      this.autoCaptureInFlight--;
     }
   }
 
@@ -632,6 +684,7 @@ export class NetworkMonitor implements NetworkMonitorLike {
     this.responses.clear();
     this.responseBodyCache.clear();
     this.responseBodyCacheSizes.clear();
+    this.skipBodyCapture.clear();
     this.responseBodyCacheBytes = 0;
     logger.info('Network records cleared');
   }

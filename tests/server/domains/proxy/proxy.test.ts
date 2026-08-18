@@ -3,6 +3,7 @@ import * as child_process from 'child_process';
 import * as http from 'node:http';
 import * as net from 'node:net';
 import { once } from 'node:events';
+import { buildTestHost } from '@tests/shared/test-urls';
 import { ProxyHandlers } from '@server/domains/proxy/index';
 import { readBodyPreview } from '@server/domains/proxy/handlers.impl';
 import { PROXY_CAPTURE_BODY_SKIP_BYTES } from '@src/constants/proxy';
@@ -1381,7 +1382,12 @@ describe('ProxyHandlers (Integration)', () => {
     // Simulate a previous capture=true session that left sensitive entries behind.
     (handlers as any).captureEnabled = false;
     (handlers as any).captureBuffer = [
-      { type: 'request', id: 'stale', url: 'http://secret.example', timestamp: Date.now() },
+      {
+        type: 'request',
+        id: 'stale',
+        url: `http://${buildTestHost('secret')}`,
+        timestamp: Date.now(),
+      },
     ];
 
     const data = parseResponse(await handlers.handleProxyGetRequests({}));
@@ -1393,7 +1399,12 @@ describe('ProxyHandlers (Integration)', () => {
 
   it('clears stale captured traffic when starting with capture:false', async () => {
     (handlers as any).captureBuffer = [
-      { type: 'request', id: 'stale', url: 'http://secret.example', timestamp: Date.now() },
+      {
+        type: 'request',
+        id: 'stale',
+        url: `http://${buildTestHost('secret')}`,
+        timestamp: Date.now(),
+      },
     ];
 
     await handlers.handleProxyStart({ port: testPort + 23, useHttps: false, capture: false });

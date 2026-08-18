@@ -597,4 +597,124 @@ describe('NetworkMonitor.impl – response body cache and persistence', () => {
       expect(reqs).toHaveLength(2);
     });
   });
+
+  // ── b1-06: content-length pre-check + auto-capture concurrency cap ──────
+  describe('auto-capture content-length pre-check', () => {
+    it('skips fetching when content-length exceeds the single-body cap (case-insensitive)', async () => {
+      const { session, send, emit } = createMockSession();
+      const monitor = new NetworkMonitor(session);
+      await monitor.enable();
+
+      emit('Network.requestWillBeSent', {
+        requestId: 'r1',
+        request: { url: `${testUrls.TEST_URLS.root}/big`, method: 'GET' },
+        timestamp: 1,
+      });
+      emit('Network.responseReceived', {
+        requestId: 'r1',
+        response: {
+          url: `${testUrls.TEST_URLS.root}/big`,
+          status: 200,
+          statusText: 'OK',
+          mimeType: 'application/octet-stream',
+          headers: { 'Content-Length': String(2 * 1024 * 1024) },
+        },
+        timestamp: 2,
+      });
+
+      send.mockClear();
+      emit('Network.loadingFinished', { requestId: 'r1' });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      const getBodyCalls = send.mock.calls.filter(
+        ([method]) => method === 'Network.getResponseBody',
+      );
+      expect(getBodyCalls).toHaveLength(0);
+      expect(mocks.logger.debug).toHaveBeenCalledWith(expect.stringContaining('content-length'));
+    });
+
+    it('still fetches when content-length is within the single-body cap', async () => {
+      const { session, send, emit } = createMockSession();
+      const monitor = new NetworkMonitor(session);
+      await monitor.enable();
+
+      emit('Network.requestWillBeSent', {
+        requestId: 'r1',
+        request: { url: `${testUrls.TEST_URLS.root}/api`, method: 'GET' },
+        timestamp: 1,
+      });
+      emit('Network.responseReceived', {
+        requestId: 'r1',
+        response: {
+          url: `${testUrls.TEST_URLS.root}/api`,
+          status: 200,
+          statusText: 'OK',
+          mimeType: 'application/json',
+          headers: { 'content-length': '123' },
+        },
+        timestamp: 2,
+      });
+
+      send.mockResolvedValueOnce({ body: '{"ok":true}', base64Encoded: false });
+      emit('Network.loadingFinished', { requestId: 'r1' });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      const getBodyCalls = send.mock.calls.filter(
+        ([method]) => method === 'Network.getResponseBody',
+      );
+      expect(getBodyCalls).toHaveLength(1);
+    });
+  });
+
+  describe('auto-capture concurrency cap', () => {
+    it('caps concurrent auto-capture at 4 in-flight fetches', async () => {
+      const { session, send, emit } = createMockSession();
+      const monitor = new NetworkMonitor(session);
+      await monitor.enable();
+
+      for (let i = 0; i < 5; i++) {
+        emit('Network.requestWillBeSent', {
+          requestId: `r${i}`,
+          request: { url: withPath(TEST_URLS.root, `${i}`), method: 'GET' },
+          timestamp: i,
+        });
+        emit('Network.responseReceived', {
+          requestId: `r${i}`,
+          response: {
+            url: withPath(TEST_URLS.root, `${i}`),
+            status: 200,
+            statusText: 'OK',
+            mimeType: 'text/plain',
+          },
+          timestamp: i + 0.5,
+        });
+      }
+
+      // Hold getResponseBody responses open so the 4 slots stay occupied.
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      send.mockImplementation(async (method: string) => {
+        if (method === 'Network.getResponseBody') {
+          await gate;
+          return { body: 'x', base64Encoded: false };
+        }
+        return {};
+      });
+
+      for (let i = 0; i < 5; i++) {
+        emit('Network.loadingFinished', { requestId: `r${i}` });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      const getBodyCalls = send.mock.calls.filter(
+        ([method]) => method === 'Network.getResponseBody',
+      );
+      expect(getBodyCalls).toHaveLength(4);
+
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+  });
 });
