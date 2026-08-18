@@ -25,15 +25,37 @@ export function resetIdCounter(): void {
 }
 
 import type { EventBus, ServerEventMap } from '@server/EventBus';
+import { logger } from '@utils/logger';
+
+/** Default cap on stored nodes before oldest entries are evicted. */
+export const DEFAULT_MAX_NODES = 100_000;
+/** Default cap on stored edges before oldest entries are evicted. */
+export const DEFAULT_MAX_EDGES = 100_000;
+
+export interface ReverseEvidenceGraphOptions {
+  /** Cap on stored nodes; oldest (by createdAt) are evicted when exceeded. */
+  maxNodes?: number;
+  /** Cap on stored edges; oldest (by insertion order) are evicted when exceeded. */
+  maxEdges?: number;
+}
 
 export class ReverseEvidenceGraph {
   private readonly nodes = new Map<string, EvidenceNode>();
   private readonly edges = new Map<string, EvidenceEdge>();
+  private readonly maxNodes: number;
+  private readonly maxEdges: number;
   private eventBus?: EventBus<ServerEventMap>;
   private isDirty = false;
   private mutationSeq = 0;
   private lastPersistedSeq = 0;
   private persistNotifier?: () => void;
+  private droppedNodes = 0;
+  private droppedEdges = 0;
+
+  constructor(options: ReverseEvidenceGraphOptions = {}) {
+    this.maxNodes = options.maxNodes ?? DEFAULT_MAX_NODES;
+    this.maxEdges = options.maxEdges ?? DEFAULT_MAX_EDGES;
+  }
 
   setEventBus(eventBus: EventBus<ServerEventMap>): void {
     this.eventBus = eventBus;
@@ -59,6 +81,82 @@ export class ReverseEvidenceGraph {
     }
   }
 
+  // ── Unbounded growth caps ─────────────────────────────
+
+  /**
+   * Surface an eviction batch to observers. Eviction is otherwise silent; a
+   * long-lived session can silently lose evidence without any signal. We warn
+   * once per batch (the batch, not the individual node/edge, is the unit of
+   * rate limiting) and emit an event when a bus is attached.
+   */
+  private notifyEviction(
+    reason: 'node-cap' | 'edge-cap',
+    droppedNodes: number,
+    droppedEdges: number,
+  ): void {
+    if (droppedNodes === 0 && droppedEdges === 0) return;
+    logger.warn(
+      `[ReverseEvidenceGraph] evicted ${droppedNodes} node(s) and ${droppedEdges} edge(s) (${reason})`,
+    );
+    void this.eventBus?.emit('evidence-evicted', {
+      reason,
+      droppedNodes,
+      droppedEdges,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  /** Evict the oldest nodes (by createdAt) down to the configured cap. */
+  private evictOldestNodes(): void {
+    const excess = this.nodes.size - this.maxNodes;
+    if (excess <= 0) return;
+    const oldest = [...this.nodes.values()]
+      .toSorted((a, b) => a.createdAt - b.createdAt)
+      .slice(0, excess);
+    const evictedIds = new Set(oldest.map((n) => n.id));
+    for (const id of evictedIds) {
+      this.nodes.delete(id);
+    }
+    // Cascade: drop edges connected to evicted nodes (mirrors removeNode) so no
+    // dangling edges survive node eviction.
+    let cascadedEdges = 0;
+    for (const [edgeId, edge] of this.edges) {
+      if (evictedIds.has(edge.source) || evictedIds.has(edge.target)) {
+        this.edges.delete(edgeId);
+        cascadedEdges++;
+      }
+    }
+    this.droppedNodes += evictedIds.size;
+    this.droppedEdges += cascadedEdges;
+    this.notifyEviction('node-cap', evictedIds.size, cascadedEdges);
+  }
+
+  /** Evict the oldest edges (by insertion order) down to the configured cap. */
+  private evictOldestEdges(): void {
+    const excess = this.edges.size - this.maxEdges;
+    if (excess <= 0) return;
+    // Edges carry no createdAt; Map iteration order equals insertion order, so
+    // the oldest edges sit at the front.
+    let removed = 0;
+    for (const edgeId of this.edges.keys()) {
+      if (removed >= excess) break;
+      this.edges.delete(edgeId);
+      removed++;
+    }
+    this.droppedEdges += removed;
+    this.notifyEviction('edge-cap', 0, removed);
+  }
+
+  /** Number of nodes evicted due to the node cap. */
+  get droppedNodeCount(): number {
+    return this.droppedNodes;
+  }
+
+  /** Number of edges evicted due to the edge cap or node-eviction cascades. */
+  get droppedEdgeCount(): number {
+    return this.droppedEdges;
+  }
+
   // ── CRUD ──────────────────────────────────────────────
 
   /** Add a node to the graph. */
@@ -75,6 +173,7 @@ export class ReverseEvidenceGraph {
       createdAt: Date.now(),
     };
     this.nodes.set(node.id, node);
+    this.evictOldestNodes();
     this.markDirty();
     return node;
   }
@@ -97,6 +196,7 @@ export class ReverseEvidenceGraph {
       metadata,
     };
     this.edges.set(edge.id, edge);
+    this.evictOldestEdges();
     this.markDirty();
     return edge;
   }
@@ -380,11 +480,19 @@ export class ReverseEvidenceGraph {
     return this.mutationSeq !== this.lastPersistedSeq;
   }
 
-  exportSnapshot(): { schemaVersion: number; savedAt: string; graph: EvidenceGraphSnapshot } {
+  exportSnapshot(): {
+    schemaVersion: number;
+    savedAt: string;
+    graph: EvidenceGraphSnapshot;
+    droppedNodes: number;
+    droppedEdges: number;
+  } {
     return {
       schemaVersion: 1,
       savedAt: new Date().toISOString(),
       graph: this.exportJson(),
+      droppedNodes: this.droppedNodes,
+      droppedEdges: this.droppedEdges,
     };
   }
 
@@ -395,6 +503,8 @@ export class ReverseEvidenceGraph {
     const { nodes, edges } = snapshot.graph;
     this.nodes.clear();
     this.edges.clear();
+    this.droppedNodes = 0;
+    this.droppedEdges = 0;
     for (const node of nodes) {
       this.nodes.set(node.id, node);
     }
