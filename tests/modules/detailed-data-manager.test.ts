@@ -48,7 +48,7 @@ describe('DetailedDataManager', () => {
     const data = { hello: 'world', count: 42 };
     const id = manager.store(data);
 
-    expect(id).toMatch(/^detail_\d+_[a-z0-9]+$/);
+    expect(id).toMatch(/^detail_\d+_[0-9a-f-]{36}$/);
     const retrieved = manager.retrieve(id);
     expect(retrieved).toEqual(data);
   });

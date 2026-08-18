@@ -10,7 +10,7 @@ import { getProjectRoot } from '@utils/outputPaths';
 
 describe('DetailedDataHandlers', () => {
   const detailedDataManager = {
-    retrieve: vi.fn(),
+    retrieveAsync: vi.fn(),
   } as any;
 
   let handlers: DetailedDataHandlers;
@@ -21,7 +21,7 @@ describe('DetailedDataHandlers', () => {
   });
 
   it('returns detailed data and defaults path to full', async () => {
-    detailedDataManager.retrieve.mockReturnValue({
+    detailedDataManager.retrieveAsync.mockReturnValue({
       nested: { value: 42 },
     });
 
@@ -29,7 +29,7 @@ describe('DetailedDataHandlers', () => {
       await handlers.handleGetDetailedData({ detailId: 'detail-1' }),
     );
 
-    expect(detailedDataManager.retrieve).toHaveBeenCalledWith('detail-1', undefined);
+    expect(detailedDataManager.retrieveAsync).toHaveBeenCalledWith('detail-1', undefined);
     expect(body).toEqual({
       success: true,
       detailId: 'detail-1',
@@ -41,7 +41,7 @@ describe('DetailedDataHandlers', () => {
   });
 
   it('passes through the requested path', async () => {
-    detailedDataManager.retrieve.mockReturnValue(['line 1', 'line 2']);
+    detailedDataManager.retrieveAsync.mockReturnValue(['line 1', 'line 2']);
 
     const body = parseJson<BrowserStatusResponse>(
       await handlers.handleGetDetailedData({
@@ -50,13 +50,13 @@ describe('DetailedDataHandlers', () => {
       }),
     );
 
-    expect(detailedDataManager.retrieve).toHaveBeenCalledWith('detail-2', 'scripts[0].source');
+    expect(detailedDataManager.retrieveAsync).toHaveBeenCalledWith('detail-2', 'scripts[0].source');
     expect(body.path).toBe('scripts[0].source');
     expect(body.data).toEqual(['line 1', 'line 2']);
   });
 
   it('returns an error payload when retrieval fails', async () => {
-    detailedDataManager.retrieve.mockImplementation(() => {
+    detailedDataManager.retrieveAsync.mockImplementation(() => {
       throw new Error('detail expired');
     });
 

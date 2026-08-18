@@ -18,7 +18,7 @@ export class DetailedDataHandlers {
       const detailId = argString(args, 'detailId', '');
       const path = argString(args, 'path');
 
-      const data = this.deps.detailedDataManager.retrieve(detailId, path);
+      const data = await this.deps.detailedDataManager.retrieveAsync(detailId, path);
 
       return R.ok().build({
         detailId,

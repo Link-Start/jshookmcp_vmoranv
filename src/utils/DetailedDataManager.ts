@@ -9,10 +9,13 @@ import { readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { getArtifactDir } from '@utils/artifacts';
-import { gzip, gunzipSync } from 'node:zlib';
+import { gzip, gunzip, gunzipSync } from 'node:zlib';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
+import { ioLimit } from '@utils/concurrency';
 
 const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
 
 /** Whether to compress persisted entries with gzip (saves ~70-90% disk). */
 const ENABLE_GZIP = true;
@@ -71,6 +74,8 @@ interface PersistenceMetrics {
   evictedByLRUCount: number;
   totalBytesWritten: number;
   totalBytesRead: number;
+  /** Number of persists skipped because the bounded write queue was saturated. */
+  persistDeferredCount: number;
 }
 
 /**
@@ -108,6 +113,12 @@ export class DetailedDataManager {
   private persistenceEnabled = true;
   private disposed = false;
 
+  /** Max in-flight disk writes before new persists degrade to memory-only (a3-06). */
+  private static readonly MAX_PENDING_PERSISTS = 8;
+  private pendingPersistCount = 0;
+  /** Serializes whole-file metadata rewrites so concurrent rebuilds cannot interleave. */
+  private metadataRebuildChain: Promise<void> = Promise.resolve();
+
   private readonly DEFAULT_TTL = DETAILED_DATA_DEFAULT_TTL_MS;
   private readonly MAX_TTL = DETAILED_DATA_MAX_TTL_MS;
   private readonly MAX_CACHE_SIZE = 100;
@@ -130,6 +141,7 @@ export class DetailedDataManager {
     evictedByLRUCount: 0,
     totalBytesWritten: 0,
     totalBytesRead: 0,
+    persistDeferredCount: 0,
   };
 
   constructor() {
@@ -214,21 +226,17 @@ export class DetailedDataManager {
     if (!this.persistenceEnabled) return;
 
     const now = Date.now();
-    const expired: string[] = [];
+    const expired: Array<[string, CacheEntry]> = [];
 
     for (const [detailId, entry] of this.cache.entries()) {
       if (entry.expiresAt <= now) {
-        expired.push(detailId);
-        if (entry.persistPath) {
-          await fs.unlink(entry.persistPath).catch(() => {});
-          if (this.disposed) return;
-        }
+        expired.push([detailId, entry]);
       }
     }
 
     if (expired.length > 0) {
-      expired.forEach((id) => this.cache.delete(id));
-      await this.rebuildMetadata();
+      expired.forEach(([id]) => this.cache.delete(id));
+      await this.discardPersistedEntries(expired.map(([, entry]) => entry));
       if (!this.disposed) logger.info(`Cleaned up ${expired.length} expired detail entries`);
     }
   }
@@ -253,6 +261,36 @@ export class DetailedDataManager {
     if (!this.disposed) {
       await fs.writeFile(this.metadataPath, lines.join('\n') + '\n').catch(() => {});
     }
+  }
+
+  /**
+   * Queue a metadata rebuild behind any in-flight one. Fire-and-forget entry
+   * removal (periodic cleanup, LRU eviction) goes through this so concurrent
+   * rebuilds cannot interleave their whole-file writes, and a failed rebuild
+   * never poisons the chain.
+   */
+  private queueRebuildMetadata(): Promise<void> {
+    this.metadataRebuildChain = this.metadataRebuildChain
+      .catch(() => {})
+      .then(() => this.rebuildMetadata())
+      .catch((error) => logger.warn('Failed to rebuild detailed-data metadata', error));
+    return this.metadataRebuildChain;
+  }
+
+  /**
+   * Unlink the persisted files of removed entries and rewrite the metadata
+   * index, so neither the files nor their .metadata.jsonl lines outlive the
+   * cache entries they describe (a2-03/a3-05).
+   */
+  private async discardPersistedEntries(entries: CacheEntry[]): Promise<void> {
+    if (this.disposed || !this.persistenceEnabled) return;
+
+    const toUnlink = entries.filter((entry) => entry.persistPath);
+    if (toUnlink.length > 0) {
+      await Promise.all(toUnlink.map((entry) => fs.unlink(entry.persistPath!).catch(() => {})));
+      if (this.disposed) return;
+    }
+    await this.queueRebuildMetadata();
   }
 
   /**
@@ -304,7 +342,7 @@ export class DetailedDataManager {
     jsonStr: string,
     size: number,
   ): DetailedDataResponse {
-    const detailId = this.storeWithSize(data, size);
+    const detailId = this.storeWithSize(data, size, undefined, jsonStr);
     const summary = this.generateSummaryFromJson(data, jsonStr, size);
 
     return {
@@ -319,11 +357,16 @@ export class DetailedDataManager {
   }
 
   store<T>(data: T, customTTL?: number): string {
-    const { size } = this.serializeWithMemo(data);
-    return this.storeWithSize(data, size, customTTL);
+    const { json, size } = this.serializeWithMemo(data);
+    return this.storeWithSize(data, size, customTTL, json);
   }
 
-  private storeWithSize(data: unknown, size: number, customTTL?: number): string {
+  private storeWithSize(
+    data: unknown,
+    size: number,
+    customTTL?: number,
+    precomputedJson?: string,
+  ): string {
     if (this.cache.size >= this.MAX_CACHE_SIZE) {
       this.evictLRU();
     }
@@ -334,17 +377,30 @@ export class DetailedDataManager {
     // sanitizeForCache returns the same reference when nothing needed offloading,
     // so the common path stays a cheap no-op with no size recomputation.
     const sanitized = sanitizeForCache(data);
-    const effectiveSize = sanitized === data ? size : this.serializeWithMemo(sanitized).size;
+    // Reuse the caller's serialization when sanitization was a no-op (a2-07:
+    // persistToDisk used to stringify a second time); only re-serialize when
+    // offloading actually rewrote the payload.
+    let jsonForDisk: string | undefined;
+    let effectiveSize: number;
+    if (sanitized === data) {
+      jsonForDisk = precomputedJson;
+      effectiveSize = size;
+    } else {
+      const reserialized = this.serializeWithMemo(sanitized);
+      jsonForDisk = reserialized.json;
+      effectiveSize = reserialized.size;
+    }
 
-    const detailId = `detail_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const detailId = this.generateDetailId();
     const now = Date.now();
     const ttl = customTTL || this.DEFAULT_TTL;
     const expiresAt = now + ttl;
 
     const shouldCompress = ENABLE_GZIP && effectiveSize > GZIP_THRESHOLD_BYTES;
-    const persistPath = this.persistenceEnabled
-      ? join(this.persistDir, `${detailId}${shouldCompress ? '.gz' : '.json'}`)
-      : undefined;
+    const persistPath =
+      this.persistenceEnabled && jsonForDisk !== undefined
+        ? join(this.persistDir, `${detailId}${shouldCompress ? '.gz' : '.json'}`)
+        : undefined;
 
     const entry: CacheEntry = {
       data: sanitized,
@@ -359,30 +415,56 @@ export class DetailedDataManager {
 
     this.cache.set(detailId, entry);
 
-    // Persist to disk asynchronously (with optional gzip compression)
-    if (persistPath) {
-      void this.persistToDisk(persistPath, sanitized, shouldCompress)
-        .then((bytesWritten) => {
-          this.metrics.diskWriteCount++;
-          this.metrics.totalBytesWritten += bytesWritten;
-          return this.appendMetadata({
-            detailId,
-            expiresAt,
-            createdAt: now,
-            size: effectiveSize,
-            compressed: shouldCompress,
+    // Persist to disk asynchronously (with optional gzip compression) behind a
+    // bounded concurrency gate: when too many writes are already in flight the
+    // entry degrades to memory-only instead of queueing unboundedly (a3-06).
+    if (persistPath && jsonForDisk !== undefined) {
+      if (this.pendingPersistCount >= DetailedDataManager.MAX_PENDING_PERSISTS) {
+        this.metrics.persistDeferredCount++;
+        entry.persistPath = undefined;
+        entry.compressed = false;
+        logger.debug(
+          `Persist queue saturated (${this.pendingPersistCount} in flight); kept ${detailId} in memory only`,
+        );
+      } else {
+        void this.persistBounded(persistPath, jsonForDisk, shouldCompress)
+          .then((bytesWritten) => {
+            this.metrics.diskWriteCount++;
+            this.metrics.totalBytesWritten += bytesWritten;
+            return this.appendMetadata({
+              detailId,
+              expiresAt,
+              createdAt: now,
+              size: effectiveSize,
+              compressed: shouldCompress,
+            });
+          })
+          .catch((err) => {
+            this.metrics.diskWriteFailCount++;
+            logger.warn(`Failed to persist ${detailId}`, err);
           });
-        })
-        .catch((err) => {
-          this.metrics.diskWriteFailCount++;
-          logger.warn(`Failed to persist ${detailId}`, err);
-        });
+      }
     }
 
     logger.debug(
       `Stored detailed data: ${detailId}, size: ${(effectiveSize / 1024).toFixed(1)}KB, expires in ${ttl / 1000}s`,
     );
 
+    return detailId;
+  }
+
+  /**
+   * Generate a unique cache id. Uses crypto.randomUUID so ids stay unique even
+   * when many stores land in the same millisecond; if the first draw collides
+   * with an existing entry (astronomically unlikely with a UUID), one retry is
+   * made before accepting the result (a2-13).
+   */
+  private generateDetailId(): string {
+    const prefix = `detail_${Date.now()}_`;
+    let detailId = `${prefix}${randomUUID()}`;
+    if (this.cache.has(detailId)) {
+      detailId = `${prefix}${randomUUID()}`;
+    }
     return detailId;
   }
 
@@ -394,6 +476,12 @@ export class DetailedDataManager {
     }
   }
 
+  /**
+   * Synchronous retrieval — compatibility layer for legacy callers. The
+   * in-memory fast path never blocks; entries that are lazy-loaded from disk
+   * after a restart fall back to a synchronous read, which blocks the event
+   * loop. Prefer retrieveAsync() for disk-backed entries (a2-04).
+   */
   retrieve<T = unknown>(detailId: string, path?: string): T {
     const cached = this.cache.get(detailId);
 
@@ -405,34 +493,106 @@ export class DetailedDataManager {
 
     if (now > cached.expiresAt) {
       this.cache.delete(detailId);
-      if (cached.persistPath) {
-        void fs.unlink(cached.persistPath).catch(() => {});
-      }
+      void this.discardPersistedEntries([cached]);
       throw new Error(`DetailId expired: ${detailId}`);
     }
 
     // Lazy load from disk if data is null
     if (cached.data === null && cached.persistPath) {
-      try {
-        const raw = readFileSync(cached.persistPath);
-        if (cached.compressed) {
-          const decompressed = gunzipSync(raw);
-          cached.data = JSON.parse(decompressed.toString('utf-8'));
-          this.metrics.gzipDecompressCount++;
-          this.metrics.totalBytesRead += decompressed.length;
-        } else {
-          cached.data = JSON.parse(raw.toString('utf-8'));
-          this.metrics.totalBytesRead += raw.length;
-        }
-        this.metrics.diskReadCount++;
-        this.metrics.diskReadLazyCount++;
-      } catch (error) {
-        this.metrics.diskReadFailCount++;
-        logger.warn(`Failed to load persisted data for ${detailId}`, error);
-        throw new Error(`DetailId not found or expired: ${detailId}`, { cause: error });
-      }
+      this.loadPersistedDataSync(detailId, cached);
     }
 
+    this.touchEntry(detailId, cached, now);
+
+    if (path) {
+      return this.getByPath(cached.data, path) as T;
+    }
+
+    return cached.data as T;
+  }
+
+  /**
+   * Asynchronous retrieval. Same semantics as retrieve(), but the lazy disk
+   * read uses fs.promises.readFile + promisified gunzip so a multi-MB entry
+   * never freezes the event loop (a2-04). This is the path get_detailed_data
+   * takes.
+   */
+  async retrieveAsync<T = unknown>(detailId: string, path?: string): Promise<T> {
+    const cached = this.cache.get(detailId);
+
+    if (!cached) {
+      throw new Error(`DetailId not found or expired: ${detailId}`);
+    }
+
+    const now = Date.now();
+
+    if (now > cached.expiresAt) {
+      this.cache.delete(detailId);
+      // Fire-and-forget like the sync path: maintenance (unlink + metadata
+      // compaction) must never block the access path. The periodic cleanup
+      // timer is the guaranteed maintenance driver.
+      void this.discardPersistedEntries([cached]);
+      throw new Error(`DetailId expired: ${detailId}`);
+    }
+
+    // Lazy load from disk if data is null
+    if (cached.data === null && cached.persistPath) {
+      await this.loadPersistedData(detailId, cached);
+    }
+
+    this.touchEntry(detailId, cached, now);
+
+    if (path) {
+      return this.getByPath(cached.data, path) as T;
+    }
+
+    return cached.data as T;
+  }
+
+  private async loadPersistedData(detailId: string, cached: CacheEntry): Promise<void> {
+    try {
+      const raw = await fs.readFile(cached.persistPath!);
+      if (cached.compressed) {
+        const decompressed = (await gunzipAsync(raw)) as Buffer;
+        cached.data = JSON.parse(decompressed.toString('utf-8'));
+        this.metrics.gzipDecompressCount++;
+        this.metrics.totalBytesRead += decompressed.length;
+      } else {
+        cached.data = JSON.parse(raw.toString('utf-8'));
+        this.metrics.totalBytesRead += raw.length;
+      }
+      this.metrics.diskReadCount++;
+      this.metrics.diskReadLazyCount++;
+    } catch (error) {
+      this.metrics.diskReadFailCount++;
+      logger.warn(`Failed to load persisted data for ${detailId}`, error);
+      throw new Error(`DetailId not found or expired: ${detailId}`, { cause: error });
+    }
+  }
+
+  /** Legacy synchronous lazy-load used only by the retrieve() compat path. */
+  private loadPersistedDataSync(detailId: string, cached: CacheEntry): void {
+    try {
+      const raw = readFileSync(cached.persistPath!);
+      if (cached.compressed) {
+        const decompressed = gunzipSync(raw);
+        cached.data = JSON.parse(decompressed.toString('utf-8'));
+        this.metrics.gzipDecompressCount++;
+        this.metrics.totalBytesRead += decompressed.length;
+      } else {
+        cached.data = JSON.parse(raw.toString('utf-8'));
+        this.metrics.totalBytesRead += raw.length;
+      }
+      this.metrics.diskReadCount++;
+      this.metrics.diskReadLazyCount++;
+    } catch (error) {
+      this.metrics.diskReadFailCount++;
+      logger.warn(`Failed to load persisted data for ${detailId}`, error);
+      throw new Error(`DetailId not found or expired: ${detailId}`, { cause: error });
+    }
+  }
+
+  private touchEntry(detailId: string, cached: CacheEntry, now: number): void {
     cached.lastAccessedAt = now;
     cached.accessCount++;
 
@@ -445,12 +605,6 @@ export class DetailedDataManager {
         );
       }
     }
-
-    if (path) {
-      return this.getByPath(cached.data, path) as T;
-    }
-
-    return cached.data as T;
   }
 
   private getByPath(obj: unknown, path: string): unknown {
@@ -500,16 +654,21 @@ export class DetailedDataManager {
   private cleanup(): void {
     const now = Date.now();
     let cleaned = 0;
+    const removed: CacheEntry[] = [];
 
     for (const [id, cached] of this.cache.entries()) {
       if (now > cached.expiresAt) {
         this.cache.delete(id);
+        removed.push(cached);
         cleaned++;
       }
     }
 
     if (cleaned > 0) {
       logger.debug(`Cleaned ${cleaned} expired detailed data entries`);
+      // Disk cleanup (unlink + metadata compaction) is fire-and-forget; cache
+      // removal above stays synchronous so callers see the shrink immediately.
+      void this.discardPersistedEntries(removed);
     }
   }
 
@@ -538,10 +697,11 @@ export class DetailedDataManager {
       const entry = this.cache.get(oldestId)!;
       this.cache.delete(oldestId);
       this.metrics.evictedByLRUCount++;
-      logger.info(
+      logger.debug(
         `Evicted LRU entry: ${oldestId}, last accessed: ${new Date(entry.lastAccessedAt).toISOString()}, access ` +
           `count: ${entry.accessCount}`,
       );
+      void this.discardPersistedEntries([entry]);
     }
   }
 
@@ -552,12 +712,18 @@ export class DetailedDataManager {
     );
 
     let freed = 0;
+    const removed: CacheEntry[] = [];
     for (const [id, entry] of sorted) {
       if (freed >= bytesToFree) break;
       this.cache.delete(id);
+      removed.push(entry);
       freed += entry.size;
       this.metrics.evictedBySizeCount++;
       logger.info(`Evicted oversized entry: ${id}, freed: ${(entry.size / 1024).toFixed(1)}KB`);
+    }
+
+    if (removed.length > 0) {
+      void this.discardPersistedEntries(removed);
     }
   }
 
@@ -571,11 +737,23 @@ export class DetailedDataManager {
   }
 
   /**
-   * Persist data to disk, optionally gzip-compressed.
+   * Persist data to disk, optionally gzip-compressed, bounded by the global
+   * I/O limiter and the pending-write gate. `json` is the caller's existing
+   * serialization — persistToDisk must not stringify again (a2-07).
    * Returns the number of bytes written.
    */
-  private async persistToDisk(filePath: string, data: unknown, compress: boolean): Promise<number> {
-    const json = JSON.stringify(data);
+  private persistBounded(filePath: string, json: string, compress: boolean): Promise<number> {
+    this.pendingPersistCount++;
+    return ioLimit(() => this.persistToDisk(filePath, json, compress)).finally(() => {
+      this.pendingPersistCount--;
+    });
+  }
+
+  /**
+   * Write the pre-serialized payload to disk, optionally gzip-compressed.
+   * Returns the number of bytes written.
+   */
+  private async persistToDisk(filePath: string, json: string, compress: boolean): Promise<number> {
     if (compress) {
       const compressed = (await gzipAsync(Buffer.from(json, 'utf-8'))) as Buffer;
       await fs.writeFile(filePath, compressed);

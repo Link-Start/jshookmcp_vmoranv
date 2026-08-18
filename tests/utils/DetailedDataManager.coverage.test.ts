@@ -174,8 +174,8 @@ describe('DetailedDataManager – v8 ignore branch coverage', () => {
     expect(manager.retrieve(overflow)).toEqual({ overflow: true });
   });
 
-  it('evictLRU logs eviction info', () => {
-    const infoSpy = vi.spyOn(logger, 'info');
+  it('evictLRU logs eviction at debug level (a2-12)', () => {
+    const debugSpy = vi.spyOn(logger, 'debug');
 
     // Fill to 100 and access all to set lastAccessedAt
     const ids: string[] = [];
@@ -190,7 +190,7 @@ describe('DetailedDataManager – v8 ignore branch coverage', () => {
     // Trigger eviction
     manager.store({ overflow: true });
 
-    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('Evicted LRU entry'));
+    expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('Evicted LRU entry'));
   });
 
   // ── extend ───────────────────────────────────────────────────────────────
