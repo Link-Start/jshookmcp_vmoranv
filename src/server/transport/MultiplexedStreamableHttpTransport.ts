@@ -19,6 +19,11 @@ import {
 import { logger } from '@utils/logger';
 import { HTTP_CAPACITY_RETRY_AFTER_MS } from '@src/constants';
 
+// Notifications (e.g. logging messages) are broadcast to every HTTP session.
+// Skip sessions idle past this threshold to bound the O(log × sessions)
+// amplification under load instead of fanning out to the full session table.
+const DEFAULT_BROADCAST_IDLE_TTL_MS = 5 * 60 * 1000;
+
 interface SessionRecord {
   sessionId: string;
   transport: StreamableHTTPServerTransport;
@@ -38,6 +43,7 @@ export interface MultiplexedStreamableHttpTransportOptions {
   maxSessions?: number;
   capacityRetryAfterMs?: number;
   sessionIdleTtlMs?: number;
+  broadcastIdleTtlMs?: number;
   now?: () => number;
 }
 
@@ -112,7 +118,12 @@ export class MultiplexedStreamableHttpTransport implements Transport {
     }
 
     if (isJSONRPCNotification(message)) {
-      await Promise.allSettled(sessions.map((session) => session.transport.send(message, options)));
+      const activeSessions = this.getActiveBroadcastSessions();
+      if (activeSessions.length > 0) {
+        await Promise.allSettled(
+          activeSessions.map((session) => session.transport.send(message, options)),
+        );
+      }
       return;
     }
 
@@ -426,6 +437,13 @@ export class MultiplexedStreamableHttpTransport implements Transport {
     }
     for (const session of expired) this.dropSession(session.sessionId);
     await Promise.allSettled(expired.map(async (session) => await session.transport.close()));
+  }
+
+  private getActiveBroadcastSessions(): SessionRecord[] {
+    const ttlMs = this.options.broadcastIdleTtlMs ?? DEFAULT_BROADCAST_IDLE_TTL_MS;
+    if (!Number.isFinite(ttlMs)) return [...this.sessions.values()];
+    const cutoff = this.getNow() - ttlMs;
+    return [...this.sessions.values()].filter((session) => session.lastTouchedAt > cutoff);
   }
 
   private getNow(): number {

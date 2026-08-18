@@ -396,6 +396,51 @@ describe('MCPServer.transport', () => {
     expect(body.tier).toBe('search');
   });
 
+  it('includes loopLag in /health verbose when a sampler is active', async () => {
+    const constantsMod = await import('@src/constants');
+    (constantsMod as any).MCP_HEALTH_VERBOSE = true;
+    const ctx = createCtx({
+      loopLagSampler: {
+        getSummary: () => ({ p50Ms: 1.5, p90Ms: 3.25, p99Ms: 9.75, samples: 42 }),
+      },
+    });
+    await startHttpTransport(ctx);
+
+    const server = mocks.httpServers[0];
+    const res = createRes();
+    server.requestHandlerForTest({ url: '/health', method: 'GET' }, res);
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).loopLag).toEqual({
+      p50Ms: 1.5,
+      p90Ms: 3.25,
+      p99Ms: 9.75,
+      samples: 42,
+    });
+  });
+
+  it('omits loopLag from /health when verbose is disabled', async () => {
+    const constantsMod = await import('@src/constants');
+    (constantsMod as any).MCP_HEALTH_VERBOSE = false;
+    // Even with a live sampler, non-verbose responses stay minimal (no loopLag).
+    const ctx = createCtx({
+      loopLagSampler: {
+        getSummary: () => ({ p50Ms: 1.5, p90Ms: 3.25, p99Ms: 9.75, samples: 42 }),
+      },
+    });
+    await startHttpTransport(ctx);
+
+    const server = mocks.httpServers[0];
+    const res = createRes();
+    server.requestHandlerForTest({ url: '/health', method: 'GET' }, res);
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({
+      status: 'ok',
+      uptime: expect.any(Number),
+    });
+  });
+
   it('returns 404 for non-MCP paths', async () => {
     const ctx = createCtx();
     await startHttpTransport(ctx);

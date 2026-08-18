@@ -458,6 +458,59 @@ describe('MultiplexedStreamableHttpTransport', () => {
     ).rejects.toThrow('Ambiguous HTTP session for outbound request/response routing.');
   });
 
+  it('skips idle sessions when broadcasting notifications', async () => {
+    let now = 0;
+    const transport = new MultiplexedStreamableHttpTransport({ now: () => now });
+    await transport.start();
+
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    const [sessionA, sessionB] = mocks.innerTransports;
+
+    // Touch only session A after the default 5-minute broadcast idle TTL, leaving
+    // session B idle past the threshold.
+    now = 400_000;
+    await transport.handleRequest(createReq('POST', sessionA.sessionId), createRes(), {});
+
+    await transport.send({
+      jsonrpc: '2.0',
+      method: 'notifications/message',
+    });
+
+    expect(sessionA.send).toHaveBeenCalledWith(
+      {
+        jsonrpc: '2.0',
+        method: 'notifications/message',
+      },
+      undefined,
+    );
+    expect(sessionB.send).not.toHaveBeenCalled();
+    // Idle sessions are skipped, not evicted.
+    expect(transport.getStats().sessions).toBe(2);
+  });
+
+  it('broadcasts to idle sessions when broadcastIdleTtlMs is Infinity', async () => {
+    let now = 0;
+    const transport = new MultiplexedStreamableHttpTransport({
+      now: () => now,
+      broadcastIdleTtlMs: Number.POSITIVE_INFINITY,
+    });
+    await transport.start();
+
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    const [sessionA, sessionB] = mocks.innerTransports;
+
+    now = 10_000_000;
+    await transport.send({
+      jsonrpc: '2.0',
+      method: 'notifications/message',
+    });
+
+    expect(sessionA.send).toHaveBeenCalled();
+    expect(sessionB.send).toHaveBeenCalled();
+  });
+
   it('releases the admission claim when inner transport construction fails', async () => {
     const onSessionClosed = vi.fn();
     const onSessionOpened = vi.fn(async () => undefined);

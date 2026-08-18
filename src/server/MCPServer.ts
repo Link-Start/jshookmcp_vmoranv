@@ -23,6 +23,7 @@ import { getLoaderMetadata } from '@server/registry/discovery';
 import type { DomainTtlEntry } from '@server/MCPServer.activation.ttl';
 import { closeServer, startHttpTransport, startStdioTransport } from '@server/MCPServer.transport';
 import { startArtifactRetentionScheduler } from '@utils/artifactRetention';
+import { createLoopLagSampler } from '@utils/loopLag';
 import { McpLogTransport } from '@server/transport/McpLogTransport';
 import type { McpLogLevel } from '@server/transport/McpLogTransport';
 import {
@@ -112,6 +113,13 @@ export class MCPServer implements MCPServerContext {
    * so the CLI entry's own call shares this timer instead of stacking one.
    */
   artifactRetentionStop: (() => void) | null = null;
+  /**
+   * Event-loop lag sampler + its stop handle, wired in start() and released by
+   * closeServer() — mirrors the artifactRetentionStop lifecycle pattern. The
+   * sampler exposes p50/p90/p99 through the /health verbose branch (r1-1).
+   */
+  loopLagSampler: import('@utils/loopLag').LoopLagSampler | null = null;
+  loopLagStop: (() => void) | null = null;
   /** Structured log transport for MCP `notifications/message`. */
   public readonly mcpLog = new McpLogTransport();
   public readonly baseTier: ToolProfile;
@@ -407,15 +415,12 @@ export class MCPServer implements MCPServerContext {
     };
     logger.onLog((level, message, args) => {
       if (!this.clientInitialized) return;
+      // Drop debug — forwarding every debug/info line as an MCP notification
+      // broadcast to all HTTP sessions is a quadratic amplification risk
+      // (O(log lines × sessions)) under load.
+      if (level === 'debug') return;
       try {
-        const mcpLevel =
-          level === 'warn'
-            ? 'Warning'
-            : level === 'error'
-              ? 'Error'
-              : level === 'debug'
-                ? 'Debug'
-                : 'Info';
+        const mcpLevel = level === 'warn' ? 'Warning' : level === 'error' ? 'Error' : 'Info';
 
         const data = args.length > 0 ? ' ' + JSON.stringify(args) : '';
         void this.server.server
@@ -673,6 +678,12 @@ export class MCPServer implements MCPServerContext {
     // the default cleanup — not a module-level side effect. The scheduler is
     // idempotent at module level, sharing one timer with the CLI entry call.
     this.artifactRetentionStop = startArtifactRetentionScheduler();
+    // r1-1: production event-loop lag metric — always on (cheap on-demand
+    // sampling via monitorEventLoopDelay, no timer), so /health verbose can
+    // report p50/p90/p99 regardless of E2E env gating. Stopped in closeServer().
+    const loopLagSampler = createLoopLagSampler();
+    this.loopLagSampler = loopLagSampler;
+    this.loopLagStop = loopLagSampler.enable();
     const transportMode = MCP_TRANSPORT.toLowerCase();
     if (transportMode === 'http') {
       await startHttpTransport(this);

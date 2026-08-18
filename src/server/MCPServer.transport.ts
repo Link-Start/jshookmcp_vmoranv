@@ -274,6 +274,12 @@ function handleHealthCheck(ctx: MCPServerContext, res: HttpServerResponse): void
           typeof httpTransport?.getStats === 'function' ? httpTransport.getStats() : null,
       };
     }
+    // r1-1: event-loop lag (p50/p90/p99 + sample count), only present when a
+    // sampler is wired (start() has run). Non-verbose responses stay minimal.
+    const loopLag = ctx.loopLagSampler?.getSummary();
+    if (loopLag) {
+      body.loopLag = loopLag;
+    }
   }
 
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -294,6 +300,11 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
     // stopped here exactly once (idempotent stop; a later start re-arms it).
     ctx.artifactRetentionStop?.();
     ctx.artifactRetentionStop = null;
+
+    // Stop the event-loop lag sampler (idempotent; a later start() re-arms it).
+    ctx.loopLagStop?.();
+    ctx.loopLagStop = null;
+    ctx.loopLagSampler = null;
 
     // Flush snapshots before any other cleanup
     const getInst =

@@ -102,6 +102,14 @@ export interface TransportState {
    * module-level side effect (architecture hygiene, 2026-08-18).
    */
   artifactRetentionStop?: (() => void) | null;
+  /**
+   * Event-loop lag sampler, wired in MCPServer.start() and released in
+   * closeServer(). Exposes p50/p90/p99 + sample count through the /health
+   * verbose branch (r1-1, 2026-08-18).
+   */
+  loopLagSampler?: import('@utils/loopLag').LoopLagSampler | null;
+  /** Stop handle for the loop lag sampler (returned by `enable()`). */
+  loopLagStop?: (() => void) | null;
 }
 
 /** Runtime-loaded plugins/workflows/tools from external directories. */

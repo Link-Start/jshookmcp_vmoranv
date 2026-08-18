@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => {
     cacheInit: vi.fn(async () => undefined),
     detailedShutdown: vi.fn(),
     startArtifactRetentionScheduler: vi.fn(),
+    createLoopLagSampler: vi.fn(),
+    sendLoggingMessage: vi.fn(async () => undefined),
+    logListener: null as null | ((level: string, message: string, args: unknown[]) => void),
   };
 });
 
@@ -32,6 +35,10 @@ vi.mock('@utils/artifactRetention', () => ({
     cleanupIntervalMinutes: 360,
   })),
   cleanupArtifacts: vi.fn(),
+}));
+
+vi.mock('@utils/loopLag', () => ({
+  createLoopLagSampler: mocks.createLoopLagSampler,
 }));
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {
@@ -63,7 +70,11 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {
     public connect = vi.fn(async () => undefined);
     public close = vi.fn(async () => undefined);
     public sendToolListChanged = vi.fn(async () => undefined);
-    public server = { setRequestHandler: vi.fn(), onclose: null };
+    public server = {
+      setRequestHandler: vi.fn(),
+      onclose: null,
+      sendLoggingMessage: mocks.sendLoggingMessage,
+    };
     public prompt = vi.fn();
 
     tool(...args: any[]) {
@@ -155,7 +166,10 @@ vi.mock('@src/utils/logger', () => ({
     error: vi.fn(),
     success: vi.fn(),
     setLevel: vi.fn(),
-    onLog: vi.fn(),
+    onLog: vi.fn((listener: (level: string, message: string, args: unknown[]) => void) => {
+      mocks.logListener = listener;
+      return () => {};
+    }),
   },
 }));
 
@@ -218,7 +232,14 @@ describe('MCPServer', () => {
   beforeEach(() => {
     mocks.mcpInstances.length = 0;
     mocks.allManifests.length = 0;
+    mocks.logListener = null;
     vi.clearAllMocks();
+    // Default loop-lag sampler: start() always creates + enables one, so every
+    // start() test needs a benign implementation (stop is a no-op fn).
+    mocks.createLoopLagSampler.mockReturnValue({
+      enable: () => vi.fn(),
+      getSummary: () => ({ p50Ms: 0, p90Ms: 0, p99Ms: 0, samples: 0 }),
+    });
 
     process.env.MCP_TRANSPORT = 'stdio';
     delete process.env.MCP_TOOL_PROFILE;
@@ -260,6 +281,46 @@ describe('MCPServer', () => {
     // boost_profile and unboost_profile were removed in the domain-level activation refactor
     expect(names).not.toContain('boost_profile');
     expect(names).not.toContain('unboost_profile');
+    expect(server).toBeDefined();
+  });
+
+  it('forwards warn/error/info logs to the MCP client but drops debug', async () => {
+    const server = new MCPServer(baseConfig);
+    const mcp = mocks.mcpInstances[0];
+
+    // Simulate the initialize handshake that flips clientInitialized to true.
+    mcp.server.oninitialized?.();
+
+    const listener = mocks.logListener;
+    expect(listener).toBeTypeOf('function');
+
+    // debug must not be forwarded (broadcast-amplification guard).
+    listener!('debug', 'noisy debug', []);
+    expect(mocks.sendLoggingMessage).not.toHaveBeenCalled();
+
+    listener!('info', 'info message', []);
+    expect(mocks.sendLoggingMessage).toHaveBeenCalledWith({
+      level: 'Info',
+      data: 'info message',
+      logger: 'jshookmcp',
+    });
+
+    mocks.sendLoggingMessage.mockClear();
+    listener!('warn', 'warn message', []);
+    expect(mocks.sendLoggingMessage).toHaveBeenCalledWith({
+      level: 'Warning',
+      data: 'warn message',
+      logger: 'jshookmcp',
+    });
+
+    mocks.sendLoggingMessage.mockClear();
+    listener!('error', 'error message', []);
+    expect(mocks.sendLoggingMessage).toHaveBeenCalledWith({
+      level: 'Error',
+      data: 'error message',
+      logger: 'jshookmcp',
+    });
+
     expect(server).toBeDefined();
   });
 
@@ -561,6 +622,28 @@ describe('MCPServer', () => {
 
     await server.close();
     expect(stopRetention).toHaveBeenCalledOnce();
+  });
+
+  it('wires the loop lag sampler in start() and stops it on close()', async () => {
+    // r1-1: production event-loop lag metric must be started by the server
+    // lifecycle (like the retention sweep) and released on close.
+    const stopLoopLag = vi.fn();
+    const sampler = {
+      enable: vi.fn(() => stopLoopLag),
+      getSummary: vi.fn(() => ({ p50Ms: 0, p90Ms: 0, p99Ms: 0, samples: 0 })),
+    };
+    mocks.createLoopLagSampler.mockReturnValue(sampler);
+
+    const server = new MCPServer(baseConfig);
+    await server.start();
+
+    expect(mocks.createLoopLagSampler).toHaveBeenCalledOnce();
+    expect(sampler.enable).toHaveBeenCalledOnce();
+    expect(server.loopLagSampler).toBe(sampler);
+
+    await server.close();
+    expect(stopLoopLag).toHaveBeenCalledOnce();
+    expect(server.loopLagSampler).toBeNull();
   });
 
   it('enterDegradedMode disables tracking only once', () => {
