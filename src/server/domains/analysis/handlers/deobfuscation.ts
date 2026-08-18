@@ -12,6 +12,13 @@ import type { ToolArgs, ToolResponse } from '@server/types';
 import type { DeobfuscateMappingRule } from '@internal-types/deobfuscator';
 import { derotateStringArray } from '@modules/deobfuscator/AdvancedDeobfuscator.ast';
 import { runWebcrack } from '@modules/deobfuscator/webcrack';
+import type { WebcrackPool } from '@modules/deobfuscator/webcrack-worker';
+import type { JscramblerPool } from '@modules/deobfuscator/jscrambler-worker';
+import {
+  DECODE_STRING_ARRAY_JOB_TIMEOUT_MS,
+  type DecodeStringArrayPool,
+} from '@modules/deobfuscator/decode-string-array-worker';
+import { resolveBabelUrls } from '@modules/deobfuscator/babel-urls';
 import { JScramberDeobfuscator } from '@modules/deobfuscator/JScramblerDeobfuscator';
 import { UniversalUnpacker } from '@modules/deobfuscator/PackerDeobfuscator';
 import { VMDeobfuscator } from '@modules/deobfuscator/VMDeobfuscator';
@@ -78,6 +85,8 @@ export async function handleDeobfuscate(
   jscramblerDeobfuscator: JScramberDeobfuscator,
   packerDeobfuscator: UniversalUnpacker,
   vmDeobfuscator: VMDeobfuscator,
+  webcrackPool?: WebcrackPool,
+  jscramblerPool?: JscramblerPool,
 ): Promise<ToolResponse> {
   const codeArg = requireCodeArg(args, 'deobfuscate');
   if (!codeArg.ok) {
@@ -96,7 +105,7 @@ export async function handleDeobfuscate(
   return cpuLimit(async (): Promise<ToolResponse> => {
     // jscrambler engine
     if (engine === 'jscrambler') {
-      const result = await jscramblerDeobfuscator.deobfuscate({ code });
+      const result = await jscramblerDeobfuscator.deobfuscate({ code }, jscramblerPool);
       return asJsonResponse(result);
     }
 
@@ -125,19 +134,25 @@ export async function handleDeobfuscate(
 
     // webcrack engine = former advanced_deobfuscate path
     if (engine === 'webcrack') {
-      const result = await advancedDeobfuscator.deobfuscate({
-        code,
-        ...extractWebcrackArgs(args),
-        ...(typeof args.detectOnly === 'boolean' ? { detectOnly: args.detectOnly } : {}),
-      });
+      const result = await advancedDeobfuscator.deobfuscate(
+        {
+          code,
+          ...extractWebcrackArgs(args),
+          ...(typeof args.detectOnly === 'boolean' ? { detectOnly: args.detectOnly } : {}),
+        },
+        webcrackPool,
+      );
       return asJsonResponse(result);
     }
 
     // auto engine = former deobfuscate path
-    const result = await deobfuscator.deobfuscate({
-      code,
-      ...extractWebcrackArgs(args),
-    });
+    const result = await deobfuscator.deobfuscate(
+      {
+        code,
+        ...extractWebcrackArgs(args),
+      },
+      webcrackPool,
+    );
 
     // Ensure failures always carry an error field for LLM clarity
     if (
@@ -157,7 +172,10 @@ export async function handleDeobfuscate(
   });
 }
 
-export async function handleWebcrackUnpack(args: ToolArgs): Promise<ToolResponse> {
+export async function handleWebcrackUnpack(
+  args: ToolArgs,
+  pool?: WebcrackPool,
+): Promise<ToolResponse> {
   const codeArg = requireCodeArg(args, 'webcrack_unpack');
   if (!codeArg.ok) {
     return asJsonResponse({ success: false, error: codeArg.error });
@@ -165,13 +183,17 @@ export async function handleWebcrackUnpack(args: ToolArgs): Promise<ToolResponse
   const code = codeArg.code;
 
   return cpuLimit(async (): Promise<ToolResponse> => {
-    const result = await runWebcrack(code, {
-      unpack: argBool(args, 'unpack', true),
-      unminify: argBool(args, 'unminify', true),
-      jsx: argBool(args, 'jsx', true),
-      mangle: argBool(args, 'mangle', false),
-      ...extractWebcrackArgs(args),
-    });
+    const result = await runWebcrack(
+      code,
+      {
+        unpack: argBool(args, 'unpack', true),
+        unminify: argBool(args, 'unminify', true),
+        jsx: argBool(args, 'jsx', true),
+        mangle: argBool(args, 'mangle', false),
+        ...extractWebcrackArgs(args),
+      },
+      pool,
+    );
 
     if (!result.applied) {
       return asJsonResponse({
@@ -194,7 +216,10 @@ export async function handleWebcrackUnpack(args: ToolArgs): Promise<ToolResponse
   });
 }
 
-export async function handleAnalysisDecodeStringArray(args: ToolArgs): Promise<ToolResponse> {
+export async function handleAnalysisDecodeStringArray(
+  args: ToolArgs,
+  decodePool?: DecodeStringArrayPool,
+): Promise<ToolResponse> {
   const code = argString(args, 'code');
   if (!code) {
     return asJsonResponse({ success: false, error: 'code is required' });
@@ -207,6 +232,15 @@ export async function handleAnalysisDecodeStringArray(args: ToolArgs): Promise<T
   const removeRotation = argBool(args, 'removeRotation', true);
 
   return cpuLimit(async (): Promise<ToolResponse> => {
+    // Worker path: run derotate + parse/traverse/generate off the event loop.
+    if (decodePool) {
+      const result = await decodePool.submit(
+        { code, babelUrls: resolveBabelUrls(), maxReplacements, removeRotation },
+        DECODE_STRING_ARRAY_JOB_TIMEOUT_MS,
+      );
+      return asJsonResponse(result);
+    }
+
     const preparedCode = removeRotation ? derotateStringArray(code) : code;
 
     const stringArrays = new Map<string, string[]>();

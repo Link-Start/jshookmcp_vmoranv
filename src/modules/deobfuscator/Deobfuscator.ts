@@ -7,6 +7,7 @@ import {
   detectObfuscationType as detectObfuscationTypeUtil,
 } from '@modules/deobfuscator/Deobfuscator.utils';
 import { runWebcrack } from '@modules/deobfuscator/webcrack';
+import type { WebcrackPool } from '@modules/deobfuscator/webcrack-worker';
 
 export class Deobfuscator {
   private resultCache = new Map<string, DeobfuscateResult>();
@@ -35,7 +36,7 @@ export class Deobfuscator {
     return crypto.createHash('md5').update(key).digest('hex');
   }
 
-  async deobfuscate(options: DeobfuscateOptions): Promise<DeobfuscateResult> {
+  async deobfuscate(options: DeobfuscateOptions, pool?: WebcrackPool): Promise<DeobfuscateResult> {
     const cacheKey = this.generateCacheKey(options);
     const cached = this.resultCache.get(cacheKey);
     if (cached) {
@@ -50,17 +51,21 @@ export class Deobfuscator {
 
     const obfuscationType = this.detectObfuscationType(options.code);
 
-    const webcrackResult = await runWebcrack(options.code, {
-      unpack: options.unpack,
-      unminify: options.unminify,
-      jsx: options.jsx,
-      mangle: options.mangle ?? options.renameVariables,
-      mappings: options.mappings,
-      includeModuleCode: options.includeModuleCode,
-      maxBundleModules: options.maxBundleModules,
-      outputDir: options.outputDir,
-      forceOutput: options.forceOutput,
-    });
+    const webcrackResult = await runWebcrack(
+      options.code,
+      {
+        unpack: options.unpack,
+        unminify: options.unminify,
+        jsx: options.jsx,
+        mangle: options.mangle ?? options.renameVariables,
+        mappings: options.mappings,
+        includeModuleCode: options.includeModuleCode,
+        maxBundleModules: options.maxBundleModules,
+        outputDir: options.outputDir,
+        forceOutput: options.forceOutput,
+      },
+      pool,
+    );
 
     if (!webcrackResult.applied) {
       const reason = webcrackResult.reason ?? 'webcrack did not return a result';

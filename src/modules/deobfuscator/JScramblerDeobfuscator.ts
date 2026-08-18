@@ -4,6 +4,8 @@ import type { NodePath } from '@babel/traverse';
 import generate from '@babel/generator';
 import * as t from '@babel/types';
 import { logger } from '@utils/logger';
+import { JSCRAMBLER_JOB_TIMEOUT_MS, type JscramblerPool } from './jscrambler-worker';
+import { resolveBabelUrls } from './babel-urls';
 
 /**
  * Confidence = transformations / CONFIDENCE_DIVISOR (capped at 1.0):
@@ -34,7 +36,10 @@ export interface JScramberDeobfuscatorResult {
 type EvalValue = string | number | boolean | null | EvalValue[];
 
 export class JScramberDeobfuscator {
-  async deobfuscate(options: JScramberDeobfuscatorOptions): Promise<JScramberDeobfuscatorResult> {
+  async deobfuscate(
+    options: JScramberDeobfuscatorOptions,
+    pool?: JscramblerPool,
+  ): Promise<JScramberDeobfuscatorResult> {
     const {
       code,
       removeDeadCode = true,
@@ -42,6 +47,20 @@ export class JScramberDeobfuscator {
       decryptStrings = true,
       simplifyExpressions = true,
     } = options;
+
+    // Worker path: run the Babel parse + five traverse passes off the event
+    // loop. The main thread only posts `{ code, options }` and receives the
+    // deobfuscated result back.
+    if (pool) {
+      return pool.submit(
+        {
+          code,
+          babelUrls: resolveBabelUrls(),
+          options: { removeDeadCode, restoreControlFlow, decryptStrings, simplifyExpressions },
+        },
+        JSCRAMBLER_JOB_TIMEOUT_MS,
+      );
+    }
 
     logger.info(' JScrambler...');
 

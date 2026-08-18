@@ -56,17 +56,21 @@ describe('Deobfuscator', () => {
 
     const result = await new Deobfuscator().deobfuscate({ code: 'obfuscated()' });
 
-    expect(webcrackState.runWebcrack).toHaveBeenCalledWith('obfuscated()', {
-      unpack: undefined,
-      unminify: undefined,
-      jsx: undefined,
-      mangle: undefined,
-      mappings: undefined,
-      includeModuleCode: undefined,
-      maxBundleModules: undefined,
-      outputDir: undefined,
-      forceOutput: undefined,
-    });
+    expect(webcrackState.runWebcrack).toHaveBeenCalledWith(
+      'obfuscated()',
+      {
+        unpack: undefined,
+        unminify: undefined,
+        jsx: undefined,
+        mangle: undefined,
+        mappings: undefined,
+        includeModuleCode: undefined,
+        maxBundleModules: undefined,
+        outputDir: undefined,
+        forceOutput: undefined,
+      },
+      undefined,
+    );
     expect(result.code).toBe('const answer = 42;');
     expect(result.bundle?.type).toBe('webpack');
     expect(result.savedTo).toBe('D:/tmp/webcrack-out');
@@ -140,19 +144,23 @@ describe('Deobfuscator', () => {
       ],
     });
 
-    expect(webcrackState.runWebcrack).toHaveBeenCalledWith('bundle', {
-      unpack: false,
-      unminify: false,
-      jsx: false,
-      mangle: true,
-      mappings: [
-        { path: './main.js', pattern: 'bootstrap', matchType: 'includes', target: 'code' },
-      ],
-      includeModuleCode: true,
-      maxBundleModules: 10,
-      outputDir: 'artifacts/deobf',
-      forceOutput: true,
-    });
+    expect(webcrackState.runWebcrack).toHaveBeenCalledWith(
+      'bundle',
+      {
+        unpack: false,
+        unminify: false,
+        jsx: false,
+        mangle: true,
+        mappings: [
+          { path: './main.js', pattern: 'bootstrap', matchType: 'includes', target: 'code' },
+        ],
+        includeModuleCode: true,
+        maxBundleModules: 10,
+        outputDir: 'artifacts/deobf',
+        forceOutput: true,
+      },
+      undefined,
+    );
   });
 
   it('throws immediately when webcrack does not produce a result', async () => {
