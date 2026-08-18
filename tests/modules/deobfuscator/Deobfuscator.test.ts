@@ -86,7 +86,42 @@ describe('Deobfuscator', () => {
     expect(first.analysis).toBe('webcrack completed deobfuscation for detected types: unknown.');
     expect(webcrackState.runWebcrack).toHaveBeenCalledTimes(1);
     expect(legacy.chat).not.toHaveBeenCalled();
-    expect(second).toBe(first);
+    // b4-07: cache hits return a shallow copy tagged cached=true instead of the
+    // shared cached object (which the caller could mutate and poison the cache).
+    expect(second).not.toBe(first);
+    expect(second.cached).toBe(true);
+    expect(second.code).toBe(first.code);
+    expect(second.transformations).toEqual(first.transformations);
+  });
+
+  it('does not collide cache entries for codes sharing the same 2000-char prefix', async () => {
+    const deobfuscator = new Deobfuscator();
+    // Old key derivation hashed only code.substring(0, 2000): these two samples
+    // share a 2500-char prefix and must NOT share a cache entry.
+    const prefix = 'a'.repeat(2500);
+
+    await deobfuscator.deobfuscate({ code: `${prefix}; var tailA = 1;` });
+    await deobfuscator.deobfuscate({ code: `${prefix}; var tailB = 2;` });
+
+    expect(webcrackState.runWebcrack).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a shallow copy on cache hit so mutations do not poison the cache', async () => {
+    const deobfuscator = new Deobfuscator();
+
+    const first = await deobfuscator.deobfuscate({ code: 'var shared = 1;' });
+    expect(first.cached).toBe(false);
+
+    const second = await deobfuscator.deobfuscate({ code: 'var shared = 1;' });
+    expect(second.cached).toBe(true);
+    expect(second).not.toBe(first);
+
+    second.code = 'mutated-by-caller';
+
+    const third = await deobfuscator.deobfuscate({ code: 'var shared = 1;' });
+    expect(third.cached).toBe(true);
+    expect(third.code).not.toBe('mutated-by-caller');
+    expect(webcrackState.runWebcrack).toHaveBeenCalledTimes(1);
   });
 
   it('passes webcrack options through and maps renameVariables to mangle', async () => {

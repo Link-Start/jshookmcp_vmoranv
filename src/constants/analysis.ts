@@ -42,6 +42,28 @@ export const ANALYSIS_MAX_SAFE_COLLECTED_BYTES = int(
 );
 export const ANALYSIS_MAX_SAFE_RESPONSE_BYTES = int('ANALYSIS_MAX_SAFE_RESPONSE_BYTES', 220 * 1024);
 
+/**
+ * Hard cap (UTF-8 bytes) for `code` inputs to CPU-heavy analysis tools.
+ * Oversized payloads are rejected before any engine is invoked (b4-02).
+ */
+export const MAX_ANALYSIS_CODE_BYTES = int('MAX_ANALYSIS_CODE_BYTES', 5 * 1024 * 1024);
+
+/* ================================================================== */
+/*  Symbolic execution server-side budget clamps (b4-03)              */
+/* ================================================================== */
+
+/** Server cap for user-supplied maxPaths on js_symbolic_execute. */
+export const SYMBOLIC_CLAMP_MAX_PATHS = int('SYMBOLIC_CLAMP_MAX_PATHS', 200);
+
+/** Server cap for user-supplied maxDepth on js_symbolic_execute. */
+export const SYMBOLIC_CLAMP_MAX_DEPTH = int('SYMBOLIC_CLAMP_MAX_DEPTH', 32);
+
+/** Server cap for user-supplied timeout (ms) on symbolic execution tools. */
+export const SYMBOLIC_CLAMP_TIMEOUT_MS = int('SYMBOLIC_CLAMP_TIMEOUT_MS', 60_000);
+
+/** Server cap for user-supplied maxSteps on js_symbolic_execute_jsvmp. */
+export const SYMBOLIC_CLAMP_MAX_STEPS = int('SYMBOLIC_CLAMP_MAX_STEPS', 5_000);
+
 /* ================================================================== */
 /*  LLM-assisted analysis (ai_suggest_exploits)                        */
 /* ================================================================== */

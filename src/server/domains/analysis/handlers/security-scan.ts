@@ -5,6 +5,7 @@
  * Returns a structured list of vulnerabilities with severity, location, and recommendations.
  */
 
+import { cpuLimit } from '@utils/concurrency';
 import { asJsonResponse } from '@server/domains/shared/response';
 import type { ToolArgs, ToolResponse } from '@server/types';
 import { identifySecurityRisks } from '@modules/analyzer/SecurityCodeAnalyzer';
@@ -19,16 +20,18 @@ export async function handleAnalysisSecurityScan(args: ToolArgs): Promise<ToolRe
     });
   }
 
-  const risks = identifySecurityRisks(code, {});
-  return asJsonResponse({
-    success: true,
-    risks,
-    riskCount: risks.length,
-    severities: {
-      critical: risks.filter((r) => r.severity === 'critical').length,
-      high: risks.filter((r) => r.severity === 'high').length,
-      medium: risks.filter((r) => r.severity === 'medium').length,
-      low: risks.filter((r) => r.severity === 'low').length,
-    },
+  return cpuLimit(async (): Promise<ToolResponse> => {
+    const risks = identifySecurityRisks(code, {});
+    return asJsonResponse({
+      success: true,
+      risks,
+      riskCount: risks.length,
+      severities: {
+        critical: risks.filter((r) => r.severity === 'critical').length,
+        high: risks.filter((r) => r.severity === 'high').length,
+        medium: risks.filter((r) => r.severity === 'medium').length,
+        low: risks.filter((r) => r.severity === 'low').length,
+      },
+    });
   });
 }
