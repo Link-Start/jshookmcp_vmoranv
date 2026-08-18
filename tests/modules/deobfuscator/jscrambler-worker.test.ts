@@ -1,19 +1,31 @@
 /**
  * Tests for off-thread JScrambler deobfuscation (A2).
  *
- * Two concerns:
+ * Three concerns:
  *   1. `JScramblerDeobfuscator.deobfuscate` submits the job to an injected pool
  *      instead of running Babel on the main thread.
- *   2. The self-contained worker script's inlined JScrambler port produces
- *      output identical to the main-thread class on the existing fixtures.
+ *   2. The worker loads the shared `jscrambler-core` module (single source of
+ *      truth) and produces output identical to both the main-thread class and a
+ *      direct core invocation on the existing fixtures.
+ *   3. The worker's injected log collector returns the core's log entries so the
+ *      off-thread path no longer drops logger instrumentation.
  */
 
+import * as parser from '@babel/parser';
+import traverse from '@babel/traverse';
+import generate from '@babel/generator';
+import * as t from '@babel/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkerPool } from '@utils/WorkerPool';
 import { JScramberDeobfuscator } from '@modules/deobfuscator/JScramblerDeobfuscator';
 import {
+  createJscramblerCore,
+  type JscramblerCoreBabel,
+} from '@modules/deobfuscator/jscrambler-core';
+import {
   JSCRAMBLER_JOB_TIMEOUT_MS,
   JSCRAMBLER_WORKER_SCRIPT,
+  resolveJscramblerCoreUrl,
   type JscramblerPool,
   type JscramblerWorkerResult,
 } from '@modules/deobfuscator/jscrambler-worker';
@@ -119,6 +131,9 @@ while (true) {
   },
 ];
 
+const CORE_BABEL: JscramblerCoreBabel = { parser, traverse, generate, types: t };
+const core = createJscramblerCore(CORE_BABEL);
+
 describe('JScramblerDeobfuscator worker-pool path', () => {
   it('submits the deobfuscation job to the pool instead of running Babel on the main thread', async () => {
     const mockPool: JscramblerPool = {
@@ -144,6 +159,7 @@ describe('JScramblerDeobfuscator worker-pool path', () => {
         babelUrls: expect.objectContaining({
           parser: expect.stringContaining('file://'),
         }),
+        coreUrl: expect.stringContaining('file://'),
         options: {
           removeDeadCode: true,
           restoreControlFlow: true,
@@ -153,6 +169,33 @@ describe('JScramblerDeobfuscator worker-pool path', () => {
       }),
       JSCRAMBLER_JOB_TIMEOUT_MS,
     );
+  });
+
+  it('replays worker-collected logs through the main-thread logger and strips them from the result', async () => {
+    const mockPool: JscramblerPool = {
+      submit: vi.fn().mockResolvedValue({
+        code: 'from-worker',
+        success: true,
+        transformations: [],
+        warnings: [],
+        confidence: 0,
+        logs: [
+          { level: 'info', message: ' JScrambler...' },
+          {
+            level: 'info',
+            message: 'JScrambler deobfuscation complete, 0 transformations applied',
+          },
+        ],
+      }),
+    };
+
+    const result = await new JScramberDeobfuscator().deobfuscate(
+      { code: 'obfuscated()' },
+      mockPool,
+    );
+
+    expect(result).not.toHaveProperty('logs');
+    expect(result.code).toBe('from-worker');
   });
 });
 
@@ -164,7 +207,7 @@ describe('jscrambler worker runtime', () => {
   });
 
   for (const fixture of FIXTURES) {
-    it(`matches the main-thread class for: ${fixture.name}`, async () => {
+    it(`matches the main-thread class and the shared core for: ${fixture.name}`, async () => {
       const pool = new WorkerPool<Record<string, unknown>, JscramblerWorkerResult>({
         name: 'jscrambler-runtime-test',
         workerScript: JSCRAMBLER_WORKER_SCRIPT,
@@ -175,11 +218,18 @@ describe('jscrambler worker runtime', () => {
       pools.push(pool);
 
       const mainThread = await new JScramberDeobfuscator().deobfuscate({ code: fixture.code });
+      const coreResult = core.deobfuscate(fixture.code, {
+        removeDeadCode: true,
+        restoreControlFlow: true,
+        decryptStrings: true,
+        simplifyExpressions: true,
+      });
 
       const workerResult = await pool.submit(
         {
           code: fixture.code,
           babelUrls: resolveBabelUrls(),
+          coreUrl: resolveJscramblerCoreUrl(),
           options: {
             removeDeadCode: true,
             restoreControlFlow: true,
@@ -195,6 +245,11 @@ describe('jscrambler worker runtime', () => {
       expect(workerResult.transformations).toEqual(mainThread.transformations);
       expect(workerResult.warnings).toEqual(mainThread.warnings);
       expect(workerResult.confidence).toBeCloseTo(mainThread.confidence);
+
+      // Three-way: the worker must also match a direct core invocation.
+      expect(workerResult.code).toBe(coreResult.code);
+      expect(workerResult.transformations).toEqual(coreResult.transformations);
+      expect(workerResult.warnings).toEqual(coreResult.warnings);
 
       // Equivalent-fixture assertions: pin the transformation labels and the
       // branch behavior so a worker/main-thread drift (or a garbage-label
@@ -222,4 +277,38 @@ describe('jscrambler worker runtime', () => {
       }
     });
   }
+
+  it('returns the core log entries from the worker collector', async () => {
+    const pool = new WorkerPool<Record<string, unknown>, JscramblerWorkerResult>({
+      name: 'jscrambler-runtime-log-test',
+      workerScript: JSCRAMBLER_WORKER_SCRIPT,
+      minWorkers: 0,
+      maxWorkers: 1,
+      idleTimeoutMs: 1000,
+    });
+    pools.push(pool);
+
+    const workerResult = await pool.submit(
+      {
+        code: 'if (false) { drop(); } else { keep(); }',
+        babelUrls: resolveBabelUrls(),
+        coreUrl: resolveJscramblerCoreUrl(),
+        options: {
+          removeDeadCode: true,
+          restoreControlFlow: true,
+          decryptStrings: true,
+          simplifyExpressions: true,
+        },
+      },
+      JSCRAMBLER_JOB_TIMEOUT_MS,
+    );
+
+    expect(workerResult.logs).toBeDefined();
+    expect(workerResult.logs?.[0]).toEqual({ level: 'info', message: ' JScrambler...' });
+    expect(
+      workerResult.logs?.some(
+        (entry) => entry.level === 'info' && entry.message.includes('deobfuscation complete'),
+      ),
+    ).toBe(true);
+  });
 });
