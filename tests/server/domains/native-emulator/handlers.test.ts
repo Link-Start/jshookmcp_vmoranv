@@ -825,6 +825,10 @@ describe('NativeEmulatorHandlers — nemu_trace profile mode', () => {
   });
 });
 
+it('aligns NEMU_CALL_MAX_STEPS with the 1M engine runaway guard', () => {
+  expect(NEMU_CALL_MAX_STEPS).toBe(1_000_000);
+});
+
 describe('NativeEmulatorHandlers — native-call step budget clamping', () => {
   let handlers: NativeEmulatorHandlers;
   afterEach(() => handlers.dispose());
@@ -869,7 +873,7 @@ describe('NativeEmulatorHandlers — native-call step budget clamping', () => {
     expect(res.clamped).toBeUndefined();
   });
 
-  it('preserves the documented 0=unlimited escape hatch without clamping', async () => {
+  it('clamps a call_symbol maxSteps of 0 to the server cap (no unlimited escape hatch)', async () => {
     const sessionId = await freshSession();
     await handlers.handleLoadLibrary({ sessionId, soPath });
     const res = payload(
@@ -882,7 +886,23 @@ describe('NativeEmulatorHandlers — native-call step budget clamping', () => {
     );
     expect(res.success).toBe(true);
     expect(res.result).toBe(42);
-    expect(res.clamped).toBeUndefined();
+    expect(res.clamped).toBe(true);
+  });
+
+  it('clamps a negative call_symbol maxSteps to the server cap (no unlimited escape hatch)', async () => {
+    const sessionId = await freshSession();
+    await handlers.handleLoadLibrary({ sessionId, soPath });
+    const res = payload(
+      await handlers.handleCallSymbol({
+        sessionId,
+        symbol: 'add_two',
+        args: [40, 2],
+        maxSteps: -1,
+      }),
+    );
+    expect(res.success).toBe(true);
+    expect(res.result).toBe(42);
+    expect(res.clamped).toBe(true);
   });
 
   it('clamps an oversized call_address maxSteps and marks the response', async () => {

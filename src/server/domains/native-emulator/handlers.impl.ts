@@ -63,15 +63,16 @@ const DISASM_ARCHITECTURES = new Set(SUPPORTED_DISASSEMBLY_ARCHITECTURES);
  * Clamp a caller-supplied native-call step budget to the server ceiling
  * (`NEMU_CALL_MAX_STEPS`). Values at or under the ceiling pass through
  * untouched; oversized values are capped and flagged so the response can carry
- * a `clamped: true` marker. `0` and negative values keep their documented
- * "unlimited" escape hatch and are never clamped.
+ * a `clamped: true` marker. `0` and negative values would otherwise reach the
+ * engine as an unbounded "no limit" (freezing the server on an infinite loop),
+ * so they are clamped to the ceiling too — there is no unlimited escape hatch.
  */
 function clampNativeMaxSteps(raw: number | undefined): {
   maxSteps: number | undefined;
   clamped: boolean;
 } {
   if (raw === undefined) return { maxSteps: undefined, clamped: false };
-  if (raw > 0 && raw > NEMU_CALL_MAX_STEPS) {
+  if (raw <= 0 || raw > NEMU_CALL_MAX_STEPS) {
     return { maxSteps: NEMU_CALL_MAX_STEPS, clamped: true };
   }
   return { maxSteps: raw, clamped: false };

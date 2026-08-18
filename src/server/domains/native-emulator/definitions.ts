@@ -162,8 +162,7 @@ export const nativeEmulatorTools: Tool[] = [
       )
       .number(
         'maxSteps',
-        'Max instruction steps before aborting (default: 1M, 0=unlimited). Use for long-running bytecode loops.',
-        { default: 0 },
+        'Max instruction steps before aborting (default: 1M). Use for long-running bytecode loops.',
       )
       .required('sessionId', 'symbol'),
   ),
@@ -178,7 +177,7 @@ export const nativeEmulatorTools: Tool[] = [
       .number('thiz', 'Receiver handle (jobject/jclass); 0 for static/none', { default: 0 })
       .number(
         'maxSteps',
-        'Max instruction steps before aborting (default: 1M, 0=unlimited). Values above the server cap are clamped and the response carries clamped:true.',
+        'Max instruction steps before aborting (default: 1M). Values above the server cap are clamped and the response carries clamped:true.',
       )
       .required('sessionId', 'symbol'),
   ),
@@ -191,7 +190,7 @@ export const nativeEmulatorTools: Tool[] = [
       .number('address', 'Guest address of the function to call')
       .array('args', { type: 'number' }, 'Integer arguments passed in x0..x7 (default: none)')
       .boolean('injectJni', 'Prepend guest JNIEnv* + thiz=0 as x0/x1 (default: false)')
-      .number('maxSteps', 'Max instruction steps before aborting (default: 1M, 0=unlimited)')
+      .number('maxSteps', 'Max instruction steps before aborting (default: 1M)')
       .required('sessionId', 'address'),
   ),
   tool('nemu_setup_java_mock', (t) =>

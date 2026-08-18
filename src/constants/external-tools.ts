@@ -83,9 +83,10 @@ export const NEMU_MAX_SESSIONS = int('NEMU_MAX_SESSIONS', 64);
  * Hard ceiling on the instruction budget a caller may request for one native
  * call (`nemu_call_symbol` / `nemu_call_jni_export` / `nemu_call_address`).
  * Values above this are clamped and the response carries `clamped: true`.
- * `0` keeps its documented "unlimited" escape hatch (never clamped). Default: 10M.
+ * Non-positive values (`0` or negative) are also clamped — there is no
+ * unlimited escape hatch. Default: 1M, aligned with the engine runaway guard.
  */
-export const NEMU_CALL_MAX_STEPS = int('NEMU_CALL_MAX_STEPS', 10_000_000);
+export const NEMU_CALL_MAX_STEPS = int('NEMU_CALL_MAX_STEPS', 1_000_000);
 
 /**
  * Instruction budget cap for profile-mode traces (`nemu_trace` mode='profile').

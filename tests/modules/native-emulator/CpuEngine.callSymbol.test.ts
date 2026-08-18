@@ -286,4 +286,36 @@ describe('CpuEngine.callSymbol — L2 calling convention + control flow', () => 
     expect(result).toBe(0);
     expect(engine.readRegister('pc')).toBe(0x1000);
   });
+
+  it.each([0, -1])(
+    'treats a non-positive maxSteps (%d) as the 1M runaway guard instead of unlimited',
+    (maxSteps) => {
+      // count: add x0,x0,#1 ; subs x2,x2,#1 ; b.ne -2 ; ret (3 steps per iteration).
+      // With x2 = 500_000 the loop needs 1.5M steps: an unlimited budget would run
+      // it to completion (x0 = 500_000), while the 1M guard aborts around 333K.
+      const code = [
+        0x00,
+        0x04,
+        0x00,
+        0x91, // add x0, x0, #1
+        0x42,
+        0x04,
+        0x00,
+        0xf1, // subs x2, x2, #1
+        0xc1,
+        0xff,
+        0xff,
+        0x54, // b.ne -2 (back to add)
+        0xc0,
+        0x03,
+        0x5f,
+        0xd6, // ret
+      ];
+      const engine = new CpuEngine();
+      engine.loadElf(buildSo(code, [{ name: 'count', codeOffset: 0 }]));
+      const result = engine.callSymbol('count', [0, 0, 500_000], undefined, maxSteps);
+      expect(result).toBeGreaterThan(0);
+      expect(result).toBeLessThan(500_000);
+    },
+  );
 });
