@@ -1,4 +1,5 @@
 import { logger } from '@utils/logger';
+import { RingBuffer } from '@utils/RingBuffer';
 import { TOKEN_BUDGET_MAX_TOKENS } from '@src/constants';
 
 export interface ToolCallRecord {
@@ -33,9 +34,13 @@ export class TokenBudgetManager {
   private readonly AUTO_CLEANUP_THRESHOLD = 0.9;
   private readonly AUTO_CLEANUP_REARM_THRESHOLD = 0.8;
   private readonly HISTORY_RETENTION = 5 * 60 * 1000;
+  /** Hard cap on retained tool-call records; bounds memory in long-lived sessions. */
+  private readonly HISTORY_MAX_RECORDS = 2000;
 
   private currentUsage = 0;
-  private toolCallHistory: ToolCallRecord[] = [];
+  private toolCallHistory = new RingBuffer<ToolCallRecord>(this.HISTORY_MAX_RECORDS);
+  /** Timestamp of the oldest buffered record (records are pushed in time order). */
+  private headTimestamp: number | null = null;
   private warnings = new Set<number>();
   private sessionStartTime = Date.now();
   private trackingEnabled = true;
@@ -96,7 +101,15 @@ export class TokenBudgetManager {
         estimatedTokens,
         cumulativeTokens: this.currentUsage,
       };
+      // Bound the history: drop over-age records, then make room at the hard
+      // cap (RingBuffer would otherwise silently overwrite the oldest record
+      // and drift the running token total).
+      this.pruneStaleHistory();
+      this.evictForCap();
       this.toolCallHistory.push(record);
+      if (this.headTimestamp === null) {
+        this.headTimestamp = record.timestamp;
+      }
 
       logger.debug(
         `Token usage: ${this.currentUsage}/${this.MAX_TOKENS} (${this.getUsagePercentage()}%) | ` +
@@ -358,7 +371,13 @@ export class TokenBudgetManager {
 
       const cutoff = Date.now() - this.HISTORY_RETENTION;
       const beforeCount = this.toolCallHistory.length;
-      this.toolCallHistory = this.toolCallHistory.filter((call) => call.timestamp > cutoff);
+      const retained = this.toolCallHistory.toArray().filter((call) => call.timestamp > cutoff);
+      const next = new RingBuffer<ToolCallRecord>(this.HISTORY_MAX_RECORDS);
+      for (const call of retained) {
+        next.push(call);
+      }
+      this.toolCallHistory = next;
+      this.headTimestamp = retained[0]?.timestamp ?? null;
       const removedCount = beforeCount - this.toolCallHistory.length;
       logger.info(`Removed ${removedCount} old tool call records`);
 
@@ -386,8 +405,62 @@ export class TokenBudgetManager {
     }
   }
 
+  /**
+   * Drop records that fell out of the retention window. Records are pushed
+   * in time order, so stale entries form a contiguous prefix. The O(1)
+   * fast path (fresh head) keeps the per-push cost constant.
+   */
+  private pruneStaleHistory(): void {
+    if (this.headTimestamp === null) {
+      return;
+    }
+    const cutoff = Date.now() - this.HISTORY_RETENTION;
+    if (this.headTimestamp > cutoff) {
+      return;
+    }
+
+    const snapshot = this.toolCallHistory.toArray();
+    let staleCount = 0;
+    while (staleCount < snapshot.length) {
+      const candidate = snapshot[staleCount];
+      if (!candidate || candidate.timestamp > cutoff) {
+        break;
+      }
+      staleCount++;
+    }
+
+    let prunedTokens = 0;
+    for (let i = 0; i < staleCount; i++) {
+      const evicted = this.toolCallHistory.shift();
+      if (evicted) {
+        prunedTokens += evicted.estimatedTokens;
+      }
+    }
+    this.currentUsage -= prunedTokens;
+    this.headTimestamp = snapshot[staleCount]?.timestamp ?? null;
+  }
+
+  /**
+   * Drop the oldest record when the buffer sits at the hard cap, so evicted
+   * tokens leave the running total instead of being silently overwritten.
+   */
+  private evictForCap(): void {
+    if (this.toolCallHistory.length < this.HISTORY_MAX_RECORDS) {
+      return;
+    }
+    const evicted = this.toolCallHistory.shift();
+    if (evicted) {
+      this.currentUsage -= evicted.estimatedTokens;
+    }
+    this.headTimestamp = this.toolCallHistory.toArray()[0]?.timestamp ?? null;
+  }
+
   private recalculateUsage(): void {
-    this.currentUsage = this.toolCallHistory.reduce((sum, call) => sum + call.estimatedTokens, 0);
+    let sum = 0;
+    for (const call of this.toolCallHistory) {
+      sum += call.estimatedTokens;
+    }
+    this.currentUsage = sum;
   }
 
   getStats(): TokenBudgetStats & { sessionStartTime: number } {
@@ -408,7 +481,7 @@ export class TokenBudgetManager {
 
     const suggestions = this.generateSuggestions(topTools);
 
-    const recentCalls = this.toolCallHistory.slice(-20);
+    const recentCalls = this.toolCallHistory.toArray().slice(-20);
 
     return {
       currentUsage: this.currentUsage,
@@ -483,7 +556,8 @@ export class TokenBudgetManager {
   reset(): void {
     logger.info('Resetting token budget...');
     this.currentUsage = 0;
-    this.toolCallHistory = [];
+    this.toolCallHistory = new RingBuffer<ToolCallRecord>(this.HISTORY_MAX_RECORDS);
+    this.headTimestamp = null;
     this.warnings.clear();
     this.autoCleanupArmed = true;
     this.sessionStartTime = Date.now();
