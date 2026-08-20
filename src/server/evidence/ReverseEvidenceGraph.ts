@@ -42,6 +42,8 @@ export interface ReverseEvidenceGraphOptions {
 export class ReverseEvidenceGraph {
   private readonly nodes = new Map<string, EvidenceNode>();
   private readonly edges = new Map<string, EvidenceEdge>();
+  private readonly outgoingEdgeIds = new Map<string, Set<string>>();
+  private readonly incomingEdgeIds = new Map<string, Set<string>>();
   private readonly maxNodes: number;
   private readonly maxEdges: number;
   private eventBus?: EventBus<ServerEventMap>;
@@ -106,29 +108,61 @@ export class ReverseEvidenceGraph {
     });
   }
 
-  /** Evict the oldest nodes (by createdAt) down to the configured cap. */
+  private indexEdge(edge: EvidenceEdge): void {
+    const outgoing = this.outgoingEdgeIds.get(edge.source) ?? new Set<string>();
+    outgoing.add(edge.id);
+    this.outgoingEdgeIds.set(edge.source, outgoing);
+
+    const incoming = this.incomingEdgeIds.get(edge.target) ?? new Set<string>();
+    incoming.add(edge.id);
+    this.incomingEdgeIds.set(edge.target, incoming);
+  }
+
+  private deleteEdge(edgeId: string): boolean {
+    const edge = this.edges.get(edgeId);
+    if (!edge) return false;
+    this.edges.delete(edgeId);
+
+    const outgoing = this.outgoingEdgeIds.get(edge.source);
+    outgoing?.delete(edgeId);
+    if (outgoing?.size === 0) this.outgoingEdgeIds.delete(edge.source);
+
+    const incoming = this.incomingEdgeIds.get(edge.target);
+    incoming?.delete(edgeId);
+    if (incoming?.size === 0) this.incomingEdgeIds.delete(edge.target);
+    return true;
+  }
+
+  private deleteNodeAndConnectedEdges(nodeId: string): number {
+    if (!this.nodes.delete(nodeId)) return 0;
+    const connected = new Set([
+      ...(this.outgoingEdgeIds.get(nodeId) ?? []),
+      ...(this.incomingEdgeIds.get(nodeId) ?? []),
+    ]);
+    let removedEdges = 0;
+    for (const edgeId of connected) {
+      if (this.deleteEdge(edgeId)) removedEdges++;
+    }
+    this.outgoingEdgeIds.delete(nodeId);
+    this.incomingEdgeIds.delete(nodeId);
+    return removedEdges;
+  }
+
+  /** Evict the oldest nodes in insertion order down to the configured cap. */
   private evictOldestNodes(): void {
     const excess = this.nodes.size - this.maxNodes;
     if (excess <= 0) return;
-    const oldest = [...this.nodes.values()]
-      .toSorted((a, b) => a.createdAt - b.createdAt)
-      .slice(0, excess);
-    const evictedIds = new Set(oldest.map((n) => n.id));
-    for (const id of evictedIds) {
-      this.nodes.delete(id);
-    }
-    // Cascade: drop edges connected to evicted nodes (mirrors removeNode) so no
-    // dangling edges survive node eviction.
+
+    let removedNodes = 0;
     let cascadedEdges = 0;
-    for (const [edgeId, edge] of this.edges) {
-      if (evictedIds.has(edge.source) || evictedIds.has(edge.target)) {
-        this.edges.delete(edgeId);
-        cascadedEdges++;
-      }
+    for (const nodeId of this.nodes.keys()) {
+      if (removedNodes >= excess) break;
+      cascadedEdges += this.deleteNodeAndConnectedEdges(nodeId);
+      removedNodes++;
     }
-    this.droppedNodes += evictedIds.size;
+    this.droppedNodes += removedNodes;
     this.droppedEdges += cascadedEdges;
-    this.notifyEviction('node-cap', evictedIds.size, cascadedEdges);
+    this.notifyEviction('node-cap', removedNodes, cascadedEdges);
   }
 
   /** Evict the oldest edges (by insertion order) down to the configured cap. */
@@ -140,7 +174,7 @@ export class ReverseEvidenceGraph {
     let removed = 0;
     for (const edgeId of this.edges.keys()) {
       if (removed >= excess) break;
-      this.edges.delete(edgeId);
+      this.deleteEdge(edgeId);
       removed++;
     }
     this.droppedEdges += removed;
@@ -196,6 +230,7 @@ export class ReverseEvidenceGraph {
       metadata,
     };
     this.edges.set(edge.id, edge);
+    this.indexEdge(edge);
     this.evictOldestEdges();
     this.markDirty();
     return edge;
@@ -209,32 +244,28 @@ export class ReverseEvidenceGraph {
   /** Remove a node and all connected edges. */
   removeNode(id: string): boolean {
     if (!this.nodes.has(id)) return false;
-    this.nodes.delete(id);
-    // Cascade: remove all edges connected to this node
-    for (const [edgeId, edge] of this.edges) {
-      if (edge.source === id || edge.target === id) {
-        this.edges.delete(edgeId);
-      }
-    }
+    this.deleteNodeAndConnectedEdges(id);
     this.markDirty();
     return true;
   }
 
   /** Get all edges originating from a node. */
   getEdgesFrom(nodeId: string): EvidenceEdge[] {
-    return [...this.edges.values()].filter((e) => e.source === nodeId);
+    return [...(this.outgoingEdgeIds.get(nodeId) ?? [])]
+      .map((edgeId) => this.edges.get(edgeId))
+      .filter((edge): edge is EvidenceEdge => edge !== undefined);
   }
 
   /** Whether an edge (source → target, type) already exists. */
   hasEdge(sourceId: string, targetId: string, type: EvidenceEdgeType): boolean {
-    return [...this.edges.values()].some(
-      (e) => e.source === sourceId && e.target === targetId && e.type === type,
-    );
+    return this.getEdgesFrom(sourceId).some((e) => e.target === targetId && e.type === type);
   }
 
   /** Get all edges pointing to a node. */
   getEdgesTo(nodeId: string): EvidenceEdge[] {
-    return [...this.edges.values()].filter((e) => e.target === nodeId);
+    return [...(this.incomingEdgeIds.get(nodeId) ?? [])]
+      .map((edgeId) => this.edges.get(edgeId))
+      .filter((edge): edge is EvidenceEdge => edge !== undefined);
   }
 
   /** Get total node count. */
@@ -505,13 +536,19 @@ export class ReverseEvidenceGraph {
     const { nodes, edges } = snapshot.graph;
     this.nodes.clear();
     this.edges.clear();
+    this.outgoingEdgeIds.clear();
+    this.incomingEdgeIds.clear();
     this.droppedNodes = 0;
     this.droppedEdges = 0;
-    for (const node of nodes) {
+    // Normal writes append monotonically-created nodes, so Map insertion order
+    // is the eviction queue. A snapshot may be unordered; normalize it once on
+    // restore instead of sorting the full graph on every capped write.
+    for (const node of nodes.toSorted((a, b) => a.createdAt - b.createdAt)) {
       this.nodes.set(node.id, node);
     }
     for (const edge of edges) {
       this.edges.set(edge.id, edge);
+      this.indexEdge(edge);
     }
     // Trim restored data back to the configured caps. A hostile or oversized
     // snapshot can inject more nodes/edges than the cap allows; without this

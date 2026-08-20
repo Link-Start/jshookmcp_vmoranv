@@ -84,6 +84,21 @@ describe('StateBoardStore — bounds and default TTL (a3-03)', () => {
     store.dispose();
   });
 
+  it('refreshes an existing key in the incremental LRU order', () => {
+    const store = new StateBoardStore({ maxEntries: 2 });
+    const farFuture = Date.now() + 999_999;
+    store.setEntry('a', entry('a', 1, farFuture));
+    store.setEntry('b', entry('b', 2, farFuture));
+    store.setEntry('a', entry('a', 3, farFuture));
+    store.setEntry('c', entry('c', 4, farFuture));
+
+    expect(store.state.has('a')).toBe(true);
+    expect(store.state.has('b')).toBe(false);
+    expect(store.state.has('c')).toBe(true);
+    expect(store.getEvictedEntries()).toBe(1);
+    store.dispose();
+  });
+
   it('deletes history for LRU-evicted keys (history shares the entry lifecycle)', () => {
     const store = new StateBoardStore({ maxEntries: 2 });
     const farFuture = Date.now() + 999_999;

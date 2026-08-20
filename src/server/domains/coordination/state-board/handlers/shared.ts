@@ -136,24 +136,27 @@ export class StateBoardStore {
       entry.expiresAt = Date.now() + defaultEntryTtlMs;
       entry.ttlSeconds = Math.floor(defaultEntryTtlMs / 1000);
     }
+    // Map insertion order is the incremental LRU queue. Refreshing an existing
+    // key moves it to the newest position without rebuilding or sorting state.
+    this.state.delete(fullKey);
     this.state.set(fullKey, entry);
     this.evictLruIfNeeded();
   }
 
-  /** Evict the least-recently-used entries (by updatedAt) when over the cap. */
+  /** Evict the least-recently-written entries using Map insertion order. */
   private evictLruIfNeeded(): void {
     const excess = this.state.size - this.maxEntries;
     if (excess <= 0) return;
-    const oldest = [...this.state.entries()]
-      .toSorted((a, b) => a[1].updatedAt - b[1].updatedAt)
-      .slice(0, excess);
-    for (const [fullKey] of oldest) {
+    let removed = 0;
+    for (const fullKey of this.state.keys()) {
+      if (removed >= excess) break;
       this.state.delete(fullKey);
       // History shares the entry's lifecycle: an evicted key must not leave an
       // orphaned history array (up to `maxHistoryPerKey` full oldValue copies)
       // pinning memory for the life of the process.
       this.history.delete(fullKey);
       this.evictedEntries++;
+      removed++;
     }
   }
 
@@ -296,7 +299,10 @@ export class StateBoardStore {
     this.state.clear();
     this.history.clear();
     if (snapshot.entries) {
-      for (const [key, entry] of snapshot.entries) {
+      // Snapshot order is not trusted. Normalize once so subsequent capped
+      // writes can evict from the Map head in O(1) per entry.
+      const entriesByRecency = snapshot.entries.toSorted((a, b) => a[1].updatedAt - b[1].updatedAt);
+      for (const [key, entry] of entriesByRecency) {
         // Skip expired entries on restore
         if (entry.expiresAt && now > entry.expiresAt) continue;
         this.state.set(key, entry);

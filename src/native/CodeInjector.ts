@@ -12,7 +12,12 @@ import {
   NOP_OPCODE,
 } from '@src/constants';
 import { ToolError } from '@errors/ToolError';
-import type { PatchOperation, CodeCave, DllInjectionResult } from './CodeInjector.types';
+import type {
+  PatchOperation,
+  CodeCave,
+  DllInjectionResult,
+  ShellcodeInjectionResult,
+} from './CodeInjector.types';
 import {
   openProcessForMemory,
   CloseHandle,
@@ -26,6 +31,7 @@ import {
   MEM,
 } from './Win32API';
 import { FlushInstructionCache } from './Win32Debug';
+import { ntCreateThreadExSafe } from './syscall/NtInjection';
 import { nativeMemoryManager } from './NativeMemoryManager.impl';
 import { isExecutable } from './NativeMemoryManager.utils';
 
@@ -242,10 +248,79 @@ export class CodeInjector {
     }
   }
 
+  /** Allocate, write, and execute raw shellcode with the requested thread API. */
+  async injectShellcode(
+    pid: number,
+    shellcode: Buffer,
+    method: 'createremote' | 'ntcreatethread' = 'createremote',
+  ): Promise<ShellcodeInjectionResult> {
+    if (shellcode.length === 0) {
+      throw new ToolError('VALIDATION', 'Shellcode must be non-empty');
+    }
+
+    const handle = openProcessForMemory(pid, true);
+    let remoteMem = 0n;
+    let threadHandle = 0n;
+    try {
+      remoteMem = VirtualAllocEx(
+        handle,
+        0n,
+        shellcode.length,
+        MEM.COMMIT | MEM.RESERVE,
+        PAGE.READWRITE,
+      );
+      if (remoteMem === 0n) {
+        throw new ToolError('RUNTIME', 'VirtualAllocEx failed for shellcode');
+      }
+
+      WriteProcessMemory(handle, remoteMem, shellcode);
+      const protection = VirtualProtectEx(handle, remoteMem, shellcode.length, PAGE.EXECUTE_READ);
+      if (!protection.success) {
+        throw new ToolError('RUNTIME', 'VirtualProtectEx failed for shellcode');
+      }
+      FlushInstructionCache(handle, remoteMem, shellcode.length);
+
+      let threadId = 0;
+      if (method === 'ntcreatethread') {
+        const result = ntCreateThreadExSafe(handle, remoteMem, 0n);
+        if (result.status < 0 || result.handle === 0n) {
+          throw new ToolError(
+            'RUNTIME',
+            `NtCreateThreadEx failed with status 0x${(result.status >>> 0).toString(16)}`,
+          );
+        }
+        threadHandle = result.handle;
+      } else {
+        const result = (await import('./Win32API')).CreateRemoteThread(handle, remoteMem, 0n);
+        if (result.handle === 0n) {
+          throw new ToolError('RUNTIME', 'CreateRemoteThread failed for shellcode');
+        }
+        threadHandle = result.handle;
+        threadId = result.threadId;
+      }
+
+      CloseHandle(threadHandle);
+      threadHandle = 0n;
+      return {
+        address: `0x${remoteMem.toString(16).toUpperCase()}`,
+        threadId,
+        method,
+      };
+    } catch (error) {
+      if (threadHandle === 0n && remoteMem !== 0n) {
+        VirtualFreeEx(handle, remoteMem, 0, MEM.RELEASE);
+      }
+      throw error;
+    } finally {
+      if (threadHandle !== 0n) CloseHandle(threadHandle);
+      CloseHandle(handle);
+    }
+  }
+
   /**
    * Inject a DLL into a target process.
    *
-   * - `mode: 'loadlibrary'` — classic LoadLibraryA injection via CreateRemoteThread.
+   * - `mode: 'loadlibrary'` — classic LoadLibraryW injection via CreateRemoteThread.
    * - `mode: 'manualmap'` — stealthy manual map injection (bypasses LdrLoadDll).
    *
    * Both modes require Windows and admin-elevated access to the target process.
@@ -281,6 +356,9 @@ export class CodeInjector {
       WriteProcessMemory: writeProcMem,
       VirtualAllocEx: virtualAllocEx,
       CreateRemoteThread: createRemoteThread,
+      WaitForSingleObject: waitForSingleObject,
+      GetExitCodeThread: getExitCodeThread,
+      VirtualFreeEx: virtualFreeEx,
       GetModuleHandle: getModuleHandle,
       GetProcAddress: getProcAddress,
       PAGE: page,
@@ -290,13 +368,13 @@ export class CodeInjector {
     const handle = openProcForMemory(pid, true);
     try {
       const kernel32Handle = getModuleHandle('kernel32.dll');
-      const loadLibraryAddr = getProcAddress(kernel32Handle, 'LoadLibraryA');
+      const loadLibraryAddr = getProcAddress(kernel32Handle, 'LoadLibraryW');
       if (!loadLibraryAddr) {
-        throw new ToolError('RUNTIME', 'Failed to resolve LoadLibraryA address in kernel32.dll');
+        throw new ToolError('RUNTIME', 'Failed to resolve LoadLibraryW address in kernel32.dll');
       }
 
-      const pathBuffer = Buffer.from(dllPath + '\0', 'ascii');
-      const remoteMem = virtualAllocEx(
+      const pathBuffer = Buffer.from(`${dllPath}\0`, 'utf16le');
+      let remoteMem = virtualAllocEx(
         handle,
         0n,
         pathBuffer.length,
@@ -312,23 +390,49 @@ export class CodeInjector {
 
       writeProcMem(handle, remoteMem, pathBuffer);
 
-      const { handle: threadHandle, threadId } = createRemoteThread(
-        handle,
-        loadLibraryAddr,
-        remoteMem,
-      );
-      if (!threadHandle) {
-        throw new ToolError('RUNTIME', 'CreateRemoteThread failed');
-      }
+      let threadHandle = 0n;
+      let remoteMemSafeToFree = true;
+      try {
+        const thread = createRemoteThread(handle, loadLibraryAddr, remoteMem);
+        threadHandle = thread.handle;
+        if (threadHandle === 0n) {
+          throw new ToolError('RUNTIME', 'CreateRemoteThread failed');
+        }
 
-      closeHandle(threadHandle);
-      return {
-        method: 'loadlibrary',
-        mode: 'loadlibrary',
-        dllPath,
-        threadId,
-        allocatedAddress: `0x${remoteMem.toString(16).toUpperCase()}`,
-      };
+        remoteMemSafeToFree = false;
+        const waitResult = waitForSingleObject(threadHandle, 10_000);
+        if (waitResult !== 0) {
+          const reason =
+            waitResult === 0x102 ? 'timed out' : `failed with code 0x${waitResult.toString(16)}`;
+          throw new ToolError('RUNTIME', `Waiting for LoadLibraryW remote thread ${reason}`);
+        }
+        remoteMemSafeToFree = true;
+
+        const exit = getExitCodeThread(threadHandle);
+        if (!exit.success) {
+          throw new ToolError('RUNTIME', 'GetExitCodeThread failed for LoadLibraryW remote thread');
+        }
+        if (exit.exitCode === 0) {
+          throw new ToolError(
+            'RUNTIME',
+            'LoadLibraryW returned NULL; verify the DLL path, dependencies, and architecture',
+          );
+        }
+
+        return {
+          method: 'loadlibrary',
+          mode: 'loadlibrary',
+          dllPath,
+          threadId: thread.threadId,
+          allocatedAddress: `0x${remoteMem.toString(16).toUpperCase()}`,
+        };
+      } finally {
+        if (threadHandle !== 0n) closeHandle(threadHandle);
+        if (remoteMemSafeToFree && remoteMem !== 0n) {
+          virtualFreeEx(handle, remoteMem, 0, mem.RELEASE);
+          remoteMem = 0n;
+        }
+      }
     } finally {
       closeHandle(handle);
     }

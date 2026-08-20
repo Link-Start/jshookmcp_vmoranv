@@ -525,6 +525,20 @@ export function CreateRemoteThread(
   };
 }
 
+/** Wait for a kernel object to become signalled. */
+export function WaitForSingleObject(hHandle: bigint, timeoutMs: number): number {
+  const fn = getKernel32().func('uint32 WaitForSingleObject(void *, uint32)');
+  return fn(hHandle, timeoutMs);
+}
+
+/** Read a completed thread's 32-bit exit code. */
+export function GetExitCodeThread(hThread: bigint): { success: boolean; exitCode: number } {
+  const fn = getKernel32().func('int GetExitCodeThread(void *, _Out_ uint32 *)');
+  const exitCodeBuf = Buffer.alloc(4);
+  const success = fn(hThread, exitCodeBuf) !== 0;
+  return { success, exitCode: exitCodeBuf.readUInt32LE(0) };
+}
+
 /**
  * Get module handle by name
  */

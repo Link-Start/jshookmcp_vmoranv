@@ -17,6 +17,7 @@ import { readFileSync } from 'node:fs';
 import { ToolError } from '@errors/ToolError';
 import {
   openProcessForMemory,
+  OpenProcess,
   CloseHandle,
   ReadProcessMemory,
   WriteProcessMemory,
@@ -25,6 +26,7 @@ import {
   EnumProcessModules,
   GetModuleBaseName,
   GetModuleInformation,
+  CreateRemoteThread,
   PAGE,
   MEM,
   PROCESS_ACCESS,
@@ -257,9 +259,8 @@ function checkAdmin(): void {
   // which fails on non-admin for protected processes. We skip the check if
   // Win32API cannot be loaded (e.g., in test environments with mocked koffi).
   try {
-    const { OpenProcess, CloseHandle: CH } = require('./Win32API');
     const h = OpenProcess(PROCESS_ACCESS.QUERY_LIMITED_INFORMATION, false, process.pid);
-    if (h !== 0n) CH(h);
+    if (h !== 0n) CloseHandle(h);
   } catch {
     // Soft check failed — the real gate is in openProcessForMemory.
   }
@@ -912,7 +913,6 @@ export class ManualMapInjector {
     }
 
     // Fallback: use CreateRemoteThread
-    const { CreateRemoteThread } = require('./Win32API');
     return CreateRemoteThread(hProcess, startAddr, param);
   }
 

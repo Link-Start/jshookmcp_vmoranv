@@ -554,7 +554,9 @@ export class MultiplexedStreamableHttpTransport implements Transport {
     const ttlMs = this.options.broadcastIdleTtlMs ?? DEFAULT_BROADCAST_IDLE_TTL_MS;
     if (!Number.isFinite(ttlMs)) return [...this.sessions.values()];
     const cutoff = this.getNow() - ttlMs;
-    return [...this.sessions.values()].filter((session) => session.lastTouchedAt > cutoff);
+    return [...this.sessions.values()].filter(
+      (session) => session.sseInFlight > 0 || session.lastTouchedAt > cutoff,
+    );
   }
 
   private getNow(): number {

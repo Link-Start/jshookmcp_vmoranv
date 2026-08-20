@@ -672,6 +672,40 @@ describe('MultiplexedStreamableHttpTransport', () => {
     expect(transport.getStats().sessions).toBe(2);
   });
 
+  it('keeps a long-lived open SSE session eligible for broadcasts', async () => {
+    let now = 0;
+    const transport = new MultiplexedStreamableHttpTransport({ now: () => now });
+    await transport.start();
+
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    const session = mocks.innerTransports[0]!;
+    let closeSse!: () => void;
+    const sseClosed = new Promise<void>((resolve) => {
+      closeSse = resolve;
+    });
+    session.handleRequest.mockImplementationOnce(async () => await sseClosed);
+
+    const openSse = transport.handleRequest(createReq('GET', session.sessionId), createRes(), {});
+    await vi.waitFor(() => expect(session.handleRequest).toHaveBeenCalledTimes(2));
+
+    now = 400_000;
+    await transport.send({
+      jsonrpc: '2.0',
+      method: 'notifications/message',
+    });
+
+    expect(session.send).toHaveBeenCalledWith(
+      {
+        jsonrpc: '2.0',
+        method: 'notifications/message',
+      },
+      undefined,
+    );
+
+    closeSse();
+    await openSse;
+  });
+
   it('broadcasts to idle sessions when broadcastIdleTtlMs is Infinity', async () => {
     let now = 0;
     const transport = new MultiplexedStreamableHttpTransport({

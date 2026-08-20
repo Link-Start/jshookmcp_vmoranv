@@ -24,12 +24,12 @@ describe('v8-inspector definitions', () => {
     expect(turbofanTool?.inputSchema.properties).not.toHaveProperty('functionId');
   });
 
-  it('documents the v8_allocation_track tracking pipeline in CLAUDE.md', () => {
-    const claudeMd = readFileSync(
-      new URL('../../../../src/server/domains/v8-inspector/CLAUDE.md', import.meta.url),
+  it('documents the v8_allocation_track tracking pipeline in tracked reference docs', () => {
+    const referenceDoc = readFileSync(
+      new URL('../../../../docs/en/reference/domains/v8-inspector.md', import.meta.url),
       'utf8',
     );
-    const line = claudeMd.split('\n').find((l) => l.includes('`v8_allocation_track`'));
+    const line = referenceDoc.split('\n').find((l) => l.includes('`v8_allocation_track`'));
     expect(line).toBeDefined();
     // allocation_track was rewritten to the stopTrackingHeapObjects + snapshot
     // pipeline (2026-08-09). The doc must describe that dual path (with the

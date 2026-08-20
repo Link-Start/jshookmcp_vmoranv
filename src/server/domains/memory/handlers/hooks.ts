@@ -630,24 +630,22 @@ export class HookHandlers {
 
       const start = Date.now();
       try {
-        // Allocate remote memory for shellcode
-        const addr = await this.injector.allocateRemote(pid, bytes.length);
-        // Write shellcode into allocated memory
-        await this.injector.patchBytes(pid, addr, bytes);
+        const result = await this.injector.injectShellcode(pid, Buffer.from(bytes), method);
         this.recordAudit({
           operation: 'inject_shellcode',
           pid,
-          address: addr,
+          address: result.address,
           size: bytes.length,
           result: 'success',
           durationMs: Date.now() - start,
         });
         return {
           success: true,
-          address: addr,
-          method,
+          address: result.address,
+          threadId: result.threadId,
+          method: result.method,
           size: bytes.length,
-          hint: `Shellcode (${bytes.length} bytes) injected at ${addr} via ${method}.`,
+          hint: `Shellcode (${bytes.length} bytes) injected and executed at ${result.address} via ${result.method} (thread ${result.threadId}).`,
         };
       } catch (e) {
         this.recordAudit({
@@ -695,7 +693,7 @@ export class HookHandlers {
           ...result,
           hint:
             mode === 'loadlibrary'
-              ? `DLL injected via LoadLibraryA in process ${pid} (thread ${result.threadId}). Verify with memory_pe_headers.`
+              ? `DLL injected via LoadLibraryW in process ${pid} (thread ${result.threadId}). Verify with memory_pe_headers.`
               : `DLL manually mapped at ${result.imageBase} in process ${pid} (${result.injectionMethod}). Verify with memory_pe_headers.`,
         };
       } catch (e) {

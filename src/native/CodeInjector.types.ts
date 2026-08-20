@@ -20,6 +20,12 @@ export interface CodeCave {
   section: string;
 }
 
+export interface ShellcodeInjectionResult {
+  address: string;
+  threadId: number;
+  method: 'createremote' | 'ntcreatethread';
+}
+
 export interface DllInjectionResult {
   /** Injection method used */
   method: 'loadlibrary' | 'manualmap';

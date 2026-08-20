@@ -61,10 +61,20 @@ describe('KernelCallbackDetector', () => {
     });
 
     it('verdict defaults to clean with zero findings', () => {
-      const report = detectKernelCallbacks();
-      expect(report.verdict).toBe('suspicious'); // test env may have active AV callbacks
-      expect(report.detectedDrivers.length).toBe(0);
-      expect(report.suspiciousHandles.length).toBe(0);
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+      try {
+        const report = detectKernelCallbacks();
+        expect(report.verdict).toBe('clean');
+        expect(report.detectedDrivers).toEqual([]);
+        expect(report.suspiciousHandles).toEqual([]);
+      } finally {
+        Object.defineProperty(process, 'platform', {
+          value: originalPlatform,
+          configurable: true,
+        });
+      }
     });
 
     it('caches results — second call returns same object', () => {
