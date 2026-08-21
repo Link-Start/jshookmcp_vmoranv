@@ -191,9 +191,12 @@ export function createChaosWalker(
       // Randomize chunk size within bounds on every read
       const lo = Math.min(fullConfig.minChunkBytes, fullConfig.maxChunkBytes);
       const hi = Math.max(fullConfig.minChunkBytes, fullConfig.maxChunkBytes);
-      // Occasionally use very small chunks (simulates focused inspection)
+      // Occasionally use very small chunks (simulates focused inspection),
+      // but never below the configured lower bound.
       if (prng.probability(0.05)) {
-        return prng.range(4096, Math.min(65536, hi));
+        const hiCap = Math.min(65536, hi);
+        const span = Math.max(0, hiCap - lo);
+        return lo + (span > 0 ? prng.range(0, span) : 0);
       }
       return prng.range(lo, hi);
     },

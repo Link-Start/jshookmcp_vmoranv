@@ -249,7 +249,9 @@ export const v8InspectorTools: Tool[] = [
     t
       .desc(
         'Track live V8 allocations via CDP HeapProfiler object tracking. ' +
-          'Starts allocation tracking for a capture window (default 3s), then returns ' +
+          'Enables the HeapProfiler, calls startTrackingHeapObjects({ trackAllocations: true }) ' +
+          'to collect lastSeenObjectId events for a capture window (default 3s), then ' +
+          'stopTrackingHeapObjects (with an explicit takeHeapSnapshot fallback) to return ' +
           'currently-live objects seen during the window with their allocation stack ' +
           '(top frame + size). Useful for finding objects that survive GC during a specific ' +
           'interaction. Requires browser/page CDP context and V8 natives for full stack resolution.',

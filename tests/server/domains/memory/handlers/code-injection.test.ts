@@ -171,8 +171,11 @@ describe('HookHandlers — code injection tools', () => {
 
   describe('handleInjectShellcode', () => {
     it('allocates and writes shellcode', async () => {
-      mockInjector.allocateRemote = vi.fn().mockResolvedValue('0x30000');
-      mockInjector.patchBytes = vi.fn().mockResolvedValue({ id: 'p1', isApplied: true });
+      mockInjector.injectShellcode = vi.fn().mockResolvedValue({
+        address: '0x30000',
+        threadId: 5678,
+        method: 'createremote',
+      });
       const response = await handlers.handleInjectShellcode({
         pid: 1234,
         shellcode: '48 31 C0 C3',
@@ -180,25 +183,34 @@ describe('HookHandlers — code injection tools', () => {
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);
       expect(parsed.address).toBe('0x30000');
+      expect(parsed.threadId).toBe(5678);
       expect(parsed.size).toBe(4);
-      expect(mockInjector.allocateRemote).toHaveBeenCalledWith(1234, 4);
-      expect(mockInjector.patchBytes).toHaveBeenCalledWith(
+      expect(mockInjector.injectShellcode).toHaveBeenCalledWith(
         1234,
-        '0x30000',
-        [0x48, 0x31, 0xc0, 0xc3],
+        expect.any(Buffer),
+        'createremote',
       );
     });
 
     it('supports hex prefix in shellcode bytes', async () => {
-      mockInjector.allocateRemote = vi.fn().mockResolvedValue('0x40000');
-      mockInjector.patchBytes = vi.fn().mockResolvedValue({ id: 'p2', isApplied: true });
+      mockInjector.injectShellcode = vi.fn().mockResolvedValue({
+        address: '0x40000',
+        threadId: 4321,
+        method: 'createremote',
+      });
       const response = await handlers.handleInjectShellcode({
         pid: 1234,
         shellcode: '0x90 0x90 0xC3',
       });
       const parsed = JSON.parse((response.content[0] as any).text);
       expect(parsed.success).toBe(true);
-      expect(mockInjector.patchBytes).toHaveBeenCalledWith(1234, '0x40000', [0x90, 0x90, 0xc3]);
+      expect(parsed.address).toBe('0x40000');
+      // Buffer.from([0x90, 0x90, 0xc3]) — injectShellcode receives the decoded bytes
+      expect(mockInjector.injectShellcode).toHaveBeenCalledWith(
+        1234,
+        Buffer.from([0x90, 0x90, 0xc3]),
+        'createremote',
+      );
     });
 
     it('rejects when shellcode is missing', async () => {
@@ -231,8 +243,11 @@ describe('HookHandlers — code injection tools', () => {
     });
 
     it('defaults to createremote method', async () => {
-      mockInjector.allocateRemote = vi.fn().mockResolvedValue('0x30000');
-      mockInjector.patchBytes = vi.fn().mockResolvedValue({ id: 'p3', isApplied: true });
+      mockInjector.injectShellcode = vi.fn().mockResolvedValue({
+        address: '0x30000',
+        threadId: 5678,
+        method: 'createremote',
+      });
       const response = await handlers.handleInjectShellcode({
         pid: 1234,
         shellcode: 'C3',

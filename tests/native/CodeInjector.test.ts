@@ -43,6 +43,8 @@ vi.mock('@native/Win32API', () => ({
   GetModuleHandle: vi.fn(() => 0x7ffe0000n),
   GetProcAddress: vi.fn(() => 0x7ffe1000n),
   CreateRemoteThread: vi.fn(() => ({ handle: 0x300n, threadId: 5678 })),
+  WaitForSingleObject: vi.fn(() => 0),
+  GetExitCodeThread: vi.fn(() => ({ success: true, exitCode: 1 })),
   PAGE: { EXECUTE_READWRITE: 0x40, EXECUTE_READ: 0x20, READWRITE: 0x04 },
   MEM: { COMMIT: 0x1000, RESERVE: 0x2000, RELEASE: 0x8000 },
 }));
@@ -278,14 +280,14 @@ describe('CodeInjector', () => {
       expect(result.injectionMethod).toBe('NtCreateThreadEx');
     });
 
-    it('should throw when LoadLibraryA address not found', async () => {
+    it('should throw when LoadLibraryW address not found', async () => {
       const { GetProcAddress } = await import('@native/Win32API');
       const mockedGPA = GetProcAddress as ReturnType<typeof vi.fn>;
       const previous = mockedGPA.getMockImplementation();
       mockedGPA.mockReturnValueOnce(0n);
 
       await expect(injector.injectDll(1234, 'C:\\test.dll', 'loadlibrary')).rejects.toThrow(
-        'LoadLibraryA',
+        'LoadLibraryW',
       );
 
       mockedGPA.mockImplementation(previous!);

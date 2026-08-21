@@ -1062,7 +1062,7 @@ export const memoryScanToolDefinitions: readonly Tool[] = [
       .desc(
         'Walk the call stack of a target process thread using the x64 RBP frame-pointer chain. ' +
           'Suspends the thread, reads the CONTEXT to get RBP/RSP/RIP, then follows the linked list ' +
-          'of [saved_RBP][return_address] frames via ReadProcessMemory. Resolves module names ' +
+          'of saved_RBP / return_address frames via ReadProcessMemory. Resolves module names ' +
           'using Toolhelp32 module snapshots. Returns an array of {frameIndex, returnAddress, ' +
           'moduleName, functionName}. Equivalent to x64dbg\'s "standard" call stack mode. ' +
           'Win32 (x64) only — requires Administrator privileges.',
