@@ -7,8 +7,15 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { CodeInjector } from '@native/CodeInjector';
-import { ReadProcessMemory, WriteProcessMemory, VirtualProtectEx } from '@native/Win32API';
+import {
+  ReadProcessMemory,
+  WriteProcessMemory,
+  VirtualProtectEx,
+  VirtualAllocEx,
+  CreateRemoteThread,
+} from '@native/Win32API';
 import { FlushInstructionCache } from '@native/Win32Debug';
+import { ntCreateThreadExSafe } from '@native/syscall/NtInjection';
 
 vi.mock('@native/Win32API', () => ({
   openProcessForMemory: vi.fn(() => 1n),
@@ -51,6 +58,10 @@ vi.mock('@native/Win32API', () => ({
 
 vi.mock('@native/Win32Debug', () => ({
   FlushInstructionCache: vi.fn(),
+}));
+
+vi.mock('@native/syscall/NtInjection', () => ({
+  ntCreateThreadExSafe: vi.fn(),
 }));
 
 vi.mock('@native/NativeMemoryManager.impl', () => ({
@@ -298,6 +309,54 @@ describe('CodeInjector', () => {
 
       expect(result.method).toBe('loadlibrary');
       expect(result.threadId).toBe(5678);
+    });
+  });
+
+  describe('injectShellcode', () => {
+    it('throws on empty shellcode', async () => {
+      await expect(injector.injectShellcode(1234, Buffer.alloc(0))).rejects.toThrow('non-empty');
+    });
+
+    it('throws when VirtualAllocEx returns 0', async () => {
+      vi.mocked(VirtualAllocEx).mockReturnValueOnce(0n);
+      await expect(injector.injectShellcode(1234, Buffer.from([0x90]))).rejects.toThrow(
+        'VirtualAllocEx',
+      );
+    });
+
+    it('throws when VirtualProtectEx fails', async () => {
+      vi.mocked(VirtualProtectEx).mockReturnValueOnce({ success: false, oldProtect: 0x20 });
+      await expect(injector.injectShellcode(1234, Buffer.from([0x90]))).rejects.toThrow(
+        'VirtualProtectEx',
+      );
+    });
+
+    it('executes via CreateRemoteThread (createremote)', async () => {
+      const result = await injector.injectShellcode(1234, Buffer.from([0x48, 0x31, 0xc0, 0xc3]));
+      expect(result.method).toBe('createremote');
+      expect(result.threadId).toBe(5678);
+      expect(result.address).toMatch(/^0x[0-9A-F]+$/);
+    });
+
+    it('executes via NtCreateThreadEx (ntcreatethread)', async () => {
+      vi.mocked(ntCreateThreadExSafe).mockReturnValueOnce({ status: 0, handle: 0x500n });
+      const result = await injector.injectShellcode(1234, Buffer.from([0xc3]), 'ntcreatethread');
+      expect(result.method).toBe('ntcreatethread');
+      expect(ntCreateThreadExSafe).toHaveBeenCalledWith(1n, expect.any(BigInt), 0n);
+    });
+
+    it('throws when CreateRemoteThread returns handle 0', async () => {
+      vi.mocked(CreateRemoteThread).mockReturnValueOnce({ handle: 0n, threadId: 0 });
+      await expect(injector.injectShellcode(1234, Buffer.from([0x90]))).rejects.toThrow(
+        'CreateRemoteThread',
+      );
+    });
+
+    it('throws when NtCreateThreadEx returns negative status', async () => {
+      vi.mocked(ntCreateThreadExSafe).mockReturnValueOnce({ status: -1, handle: 0n });
+      await expect(
+        injector.injectShellcode(1234, Buffer.from([0x90]), 'ntcreatethread'),
+      ).rejects.toThrow('NtCreateThreadEx');
     });
   });
 
