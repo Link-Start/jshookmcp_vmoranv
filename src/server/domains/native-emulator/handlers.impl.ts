@@ -54,7 +54,13 @@ import { formatOpcodeInput, parseOpcodeInput, parseProgramCounter } from './hand
 import { buildJavaFieldValue, buildJavaMockImpl } from './handler-java';
 import { decodeLiteVmWord, LITEVM_KNOWN_DATA } from './handler-litevm';
 import { ensureRawMemorySize, rawMemoryLimit, toUint8 } from './handler-memory';
-import { persistTraceArtifact, traceFilterMatch, traceRow, type TraceMode } from './handler-trace';
+import {
+  createTraceRowContext,
+  persistTraceArtifact,
+  traceFilterMatch,
+  traceRow,
+  type TraceMode,
+} from './handler-trace';
 import {
   getOrCreateGdbServer,
   removeGdbServer,
@@ -1200,6 +1206,10 @@ export class NativeEmulatorHandlers {
 
       const events: Array<Record<string, unknown>> = [];
       let truncated = false;
+      // Per-trace-call disassembly cache: a VMP dispatch loop that re-executes
+      // the same handful of PCs thousands of times pays disassembleArm64 once
+      // per unique PC, not once per instruction.
+      const traceCtx = createTraceRowContext();
       // For registerDiff: track previous register snapshot (keyed by register name)
       let prevRegs: Record<string, unknown> | undefined;
       const engine = session.emulator.engine;
@@ -1261,8 +1271,10 @@ export class NativeEmulatorHandlers {
           if ((insn & 0xfc000000) >>> 0 === 0x94000000) {
             // BL imm26 — sign-extended 26-bit word offset
             recordCall(ev.pc + (((insn & 0x03ffffff) << 6) >> 6) * 4);
-          } else if ((insn & 0xfffffc1f) >>> 0 === 0xd63f0000) {
-            // BLR Xn — target is the register value
+          } else if ((insn & 0xfffff1ff) >>> 0 === 0xd63f0000) {
+            // BLR family (BLR + PAC variants BLRAA/BLRAAZ/BLRAB/BLRABZ) — target
+            // is Rn (bits[9:5]). Mask 0xfffff1ff zeroes bits[11:10] (PAC op3
+            // discriminators) so all BLR variants are recorded as call edges.
             try {
               recordCall(Number(ev.x((insn >>> 5) & 0b11111)));
             } catch {
@@ -1278,7 +1290,7 @@ export class NativeEmulatorHandlers {
           engine.requestStop(); // hard-stop execution when trace budget exceeded
           return;
         }
-        const row = traceRow(ev, captureRegisters, mode, tableReg, captureBlArgs);
+        const row = traceRow(ev, captureRegisters, mode, tableReg, captureBlArgs, traceCtx);
         // registerDiff: only emit if at least one captured register changed
         if (registerDiff && captureRegisters && prevRegs) {
           const cur = row.registers as Record<string, unknown> | undefined;
