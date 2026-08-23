@@ -4,6 +4,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { escapeRegexStr } from '@utils/escapeForRegex';
+import { readEnvInteger } from '@src/config/environment';
 
 /** Hard cap on live state-board entries before least-recently-used eviction. */
 const MAX_ENTRIES = 10_000;
@@ -14,12 +15,7 @@ const CLEANUP_INTERVAL_MS = 60_000;
 
 /** Resolve the default entry TTL, overridable via env for ops/tests. */
 function resolveDefaultTtlMs(): number {
-  const raw = process.env.JSHOOK_STATE_BOARD_DEFAULT_TTL_MS;
-  if (typeof raw === 'string' && raw.trim() !== '') {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  return DEFAULT_ENTRY_TTL_MS;
+  return readEnvInteger('JSHOOK_STATE_BOARD_DEFAULT_TTL_MS', DEFAULT_ENTRY_TTL_MS, { min: 1 });
 }
 const defaultEntryTtlMs = resolveDefaultTtlMs();
 

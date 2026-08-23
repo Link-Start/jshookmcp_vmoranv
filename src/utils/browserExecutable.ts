@@ -1,4 +1,5 @@
 import { existsSync } from 'fs';
+import { readEnvNullableString } from '@src/config/environment';
 import { logger } from './logger';
 
 /**
@@ -15,7 +16,7 @@ let cachedBrowserPath: string | undefined | null = null;
 
 function resolveFromEnvironment(): string | undefined {
   for (const key of ENV_KEYS) {
-    const candidate = process.env[key]?.trim();
+    const candidate = readEnvNullableString(key, { trim: true });
     if (candidate && existsSync(candidate)) {
       return candidate;
     }

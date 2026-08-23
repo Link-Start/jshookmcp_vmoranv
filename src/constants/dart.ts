@@ -55,6 +55,11 @@ export const DART_MAX_RESULT_BYTES = int('DART_MAX_RESULT_BYTES', 16 * 1024 * 10
  */
 export const DART_MAX_SMI_VALUE = int('DART_MAX_SMI_VALUE', 1_000_000);
 
+/** Obfuscation map search recursion depth limit. */
+export const DART_OBFUSCATION_MAP_MAX_DIR_DEPTH = int('DART_OBFUSCATION_MAP_MAX_DIR_DEPTH', 5);
+/** Obfuscation map search maximum candidates limit. */
+export const DART_OBFUSCATION_MAP_MAX_CANDIDATES = int('DART_OBFUSCATION_MAP_MAX_CANDIDATES', 20);
+
 /**
  * dart_symbolize ceiling on the obfuscation-map JSON the loader will
  * accept. Real Flutter obfuscation maps are typically a few hundred KB;

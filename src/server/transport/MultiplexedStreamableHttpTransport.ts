@@ -18,6 +18,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { logger } from '@utils/logger';
 import { HTTP_CAPACITY_RETRY_AFTER_MS, MCP_HTTP_JSON_RESPONSE } from '@src/constants';
+import { readEnvInteger } from '@src/config/environment';
 
 // Notifications (e.g. logging messages) are broadcast to every HTTP session.
 // Skip sessions idle past this threshold to bound the O(log × sessions)
@@ -29,10 +30,7 @@ const DEFAULT_BROADCAST_IDLE_TTL_MS = 5 * 60 * 1000;
  * bounded — so a single session could pile up unbounded concurrent requests and
  * exhaust the process (a1-06). Overridable via MCP_HTTP_MAX_INFLIGHT.
  */
-const DEFAULT_MAX_INFLIGHT = (() => {
-  const envVal = parseInt(process.env.MCP_HTTP_MAX_INFLIGHT ?? '', 10);
-  return Number.isFinite(envVal) && envVal > 0 ? envVal : 64;
-})();
+const DEFAULT_MAX_INFLIGHT = 64;
 
 /**
  * Per-session cap on concurrent SSE GET streams (the server→client event
@@ -42,10 +40,7 @@ const DEFAULT_MAX_INFLIGHT = (() => {
  * separately at a small limit — this also prevents a hostile client from
  * holding open unbounded half-open streams. Overridable via MCP_HTTP_MAX_SSE_INFLIGHT.
  */
-const DEFAULT_MAX_SSE_INFLIGHT = (() => {
-  const envVal = parseInt(process.env.MCP_HTTP_MAX_SSE_INFLIGHT ?? '', 10);
-  return Number.isFinite(envVal) && envVal > 0 ? envVal : 8;
-})();
+const DEFAULT_MAX_SSE_INFLIGHT = 8;
 
 interface SessionRecord {
   sessionId: string;
@@ -95,10 +90,19 @@ export class MultiplexedStreamableHttpTransport implements Transport {
   private readonly sessions = new Map<string, SessionRecord>();
   private readonly requestRoutes = new Map<string, RequestRouteRecord>();
   private readonly sessionOriginalToInternal = new Map<string, Map<string, string>>();
+  private readonly maxInFlight: number;
+  private readonly maxSseInFlight: number;
   private pendingSessionAdmissions = 0;
   private requestSequence = 0;
 
-  constructor(private readonly options: MultiplexedStreamableHttpTransportOptions = {}) {}
+  constructor(private readonly options: MultiplexedStreamableHttpTransportOptions = {}) {
+    this.maxInFlight =
+      options.maxInFlight ??
+      readEnvInteger('MCP_HTTP_MAX_INFLIGHT', DEFAULT_MAX_INFLIGHT, { min: 1 });
+    this.maxSseInFlight =
+      options.maxSseInFlight ??
+      readEnvInteger('MCP_HTTP_MAX_SSE_INFLIGHT', DEFAULT_MAX_SSE_INFLIGHT, { min: 1 });
+  }
 
   async start(): Promise<void> {
     if (this.started) {
@@ -213,7 +217,7 @@ export class MultiplexedStreamableHttpTransport implements Transport {
       // small limit instead.
       const isGet = (req.method ?? '').toUpperCase() === 'GET';
       if (isGet) {
-        const maxSseInFlight = this.options.maxSseInFlight ?? DEFAULT_MAX_SSE_INFLIGHT;
+        const maxSseInFlight = this.maxSseInFlight;
         if (existing.sseInFlight >= maxSseInFlight) {
           const retryAfterMs = this.options.capacityRetryAfterMs ?? HTTP_CAPACITY_RETRY_AFTER_MS;
           res.writeHead(503, {
@@ -241,7 +245,7 @@ export class MultiplexedStreamableHttpTransport implements Transport {
         }
         existing.sseInFlight += 1;
       } else {
-        const maxInFlight = this.options.maxInFlight ?? DEFAULT_MAX_INFLIGHT;
+        const maxInFlight = this.maxInFlight;
         if (existing.inFlight >= maxInFlight) {
           const retryAfterMs = this.options.capacityRetryAfterMs ?? HTTP_CAPACITY_RETRY_AFTER_MS;
           res.writeHead(503, {

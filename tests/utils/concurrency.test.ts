@@ -38,6 +38,27 @@ describe('concurrency utilities', () => {
     expect(maxRunning).toBeLessThanOrEqual(2);
   });
 
+  it('prefers the canonical uppercase concurrency setting over the legacy name', async () => {
+    process.env.JSHOOK_IO_CONCURRENCY = '1';
+    process.env.jshook_IO_CONCURRENCY = '3';
+    const { ioLimit } = await loadConcurrencyModule();
+
+    let running = 0;
+    let maxRunning = 0;
+    await Promise.all(
+      Array.from({ length: 3 }, () =>
+        ioLimit(async () => {
+          running += 1;
+          maxRunning = Math.max(maxRunning, running);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          running -= 1;
+        }),
+      ),
+    );
+
+    expect(maxRunning).toBe(1);
+  });
+
   it('cpuLimit can be forced to run sequentially', async () => {
     process.env.jshook_CPU_CONCURRENCY = '1';
     const { cpuLimit } = await loadConcurrencyModule();

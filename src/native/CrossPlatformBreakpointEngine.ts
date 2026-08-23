@@ -13,6 +13,7 @@
  */
 
 import { ToolError } from '@errors/ToolError';
+import { readEnvString } from '@src/config/environment';
 import type {
   BreakpointAccess,
   BreakpointConfig,
@@ -49,11 +50,12 @@ export class CrossPlatformBreakpointEngine {
   private readonly platform: string;
 
   constructor() {
+    const configuredPlatform = readEnvString('JSHOOK_REGISTRY_PLATFORM', '', { trim: true });
     this.platform =
-      process.env.JSHOOK_REGISTRY_PLATFORM === 'win32' ||
-      process.env.JSHOOK_REGISTRY_PLATFORM === 'linux' ||
-      process.env.JSHOOK_REGISTRY_PLATFORM === 'darwin'
-        ? process.env.JSHOOK_REGISTRY_PLATFORM
+      configuredPlatform === 'win32' ||
+      configuredPlatform === 'linux' ||
+      configuredPlatform === 'darwin'
+        ? configuredPlatform
         : process.platform;
   }
 

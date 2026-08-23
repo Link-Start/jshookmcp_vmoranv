@@ -13,6 +13,7 @@ import { resolveMemoryDomainPid } from '@server/domains/memory/pid-resolver';
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 import { argEnum, argNumber, argString } from '@server/domains/shared/parse-args';
 import { logger } from '@utils/logger';
+import { readEnvString } from '@src/config/environment';
 import { MemoryAuditTrail } from '@modules/process/memory/AuditTrail';
 import {
   requirePositiveIntArg,
@@ -44,7 +45,7 @@ const TOOL_PROCESS_CONTROL = 'memory_process_control';
 const INJECTION_ENV_GATE = 'JSHOOK_INJECTION_ENABLE';
 
 function assertInjectionEnabled(): void {
-  if (process.env[INJECTION_ENV_GATE] !== '1') {
+  if (readEnvString(INJECTION_ENV_GATE, '') !== '1') {
     throw new Error(
       `Code injection tools require ${INJECTION_ENV_GATE}=1 environment variable. ` +
         `Set this to enable memory_allocate, memory_free, memory_inject_shellcode, and memory_inject_dll.`,
@@ -760,11 +761,12 @@ export class HookHandlers {
 
       const pid = await this.resolvePid(args.pid);
 
+      const configuredPlatform = readEnvString('JSHOOK_REGISTRY_PLATFORM', '', { trim: true });
       const platform: 'win32' | 'linux' | 'darwin' | 'unknown' =
-        process.env.JSHOOK_REGISTRY_PLATFORM === 'win32' ||
-        process.env.JSHOOK_REGISTRY_PLATFORM === 'linux' ||
-        process.env.JSHOOK_REGISTRY_PLATFORM === 'darwin'
-          ? process.env.JSHOOK_REGISTRY_PLATFORM
+        configuredPlatform === 'win32' ||
+        configuredPlatform === 'linux' ||
+        configuredPlatform === 'darwin'
+          ? configuredPlatform
           : (process.platform as 'win32' | 'linux' | 'darwin' | 'unknown');
 
       const { suspendProcess, resumeProcess } = await import('@modules/process/memory/scanner');

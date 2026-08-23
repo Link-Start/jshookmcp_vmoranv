@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { JSHOOK_INSTANCE_WARN_AT, JSHOOK_MAX_INSTANCES } from '@src/constants';
 import { getStateDir } from '@server/persistence/RuntimeSnapshotScheduler';
 import { logger } from '@utils/logger';
+import { readEnvString } from '@src/config/environment';
 
 export interface InstanceRecord {
   pid: number;
@@ -102,8 +103,8 @@ export async function registerServerInstance(options?: {
     pid: process.pid,
     ppid: process.ppid,
     startedAt: new Date().toISOString(),
-    transport: options?.transport ?? process.env.MCP_TRANSPORT ?? 'stdio',
-    profile: options?.profile ?? process.env.MCP_TOOL_PROFILE ?? 'search',
+    transport: options?.transport ?? readEnvString('MCP_TRANSPORT', 'stdio', { trim: true }),
+    profile: options?.profile ?? readEnvString('MCP_TOOL_PROFILE', 'search', { trim: true }),
     argv0: process.argv[1] ?? process.argv0 ?? 'jshook',
   };
   const peers = await listLiveInstances(self.pid);

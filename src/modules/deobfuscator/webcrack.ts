@@ -14,6 +14,7 @@ import {
   type WebcrackPool,
   type WebcrackWorkerBundle,
 } from './webcrack-worker';
+import { DEOBF_WEBCRACK_MAX_BUNDLE_MODULES } from '@src/constants/transform';
 
 type WebcrackModuleLike = {
   id: string;
@@ -79,7 +80,7 @@ const DEFAULT_OPTIONS: Required<
   unpack: true,
 };
 
-const MAX_BUNDLE_MODULES = 100;
+const MAX_BUNDLE_MODULES = DEOBF_WEBCRACK_MAX_BUNDLE_MODULES;
 
 type MappingMetadata = {
   fromPath: string;

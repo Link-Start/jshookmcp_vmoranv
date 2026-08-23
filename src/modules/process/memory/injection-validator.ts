@@ -12,6 +12,7 @@ import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { UnifiedProcessManager } from '@modules/process/UnifiedProcessManager';
 import { logger } from '@utils/logger';
+import { readEnvString } from '@src/config/environment';
 
 export enum InjectionValidationMode {
   STRICT = 'strict', // All checks enforced, confirmation required for unsigned processes
@@ -447,7 +448,9 @@ export class InjectionValidator {
  * Create validator instance from environment configuration
  */
 export function createValidatorFromEnv(): InjectionValidator {
-  const modeStr = (process.env.JSHOOK_INJECTION_VALIDATION_MODE ?? 'balanced').toLowerCase();
+  const modeStr = readEnvString('JSHOOK_INJECTION_VALIDATION_MODE', 'balanced', {
+    trim: true,
+  }).toLowerCase();
   const mode = Object.values(InjectionValidationMode).includes(modeStr as InjectionValidationMode)
     ? (modeStr as InjectionValidationMode)
     : InjectionValidationMode.BALANCED;

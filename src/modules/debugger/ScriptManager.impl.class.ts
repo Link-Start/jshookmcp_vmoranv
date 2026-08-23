@@ -7,19 +7,27 @@ import {
   extractFunctionTreeCore,
   type ExtractFunctionTreeResult,
 } from '@modules/debugger/ScriptManager.impl.extract-function-tree';
+import {
+  SCRIPT_SEARCH_RESULT_LIMIT,
+  SCRIPT_CONTEXT_TRUNCATE_LINES_LARGE,
+  SCRIPT_CONTEXT_SNIPPET_HALF_LINES_LARGE,
+  SCRIPT_CONTEXT_TRUNCATE_LINES_SMALL,
+  SCRIPT_CONTEXT_SNIPPET_HALF_LINES_SMALL,
+  SCRIPT_CONTEXT_HALF_LINES_SMALL,
+} from '@src/constants';
 
 /** Cap on the number of scripts scanned by searchInScripts. */
-const SEARCH_RESULT_LIMIT = 500;
+const SEARCH_RESULT_LIMIT = SCRIPT_SEARCH_RESULT_LIMIT;
 /** Context truncation trigger for the searchInScripts path (chars). */
-const CONTEXT_TRUNCATE_LINES_LARGE = 2000;
+const CONTEXT_TRUNCATE_LINES_LARGE = SCRIPT_CONTEXT_TRUNCATE_LINES_LARGE;
 /** Match-window half-width used when truncating the searchInScripts path. */
-const CONTEXT_SNIPPET_HALF_LINES_LARGE = 100;
+const CONTEXT_SNIPPET_HALF_LINES_LARGE = SCRIPT_CONTEXT_SNIPPET_HALF_LINES_LARGE;
 /** Context truncation trigger for the keyword-index path (chars). */
-const CONTEXT_TRUNCATE_LINES_SMALL = 1000;
+const CONTEXT_TRUNCATE_LINES_SMALL = SCRIPT_CONTEXT_TRUNCATE_LINES_SMALL;
 /** Match-window half-width used when truncating the keyword-index path. */
-const CONTEXT_SNIPPET_HALF_LINES_SMALL = 50;
+const CONTEXT_SNIPPET_HALF_LINES_SMALL = SCRIPT_CONTEXT_SNIPPET_HALF_LINES_SMALL;
 /** Match-window half-width for the keyword-index path (lines). */
-const CONTEXT_HALF_LINES_SMALL = 3;
+const CONTEXT_HALF_LINES_SMALL = SCRIPT_CONTEXT_HALF_LINES_SMALL;
 
 /**
  * Build the match-window context for a keyword hit. Joins `halfWidth` lines

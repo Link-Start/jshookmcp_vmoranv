@@ -139,6 +139,18 @@ describe('ArtifactRetention – additional coverage', () => {
       expect(config.maxTotalBytes).toBe(0);
     });
 
+    it('falls back instead of partially parsing malformed numeric values', () => {
+      const config = getArtifactRetentionConfig({
+        MCP_ARTIFACT_RETENTION_DAYS: '14days',
+        MCP_ARTIFACT_MAX_TOTAL_MB: '1.5',
+        MCP_ARTIFACT_CLEANUP_INTERVAL_MINUTES: '30minutes',
+      } as unknown as NodeJS.ProcessEnv);
+
+      expect(config.retentionDays).toBe(7);
+      expect(config.maxTotalBytes).toBe(0);
+      expect(config.cleanupIntervalMinutes).toBe(360);
+    });
+
     it('applies safe defaults when no env vars are set (a4-06)', () => {
       // 2026-08-18: retention used to default to disabled (env ?? '0'), letting
       // artifacts accumulate until the disk filled (a4-06). The new defaults

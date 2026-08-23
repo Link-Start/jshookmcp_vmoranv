@@ -15,6 +15,7 @@
 
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 import { argBool } from '@server/domains/shared/parse-args';
+import { readEnvBoolean } from '@src/config/environment';
 
 // Known anti-cheat / EDR process name patterns.
 const KNOWN_AC_PROCESSES: ReadonlyArray<{
@@ -293,7 +294,7 @@ export class AntiDetectionCheckHandlers {
     const gateVars = ['JSHOOK_INJECTION_ENABLE', 'JSHOOK_BYOVD_ENABLE', 'JSHOOK_SELFDEFENSE'];
 
     for (const v of gateVars) {
-      if (process.env[v] === '1' || process.env[v] === 'true') {
+      if (readEnvBoolean(v, false)) {
         if (v === 'JSHOOK_SELFDEFENSE') {
           score -= penaltyPerWarn;
           recommendations.push(

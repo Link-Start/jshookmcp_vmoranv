@@ -20,6 +20,7 @@ import type { AndroidRuntimeDumpSessionManager } from '@modules/binary-instrumen
 import type { MCPServerContext } from '@server/MCPServer.context';
 import type { CapabilityStatus } from '@server/domains/shared/capabilities';
 import { capabilityFailure } from '@server/domains/shared/capabilities';
+import { readEnvString } from '@src/config/environment';
 
 const UNIDBG_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
 
@@ -223,7 +224,7 @@ export async function getUnidbgAvailability(): Promise<{
   command: string;
   jarPath: string;
 }> {
-  const jarPath = process.env['UNIDBG_JAR'] ?? '';
+  const jarPath = readEnvString('UNIDBG_JAR', '', { trim: true });
   if (jarPath.length === 0) {
     return {
       available: false,

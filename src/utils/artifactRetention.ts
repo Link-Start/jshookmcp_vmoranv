@@ -4,6 +4,7 @@ import { getArtifactDir, getArtifactsRoot, type ArtifactCategory } from '@utils/
 import { getConfig } from '@utils/config';
 import { getDebuggerSessionsDir, getProjectRoot } from '@utils/outputPaths';
 import { logger } from '@utils/logger';
+import { readEnvBoolean, readEnvInteger } from '@src/config/environment';
 
 export interface ArtifactRetentionConfig {
   enabled: boolean;
@@ -43,8 +44,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // failed. The scheduler now runs by default — a 7-day age window swept every
 // 6 hours — with an unref'd timer so it never blocks process exit. Setting an
 // env var explicitly to '0' still disables the corresponding knob.
-const DEFAULT_RETENTION_DAYS = '7';
-const DEFAULT_CLEANUP_INTERVAL_MINUTES = '360';
+const DEFAULT_RETENTION_DAYS = 7;
+const DEFAULT_CLEANUP_INTERVAL_MINUTES = 360;
 const MANAGED_ARTIFACT_CATEGORIES: readonly ArtifactCategory[] = Object.freeze([
   'wasm',
   'traces',
@@ -59,22 +60,19 @@ const MANAGED_ARTIFACT_CATEGORIES: readonly ArtifactCategory[] = Object.freeze([
   'heap-snapshots',
 ]);
 
-export function getArtifactRetentionConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): ArtifactRetentionConfig {
+export function getArtifactRetentionConfig(env?: NodeJS.ProcessEnv): ArtifactRetentionConfig {
   const retentionDays = Math.max(
     0,
-    parseInt(env.MCP_ARTIFACT_RETENTION_DAYS ?? DEFAULT_RETENTION_DAYS, 10) || 0,
+    readEnvInteger('MCP_ARTIFACT_RETENTION_DAYS', DEFAULT_RETENTION_DAYS, { env }),
   );
-  const maxTotalMb = Math.max(0, parseInt(env.MCP_ARTIFACT_MAX_TOTAL_MB ?? '0', 10) || 0);
+  const maxTotalMb = Math.max(0, readEnvInteger('MCP_ARTIFACT_MAX_TOTAL_MB', 0, { env }));
   const cleanupIntervalMinutes = Math.max(
     0,
-    parseInt(env.MCP_ARTIFACT_CLEANUP_INTERVAL_MINUTES ?? DEFAULT_CLEANUP_INTERVAL_MINUTES, 10) ||
-      0,
+    readEnvInteger('MCP_ARTIFACT_CLEANUP_INTERVAL_MINUTES', DEFAULT_CLEANUP_INTERVAL_MINUTES, {
+      env,
+    }),
   );
-  const cleanupOnStart = ['1', 'true'].includes(
-    (env.MCP_ARTIFACT_CLEANUP_ON_START ?? '').toLowerCase(),
-  );
+  const cleanupOnStart = readEnvBoolean('MCP_ARTIFACT_CLEANUP_ON_START', false, { env });
   return {
     enabled: retentionDays > 0 || maxTotalMb > 0,
     retentionDays,

@@ -11,6 +11,8 @@ import { getArtifactRetentionConfig } from '@utils/artifactRetention';
 import { probeBetterSqlite3 } from '@utils/betterSqlite3';
 import { ioLimit } from '@utils/concurrency';
 import { logger } from '@utils/logger';
+import { readEnvNullableString, readEnvString } from '@src/config/environment';
+import { getConfig } from '@utils/config';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -100,6 +102,11 @@ export async function runEnvironmentDoctor(options?: {
   includeBridgeHealth?: boolean;
 }): Promise<EnvironmentDoctorReport> {
   const includeBridgeHealth = options?.includeBridgeHealth ?? true;
+  const runtimeConfig = getConfig();
+  const signatureRequiredOverride = readEnvNullableString('MCP_PLUGIN_SIGNATURE_REQUIRED', {
+    trim: true,
+  });
+  const strictLoadOverride = readEnvNullableString('MCP_PLUGIN_STRICT_LOAD', { trim: true });
   const registry = getSharedRegistry();
   const externalResultsPromise = safeExternalProbe(registry);
   const gitCommandPromise = toSafeCheck(
@@ -140,7 +147,7 @@ export async function runEnvironmentDoctor(options?: {
           ioLimit(() =>
             checkHttpEndpoint(
               'burp-mcp-sse',
-              process.env.BURP_MCP_SSE_URL?.trim() || 'http://127.0.0.1:9876',
+              readEnvString('BURP_MCP_SSE_URL', 'http://127.0.0.1:9876', { trim: true }),
             ),
           ),
         ),
@@ -199,16 +206,17 @@ export async function runEnvironmentDoctor(options?: {
     commands,
     bridges,
     config: {
-      transport: (process.env.MCP_TRANSPORT ?? 'stdio').toLowerCase(),
-      toolProfile: (process.env.MCP_TOOL_PROFILE ?? 'search').toLowerCase(),
-      pluginRoots: process.env.MCP_PLUGIN_ROOTS ?? '<jshook-install>/plugins',
-      workflowRoots: process.env.MCP_WORKFLOW_ROOTS ?? '<jshook-install>/workflows',
+      transport: runtimeConfig.server.transport,
+      toolProfile: runtimeConfig.mcp.toolProfile,
+      pluginRoots: runtimeConfig.extensions.pluginRoots.join(',') || '<jshook-install>/plugins',
+      workflowRoots:
+        runtimeConfig.extensions.workflowRoots.join(',') || '<jshook-install>/workflows',
       pluginSignatureRequired:
-        process.env.MCP_PLUGIN_SIGNATURE_REQUIRED ??
-        (process.env.NODE_ENV === 'production' ? 'true (production default)' : 'false'),
+        signatureRequiredOverride ??
+        (runtimeConfig.extensions.signatureRequired ? 'true (production default)' : 'false'),
       pluginStrictLoad:
-        process.env.MCP_PLUGIN_STRICT_LOAD ??
-        (process.env.NODE_ENV === 'production' ? 'true (production default)' : 'false'),
+        strictLoadOverride ??
+        (runtimeConfig.extensions.strictLoad ? 'true (production default)' : 'false'),
       artifactRetention: getArtifactRetentionConfig(),
     },
     limitations,

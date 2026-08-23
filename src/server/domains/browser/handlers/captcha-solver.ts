@@ -9,6 +9,7 @@ import { argString, argNumber, argBool } from '@server/domains/shared/parse-args
 import { logger } from '@utils/logger';
 import { fetchWithTimeout } from '@utils/network/fetch';
 import { R, type ToolResponse } from '@server/domains/shared/ResponseBuilder';
+import { readEnvNullableString, readEnvString } from '@src/config/environment';
 import {
   CAPTCHA_SOLVER_BASE_URL,
   CAPTCHA_SUBMIT_TIMEOUT_MS,
@@ -116,23 +117,23 @@ function resolveLegacyServiceOverride(rawProvider: unknown): string | undefined 
 
 function resolveExternalServiceName(args: Record<string, unknown>): string {
   const legacyOverride = resolveLegacyServiceOverride(args.provider);
-  const configured = (process.env.CAPTCHA_PROVIDER || '').trim().toLowerCase();
+  const configured = readEnvString('CAPTCHA_PROVIDER', '', { trim: true }).toLowerCase();
   return legacyOverride || configured || '2captcha';
 }
 
 function getSolverBaseUrl(service: string): string {
   if (service === '2captcha') {
     return (
-      process.env.CAPTCHA_SOLVER_BASE_URL?.trim() ||
-      process.env.CAPTCHA_2CAPTCHA_BASE_URL?.trim() ||
+      readEnvNullableString('CAPTCHA_SOLVER_BASE_URL', { trim: true }) ||
+      readEnvNullableString('CAPTCHA_2CAPTCHA_BASE_URL', { trim: true }) ||
       CAPTCHA_SOLVER_BASE_URL
     );
   }
   if (service === 'anticaptcha') {
-    return process.env.CAPTCHA_ANTICAPTCHA_BASE_URL?.trim() || '';
+    return readEnvNullableString('CAPTCHA_ANTICAPTCHA_BASE_URL', { trim: true }) || '';
   }
   if (service === 'capsolver') {
-    return process.env.CAPTCHA_CAPSOLVER_BASE_URL?.trim() || '';
+    return readEnvNullableString('CAPTCHA_CAPSOLVER_BASE_URL', { trim: true }) || '';
   }
   return '';
 }
@@ -454,9 +455,12 @@ export async function handleCaptchaVisionSolve(
   const page = await collector.getActivePage();
   if (!page) return R.fail('No active page.').build();
 
-  const mode = normalizeSolverMode(args.mode ?? args.provider ?? process.env.CAPTCHA_PROVIDER);
+  const mode = normalizeSolverMode(
+    args.mode ?? args.provider ?? readEnvNullableString('CAPTCHA_PROVIDER', { trim: true }),
+  );
   const externalService = resolveExternalServiceName(args);
-  const apiKey = argString(args, 'apiKey', '') || process.env.CAPTCHA_API_KEY || '';
+  const apiKey =
+    argString(args, 'apiKey', '') || readEnvString('CAPTCHA_API_KEY', '', { trim: true });
   const challengeTypeHint = normalizeChallengeTypeHint(args.challengeType ?? args.typeHint);
   const taskKind = resolveTaskKind(args.taskKind, challengeTypeHint);
   const timeoutMs = Math.min(
@@ -564,9 +568,12 @@ export async function handleWidgetChallengeSolve(
   const page = await collector.getActivePage();
   if (!page) return R.fail('No active page.').build();
 
-  const mode = normalizeSolverMode(args.mode ?? args.provider ?? process.env.CAPTCHA_PROVIDER);
+  const mode = normalizeSolverMode(
+    args.mode ?? args.provider ?? readEnvNullableString('CAPTCHA_PROVIDER', { trim: true }),
+  );
   const externalService = resolveExternalServiceName(args);
-  const apiKey = argString(args, 'apiKey', '') || process.env.CAPTCHA_API_KEY || '';
+  const apiKey =
+    argString(args, 'apiKey', '') || readEnvString('CAPTCHA_API_KEY', '', { trim: true });
   const timeoutMs = Math.min(
     Math.max(argNumber(args, 'timeoutMs', CAPTCHA_DEFAULT_TIMEOUT_MS), CAPTCHA_MIN_TIMEOUT_MS),
     CAPTCHA_MAX_TIMEOUT_MS,

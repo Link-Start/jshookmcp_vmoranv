@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { MOJO_MONITOR_TIMEOUT_MS, MOJO_FRIDA_PROBE_TIMEOUT_MS } from '@src/constants';
+import { readEnvBoolean, readEnvInteger } from '@src/config/environment';
 
 /**
  * Hard cap on buffered Mojo messages. The monitor is a domain-level singleton
@@ -8,10 +9,7 @@ import { MOJO_MONITOR_TIMEOUT_MS, MOJO_FRIDA_PROBE_TIMEOUT_MS } from '@src/const
  * and counted in `droppedMessages` (surfaced via `getMessages().dropped` and
  * `getDroppedMessageCount()`) (b6-01).
  */
-export const MOJO_MAX_MESSAGES = (() => {
-  const envVal = parseInt(process.env.JSHOOK_MOJO_MAX_MESSAGES ?? '', 10);
-  return Number.isFinite(envVal) && envVal > 0 ? envVal : 10_000;
-})();
+export const MOJO_MAX_MESSAGES = readEnvInteger('JSHOOK_MOJO_MAX_MESSAGES', 10_000, { min: 1 });
 
 /**
  * Best-effort message direction inferred from the header flags byte
@@ -161,12 +159,12 @@ async function probeFridaCli(): Promise<string | null> {
 }
 
 async function detectAvailability(): Promise<MojoMonitorAvailability> {
-  const flag = process.env['JSHOOK_ENABLE_MOJO_IPC'];
+  const enabled = readEnvBoolean('JSHOOK_ENABLE_MOJO_IPC', true);
   const fridaNpm = detectFridaNpmPackage();
   const fridaCli = await probeFridaCli();
   const fridaAvailable = fridaNpm || fridaCli !== null;
 
-  if (flag === '0' || flag === 'false') {
+  if (!enabled) {
     return {
       available: false,
       fridaAvailable,

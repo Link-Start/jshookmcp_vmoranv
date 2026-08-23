@@ -17,6 +17,7 @@ import { resolveMemoryDomainPid } from '@server/domains/memory/pid-resolver';
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 import { argString } from '@server/domains/shared/parse-args';
 import { logger } from '@utils/logger';
+import { readEnvString } from '@src/config/environment';
 
 const TOOL_AA = 'memory_auto_assemble';
 const TOOL_AA_DISABLE = 'memory_auto_assemble_disable';
@@ -24,7 +25,7 @@ const TOOL_AA_DISABLE = 'memory_auto_assemble_disable';
 const INJECTION_ENV_GATE = 'JSHOOK_INJECTION_ENABLE';
 
 function assertInjectionEnabled(): void {
-  if (process.env[INJECTION_ENV_GATE] !== '1') {
+  if (readEnvString(INJECTION_ENV_GATE, '') !== '1') {
     throw new Error(
       `Auto Assembler tools require ${INJECTION_ENV_GATE}=1 environment variable. ` +
         `Set this to enable memory_auto_assemble and memory_auto_assemble_disable.`,

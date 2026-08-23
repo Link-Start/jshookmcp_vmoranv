@@ -19,6 +19,7 @@ import {
   INSTALLED_EXTENSION_METADATA_FILENAME,
   type InstalledExtensionMetadata,
 } from '@server/extensions/types';
+import { readEnvNullableString, readEnvString } from '@src/config/environment';
 
 export const execFileAsync = promisify(execFile);
 
@@ -26,7 +27,7 @@ export function getJshookInstallRoot(): string {
   return fileURLToPath(new URL('../../../../', import.meta.url));
 }
 
-function parseFirstRoot(raw: string | undefined): string | undefined {
+function parseFirstRoot(raw: string | null | undefined): string | undefined {
   const value = raw?.trim();
   if (!value) return undefined;
   return value
@@ -37,7 +38,7 @@ function parseFirstRoot(raw: string | undefined): string | undefined {
 
 export function resolveDefaultExtensionRoot(kind: 'plugin' | 'workflow'): string {
   const envKey = kind === 'workflow' ? 'MCP_WORKFLOW_ROOTS' : 'MCP_PLUGIN_ROOTS';
-  const configured = parseFirstRoot(process.env[envKey]);
+  const configured = parseFirstRoot(readEnvNullableString(envKey));
   if (configured) {
     return resolve(configured);
   }
@@ -47,7 +48,10 @@ export function resolveDefaultExtensionRoot(kind: 'plugin' | 'workflow'): string
 }
 
 export function getRegistryBaseUrl(): string {
-  const baseUrl = (process.env.EXTENSION_REGISTRY_BASE_URL ?? '').trim().replace(/\/+$/, '');
+  const baseUrl = readEnvString('EXTENSION_REGISTRY_BASE_URL', '', { trim: true }).replace(
+    /\/+$/,
+    '',
+  );
   if (!baseUrl) {
     throw new Error(
       'EXTENSION_REGISTRY_BASE_URL is not configured. Set it in .env or environment before browsing or installing' +

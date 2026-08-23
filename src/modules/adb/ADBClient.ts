@@ -3,6 +3,7 @@ import type { ExecFileOptionsWithStringEncoding } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { ToolError } from '@errors/ToolError';
+import { readEnvString } from '@src/config/environment';
 import {
   ADB_DEFAULT_TIMEOUT_MS,
   ADB_FILE_TRANSFER_TIMEOUT_MS,
@@ -155,7 +156,7 @@ export class ADBClient {
 
   private async runAdb(args: string[], timeout = DEFAULT_TIMEOUT_MS): Promise<string> {
     try {
-      const adbPath = process.env['ADB_PATH'] ?? 'adb';
+      const adbPath = readEnvString('ADB_PATH', 'adb', { trim: true });
       const { stdout } = await execFileAsync(adbPath, args, {
         ...EXEC_OPTIONS,
         timeout,

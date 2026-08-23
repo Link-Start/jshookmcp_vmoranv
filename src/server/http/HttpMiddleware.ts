@@ -10,16 +10,39 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { timingSafeEqual as cryptoTimingSafeEqual } from 'node:crypto';
 import { HTTP_CLEANUP_INTERVAL_MS, HTTP_RATE_LIMIT_MAX_IPS } from '@src/constants';
+import {
+  readEnvBoolean,
+  readEnvInteger,
+  readEnvNullableString,
+  readEnvString,
+} from '@src/config/environment';
 
 // ── Allowed origins for localhost CSRF protection ──
 const LOCALHOST_ORIGINS = new Set(['http://127.0.0.1', 'http://localhost', 'http://[::1]']);
+
+export interface HttpAuthRuntimeConfig {
+  authToken?: string;
+  host?: string;
+  allowInsecure?: boolean;
+}
+
+export interface HttpRateLimitRuntimeConfig {
+  enabled?: boolean;
+  trustProxy?: boolean;
+  windowMs?: number;
+  maxRequests?: number;
+}
 
 /**
  * Reject cross-origin requests to localhost when no auth token is set.
  * Browsers always send Origin on POST/PUT/DELETE; its absence means
  * non-browser client (curl, SDK) which is fine.
  */
-export function checkOrigin(req: IncomingMessage, res: ServerResponse): boolean {
+export function checkOrigin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config?: Pick<HttpAuthRuntimeConfig, 'authToken'>,
+): boolean {
   const origin = req.headers.origin;
   if (!origin) return true; // non-browser clients
 
@@ -37,7 +60,9 @@ export function checkOrigin(req: IncomingMessage, res: ServerResponse): boolean 
   if (LOCALHOST_ORIGINS.has(originBase)) return true;
 
   // If MCP_AUTH_TOKEN is set, any origin with valid auth is OK (checked by checkAuth)
-  if (process.env.MCP_AUTH_TOKEN) return true;
+  const authToken =
+    config === undefined ? readEnvNullableString('MCP_AUTH_TOKEN') : (config.authToken ?? null);
+  if (authToken) return true;
 
   res.writeHead(403, { 'Content-Type': 'text/plain' });
   res.end('Forbidden – cross-origin requests require MCP_AUTH_TOKEN');
@@ -50,16 +75,22 @@ export function checkOrigin(req: IncomingMessage, res: ServerResponse): boolean 
  * If `MCP_AUTH_TOKEN` is set, validates `Authorization: Bearer <token>`.
  * Returns `true` when the request is allowed to proceed.
  */
-export function checkAuth(req: IncomingMessage, res: ServerResponse): boolean {
-  const expected = process.env.MCP_AUTH_TOKEN;
+export function checkAuth(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config?: HttpAuthRuntimeConfig,
+): boolean {
+  const expected =
+    config === undefined ? readEnvNullableString('MCP_AUTH_TOKEN') : (config.authToken ?? null);
   if (!expected) {
     // When binding to non-localhost without a token, reject unless explicitly allowed
-    const host = process.env.MCP_HOST ?? '127.0.0.1';
+    const host = config?.host ?? readEnvString('MCP_HOST', '127.0.0.1', { trim: true });
     // '0.0.0.0' and '::' bind to ALL interfaces (including external), so they
     // are NOT safe to treat as local — require auth or explicit insecure flag.
     const SAFE_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
     const isLocal = SAFE_LOCAL_HOSTS.has(host);
-    if (!isLocal && !['1', 'true'].includes((process.env.MCP_ALLOW_INSECURE ?? '').toLowerCase())) {
+    const allowInsecure = config?.allowInsecure ?? readEnvBoolean('MCP_ALLOW_INSECURE', false);
+    if (!isLocal && !allowInsecure) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end(
         'Forbidden – MCP_AUTH_TOKEN is required when binding to non-localhost. Set MCP_ALLOW_INSECURE=1 to override.',
@@ -91,10 +122,7 @@ export function checkAuth(req: IncomingMessage, res: ServerResponse): boolean {
 
 // ── Body size limit middleware ──
 
-const DEFAULT_MAX_BODY_BYTES = (() => {
-  const envVal = parseInt(process.env.MCP_MAX_BODY_BYTES ?? '', 10);
-  return Number.isFinite(envVal) && envVal > 0 ? envVal : 10 * 1024 * 1024;
-})();
+const DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 /**
  * Reads the request body with a byte-size cap.
@@ -103,7 +131,7 @@ const DEFAULT_MAX_BODY_BYTES = (() => {
 export function readBodyWithLimit(
   req: IncomingMessage,
   res: ServerResponse,
-  maxBytes: number = DEFAULT_MAX_BODY_BYTES,
+  maxBytes: number = readEnvInteger('MCP_MAX_BODY_BYTES', DEFAULT_MAX_BODY_BYTES, { min: 1 }),
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -153,15 +181,9 @@ export function readBodyWithLimit(
 
 // ── Sliding-window rate limiter per IP ──
 
-const RATE_LIMIT_WINDOW_MS = (() => {
-  const envVal = parseInt(process.env.MCP_RATE_LIMIT_WINDOW_MS ?? '', 10);
-  return Number.isFinite(envVal) && envVal > 0 ? envVal : 60_000;
-})();
+const RATE_LIMIT_WINDOW_MS = readEnvInteger('MCP_RATE_LIMIT_WINDOW_MS', 60_000, { min: 1 });
 
-const RATE_LIMIT_MAX_REQUESTS = (() => {
-  const envVal = parseInt(process.env.MCP_RATE_LIMIT_MAX ?? '', 10);
-  return Number.isFinite(envVal) && envVal > 0 ? envVal : 60;
-})();
+const RATE_LIMIT_MAX_REQUESTS = readEnvInteger('MCP_RATE_LIMIT_MAX', 60, { min: 1 });
 
 interface RateLimitEntry {
   /** Ring buffer of bucket slot ids (parallel to `counts`). Slot 0 = empty. */
@@ -180,9 +202,6 @@ interface RateLimitEntry {
  */
 export const RATE_LIMIT_BUCKET_COUNT = 60;
 
-/** Duration of one bucket, derived so the ring always spans one full window. */
-const RATE_LIMIT_BUCKET_MS = Math.max(1, Math.ceil(RATE_LIMIT_WINDOW_MS / RATE_LIMIT_BUCKET_COUNT));
-
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
 function createRateLimitEntry(): RateLimitEntry {
@@ -200,10 +219,10 @@ const RATE_LIMIT_MAX_IPS = HTTP_RATE_LIMIT_MAX_IPS;
 const CLEANUP_INTERVAL_MS = HTTP_CLEANUP_INTERVAL_MS;
 let lastCleanup = Date.now();
 
-function rateLimitCleanup(now: number): void {
+function rateLimitCleanup(now: number, windowMs: number = RATE_LIMIT_WINDOW_MS): void {
   if (now - lastCleanup < CLEANUP_INTERVAL_MS) return;
   lastCleanup = now;
-  const cutoff = now - RATE_LIMIT_WINDOW_MS;
+  const cutoff = now - windowMs;
   for (const [ip, entry] of rateLimitStore) {
     if (entry.lastSeen <= cutoff) {
       rateLimitStore.delete(ip);
@@ -233,10 +252,10 @@ function rateLimitEvictIfNeeded(): void {
   }
 }
 
-function getClientIP(req: IncomingMessage): string {
+function getClientIP(req: IncomingMessage, config?: HttpRateLimitRuntimeConfig): string {
   // Only trust X-Forwarded-For when explicitly opted in via MCP_TRUST_PROXY
   // Without this, an attacker can spoof XFF to bypass rate limiting.
-  const trustProxy = ['1', 'true'].includes((process.env.MCP_TRUST_PROXY ?? '').toLowerCase());
+  const trustProxy = config?.trustProxy ?? readEnvBoolean('MCP_TRUST_PROXY', false);
 
   if (trustProxy) {
     const forwarded = req.headers['x-forwarded-for'];
@@ -264,20 +283,24 @@ export function checkRateLimit(
   req: IncomingMessage,
   res: ServerResponse,
   authenticated = false,
+  config?: HttpRateLimitRuntimeConfig,
 ): boolean {
   // Allow disabling rate limiting (e.g. behind an external rate limiter)
-  if (['0', 'false'].includes((process.env.MCP_RATE_LIMIT_ENABLED ?? '').toLowerCase())) {
+  if (!(config?.enabled ?? readEnvBoolean('MCP_RATE_LIMIT_ENABLED', true))) {
     return true;
   }
 
   // Only grant the higher limit when the caller has verified the token
-  const maxRequests = authenticated ? RATE_LIMIT_MAX_REQUESTS * 3 : RATE_LIMIT_MAX_REQUESTS;
+  const configuredMaxRequests = config?.maxRequests ?? RATE_LIMIT_MAX_REQUESTS;
+  const maxRequests = authenticated ? configuredMaxRequests * 3 : configuredMaxRequests;
+  const windowMs = config?.windowMs ?? RATE_LIMIT_WINDOW_MS;
+  const bucketMs = Math.max(1, Math.ceil(windowMs / RATE_LIMIT_BUCKET_COUNT));
 
   const now = Date.now();
-  rateLimitCleanup(now);
+  rateLimitCleanup(now, windowMs);
   rateLimitEvictIfNeeded();
 
-  const ip = getClientIP(req);
+  const ip = getClientIP(req, config);
   let entry = rateLimitStore.get(ip);
   if (!entry) {
     entry = createRateLimitEntry();
@@ -288,7 +311,7 @@ export function checkRateLimit(
   // Fixed-bucket ring: each request only touches its own slot and sums a
   // bounded number of buckets, so per-request work stays O(1) regardless of
   // how many requests a single IP has made within the window (a1-09).
-  const currentSlot = Math.floor(now / RATE_LIMIT_BUCKET_MS);
+  const currentSlot = Math.floor(now / bucketMs);
   const bucketIndex = currentSlot % RATE_LIMIT_BUCKET_COUNT;
 
   // The ring slot now belongs to a new bucket — reset the stale count it held.
@@ -306,7 +329,7 @@ export function checkRateLimit(
   }
 
   if (count >= maxRequests) {
-    const retryAfterSec = Math.ceil(RATE_LIMIT_WINDOW_MS / 1000);
+    const retryAfterSec = Math.ceil(windowMs / 1000);
     res.writeHead(429, {
       'Content-Type': 'text/plain',
       'Retry-After': String(retryAfterSec),

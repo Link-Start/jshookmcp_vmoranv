@@ -29,6 +29,7 @@ import * as http2 from 'node:http2';
 import * as tls from 'node:tls';
 import * as net from 'node:net';
 import { BufferChain } from '@utils/BufferChain';
+import { readEnvInteger } from '@src/config/environment';
 
 const STRIPPED_HEADERS = new Set([
   'host',
@@ -55,10 +56,7 @@ const DEFAULT_MAX_CACHED_SESSIONS = 32;
 
 /** Resolve the concurrent-session ceiling, honoring an env override when valid. */
 function maxCachedSessions(): number {
-  const raw = process.env.JSHOOK_HTTP2_MAX_SESSIONS;
-  if (raw === undefined || raw.trim() === '') return DEFAULT_MAX_CACHED_SESSIONS;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_CACHED_SESSIONS;
+  return readEnvInteger('JSHOOK_HTTP2_MAX_SESSIONS', DEFAULT_MAX_CACHED_SESSIONS, { min: 1 });
 }
 
 interface Http2SessionCacheEntry {

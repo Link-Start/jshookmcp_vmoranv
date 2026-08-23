@@ -216,6 +216,25 @@ export const DEBUGGER_WAIT_FOR_PAUSED_TIMEOUT_MS = int(
   30_000,
 );
 export const WATCH_EVAL_TIMEOUT_MS = int('WATCH_EVAL_TIMEOUT_MS', 5_000);
+export const WATCH_MAX_HISTORY = int('WATCH_MAX_HISTORY', 100);
+export const SCRIPT_SEARCH_RESULT_LIMIT = int('SCRIPT_SEARCH_RESULT_LIMIT', 500);
+export const SCRIPT_CONTEXT_TRUNCATE_LINES_LARGE = int('SCRIPT_CONTEXT_TRUNCATE_LINES_LARGE', 2000);
+export const SCRIPT_CONTEXT_SNIPPET_HALF_LINES_LARGE = int(
+  'SCRIPT_CONTEXT_SNIPPET_HALF_LINES_LARGE',
+  100,
+);
+export const SCRIPT_CONTEXT_TRUNCATE_LINES_SMALL = int('SCRIPT_CONTEXT_TRUNCATE_LINES_SMALL', 1000);
+export const SCRIPT_CONTEXT_SNIPPET_HALF_LINES_SMALL = int(
+  'SCRIPT_CONTEXT_SNIPPET_HALF_LINES_SMALL',
+  50,
+);
+export const SCRIPT_CONTEXT_HALF_LINES_SMALL = int('SCRIPT_CONTEXT_HALF_LINES_SMALL', 3);
+
+/* ================================================================== */
+/*  Dataflow & Taint Analysis                                          */
+/* ================================================================== */
+
+export const DATAFLOW_MAX_FIXPOINT_ITERATIONS = int('DATAFLOW_MAX_FIXPOINT_ITERATIONS', 100);
 
 /* ================================================================== */
 /*  Process operations                                                 */

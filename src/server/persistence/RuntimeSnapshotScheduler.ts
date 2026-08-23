@@ -2,6 +2,7 @@ import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { logger } from '@utils/logger';
+import { readEnvNullableString } from '@src/config/environment';
 
 /**
  * Counts reported by a snapshot restore — the number of records dropped or
@@ -153,8 +154,8 @@ export class RuntimeSnapshotScheduler {
 }
 
 export function getStateDir(): string {
-  const overridden = process.env.JSHOOK_STATE_DIR;
-  if (typeof overridden === 'string' && overridden.trim().length > 0) {
+  const overridden = readEnvNullableString('JSHOOK_STATE_DIR', { trim: true });
+  if (overridden) {
     return resolve(homedir(), overridden);
   }
   return resolve(homedir(), '.jshookmcp', 'state');

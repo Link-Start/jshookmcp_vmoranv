@@ -29,6 +29,7 @@
  */
 
 import { logger } from '@utils/logger';
+import { readEnvBoolean } from '@src/config/environment';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -89,8 +90,7 @@ let handleHardeningApplied = false;
 
 function envFlag(name: string): boolean {
   try {
-    const v = process.env[name];
-    return v === '1' || v === 'true';
+    return readEnvBoolean(name, false);
   } catch {
     return false;
   }

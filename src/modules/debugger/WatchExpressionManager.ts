@@ -1,9 +1,6 @@
 import type { RuntimeInspector } from '@modules/debugger/RuntimeInspector';
 import { logger } from '@utils/logger';
-import { WATCH_EVAL_TIMEOUT_MS } from '@src/constants';
-
-/** Cap on retained value-history entries per watch (oldest dropped first). */
-const WATCH_MAX_HISTORY = 100;
+import { WATCH_EVAL_TIMEOUT_MS, WATCH_MAX_HISTORY } from '@src/constants';
 
 type WatchValue = unknown;
 

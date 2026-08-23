@@ -11,14 +11,16 @@ import type { HardwareBreakpointEngine } from '@native/HardwareBreakpoint';
 import { memoryScanToolDefinitions } from './definitions';
 import type { MemoryScanHandlers } from './handlers.impl';
 import { UnifiedProcessManager } from '@server/domains/shared/modules/native';
+import { readEnvString } from '@src/config/environment';
 
 const DOMAIN = 'memory' as const;
 const DEP_KEY = 'memoryScanHandlers' as const;
+const configuredPlatform = readEnvString('JSHOOK_REGISTRY_PLATFORM', '', { trim: true });
 const EFFECTIVE_PLATFORM =
-  process.env.JSHOOK_REGISTRY_PLATFORM === 'win32' ||
-  process.env.JSHOOK_REGISTRY_PLATFORM === 'linux' ||
-  process.env.JSHOOK_REGISTRY_PLATFORM === 'darwin'
-    ? process.env.JSHOOK_REGISTRY_PLATFORM
+  configuredPlatform === 'win32' ||
+  configuredPlatform === 'linux' ||
+  configuredPlatform === 'darwin'
+    ? configuredPlatform
     : process.platform;
 const IS_WIN32 = EFFECTIVE_PLATFORM === 'win32';
 type H = MemoryScanHandlers;

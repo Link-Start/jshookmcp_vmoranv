@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
 import { BlockList, isIP } from 'node:net';
+import { readEnvBoolean } from '@src/config/environment';
 
 const RESTRICTED_IPV4_BLOCKLIST = new BlockList();
 const RESTRICTED_IPV6_BLOCKLIST = new BlockList();
@@ -172,7 +173,7 @@ function isAddressAuthorized(
 }
 
 export function isLocalSsrfBypassEnabled(): boolean {
-  return process.env.ALLOW_LOCAL_SSRF === 'true';
+  return readEnvBoolean('ALLOW_LOCAL_SSRF', false);
 }
 
 export function isLoopbackHost(host: string): boolean {

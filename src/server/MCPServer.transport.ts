@@ -3,15 +3,15 @@ import type { Socket } from 'node:net';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   HTTP_CAPACITY_RETRY_AFTER_MS,
-  MCP_HTTP_REQUEST_TIMEOUT_MS,
-  MCP_HTTP_HEADERS_TIMEOUT_MS,
-  MCP_HTTP_KEEPALIVE_TIMEOUT_MS,
-  MCP_HTTP_FORCE_CLOSE_TIMEOUT_MS,
-  MCP_HTTP_HOST,
-  MCP_HTTP_PORT,
-  MCP_HEALTH_VERBOSE,
-  MCP_BROWSER_FLEET_MAX_LOCAL_LEASES,
   MCP_BROWSER_FLEET_LEASE_TTL_MS,
+  MCP_BROWSER_FLEET_MAX_LOCAL_LEASES,
+  MCP_HEALTH_VERBOSE,
+  MCP_HTTP_FORCE_CLOSE_TIMEOUT_MS,
+  MCP_HTTP_HEADERS_TIMEOUT_MS,
+  MCP_HTTP_HOST,
+  MCP_HTTP_KEEPALIVE_TIMEOUT_MS,
+  MCP_HTTP_PORT,
+  MCP_HTTP_REQUEST_TIMEOUT_MS,
   STDIO_SEND_TIMEOUT_MS,
 } from '@src/constants';
 import {
@@ -86,13 +86,32 @@ export async function startStdioTransport(ctx: MCPServerContext): Promise<void> 
 }
 
 export async function startHttpTransport(ctx: MCPServerContext): Promise<void> {
-  const port = MCP_HTTP_PORT;
-  const host = MCP_HTTP_HOST;
+  const serverConfig = ctx.config?.server;
+  const httpConfig = serverConfig?.http;
+  const port = serverConfig?.port ?? MCP_HTTP_PORT;
+  const host = serverConfig?.host ?? MCP_HTTP_HOST;
+  const authConfig = serverConfig
+    ? {
+        authToken: serverConfig.authToken,
+        host: serverConfig.host,
+        allowInsecure: serverConfig.allowInsecure,
+      }
+    : undefined;
+  const rateLimitConfig = httpConfig
+    ? {
+        enabled: httpConfig.rateLimitEnabled,
+        trustProxy: httpConfig.trustProxy,
+        windowMs: httpConfig.rateLimitWindowMs,
+        maxRequests: httpConfig.rateLimitMax,
+      }
+    : undefined;
   const getDomainInstance =
     typeof ctx.getDomainInstance === 'function' ? ctx.getDomainInstance.bind(ctx) : null;
 
   const transport = new MultiplexedStreamableHttpTransport({
     maxSessions: ctx.config?.mcp?.browserFleetMaxLocalLeases ?? MCP_BROWSER_FLEET_MAX_LOCAL_LEASES,
+    maxInFlight: httpConfig?.maxInFlight,
+    maxSseInFlight: httpConfig?.maxSseInFlight,
     capacityRetryAfterMs: HTTP_CAPACITY_RETRY_AFTER_MS,
     sessionIdleTtlMs: ctx.config?.mcp?.browserFleetLeaseTtlMs ?? MCP_BROWSER_FLEET_LEASE_TTL_MS,
     onSessionOpened: async (sessionId) => {
@@ -178,13 +197,13 @@ export async function startHttpTransport(ctx: MCPServerContext): Promise<void> {
       return;
     }
 
-    if (!checkOrigin(req, res)) return;
+    if (!checkOrigin(req, res, authConfig)) return;
     // Auth runs BEFORE rate limit so the verified result can be passed to the
     // rate limiter. This prevents attackers from spoofing Authorization headers
     // to obtain the higher (3x) rate limit without a valid token.
-    const authenticated = checkAuth(req, res);
+    const authenticated = checkAuth(req, res, authConfig);
     if (!authenticated) return;
-    if (!checkRateLimit(req, res, authenticated)) return;
+    if (!checkRateLimit(req, res, authenticated, rateLimitConfig)) return;
 
     if (req.method === 'GET' || req.method === 'DELETE') {
       void transport.handleRequest(req, res);
@@ -192,7 +211,11 @@ export async function startHttpTransport(ctx: MCPServerContext): Promise<void> {
     }
 
     if (req.method === 'POST') {
-      readBodyWithLimit(req, res)
+      const bodyPromise =
+        httpConfig?.maxBodyBytes === undefined
+          ? readBodyWithLimit(req, res)
+          : readBodyWithLimit(req, res, httpConfig.maxBodyBytes);
+      bodyPromise
         .then((body) => transport.handleRequest(req, res, body))
         .catch(() => {
           /* already responded by middleware */
@@ -210,9 +233,9 @@ export async function startHttpTransport(ctx: MCPServerContext): Promise<void> {
   }
 
   // Timeout configuration to prevent slow-loris and connection exhaustion
-  httpServer.requestTimeout = MCP_HTTP_REQUEST_TIMEOUT_MS;
-  httpServer.headersTimeout = MCP_HTTP_HEADERS_TIMEOUT_MS;
-  httpServer.keepAliveTimeout = MCP_HTTP_KEEPALIVE_TIMEOUT_MS;
+  httpServer.requestTimeout = httpConfig?.requestTimeoutMs ?? MCP_HTTP_REQUEST_TIMEOUT_MS;
+  httpServer.headersTimeout = httpConfig?.headersTimeoutMs ?? MCP_HTTP_HEADERS_TIMEOUT_MS;
+  httpServer.keepAliveTimeout = httpConfig?.keepAliveTimeoutMs ?? MCP_HTTP_KEEPALIVE_TIMEOUT_MS;
 
   httpServer.on('connection', (socket: Socket) => {
     ctx.httpSockets.add(socket);
@@ -236,7 +259,7 @@ function handleHealthCheck(ctx: MCPServerContext, res: HttpServerResponse): void
   // Minimal output by default to avoid exposing internal state (domains, tool
   // counts, token budget). Full details are gated behind MCP_AUTH_TOKEN or
   // MCP_HEALTH_VERBOSE=true for trusted environments.
-  const verbose = MCP_HEALTH_VERBOSE;
+  const verbose = ctx.config?.server?.healthVerbose ?? MCP_HEALTH_VERBOSE;
 
   const body: Record<string, unknown> = {
     status: 'ok',
@@ -363,7 +386,7 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
         for (const socket of ctx.httpSockets) {
           socket.destroy();
         }
-      }, MCP_HTTP_FORCE_CLOSE_TIMEOUT_MS);
+      }, ctx.config?.server?.http?.forceCloseTimeoutMs ?? MCP_HTTP_FORCE_CLOSE_TIMEOUT_MS);
       await closePromise;
       clearTimeout(forceTimeout);
       ctx.httpSockets.clear();

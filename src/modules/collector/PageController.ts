@@ -5,6 +5,7 @@ import {
   PAGE_NETWORK_IDLE_TIMEOUT_MS,
   PAGE_OPERATION_TIMEOUT_MS,
   PAGE_EVALUATE_TIMEOUT_MS,
+  PAGE_CDP_HEALTH_CHECK_TIMEOUT_MS,
 } from '@src/constants';
 import { setTimeout as asyncSetTimeout } from 'node:timers/promises';
 import { writeFile } from 'node:fs/promises';
@@ -956,9 +957,6 @@ export class PageController {
  * 'disconnected'. Without this check, page.evaluate() blocks for the full 30 s
  * timeout — with this check we fail fast (~3 s) with a clear message.
  */
-/** Fail-fast window for the pre-evaluate CDP health probe (see checkPageCDPHealth). */
-const PAGE_CDP_HEALTH_CHECK_TIMEOUT_MS = 500;
-
 async function checkPageCDPHealth(
   page: Page,
   timeoutMs = PAGE_CDP_HEALTH_CHECK_TIMEOUT_MS,

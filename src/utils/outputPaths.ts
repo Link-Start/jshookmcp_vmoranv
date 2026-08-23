@@ -11,6 +11,7 @@ import {
   sep,
 } from 'node:path';
 import { projectRoot as configProjectRoot, getConfig, isNpxContext } from '@utils/config';
+import { readEnvNullableString } from '@src/config/environment';
 
 // Use config.ts's projectRoot as the single source of truth.
 // Both files compute import.meta.url-based roots with different fallback
@@ -24,8 +25,8 @@ const defaultProjectRoot = configProjectRoot;
  * npm cache.  Redirect to the user's cwd so that relative-path validation
  * and output directories land in their project, not the install cache.
  */
-function resolveProjectRoot(env: NodeJS.ProcessEnv = process.env): string {
-  const requestedRoot = env.MCP_PROJECT_ROOT?.trim();
+function resolveProjectRoot(env?: NodeJS.ProcessEnv): string {
+  const requestedRoot = readEnvNullableString('MCP_PROJECT_ROOT', { env, trim: true });
   if (requestedRoot) {
     return normalize(
       isUserAbsolutePath(requestedRoot)

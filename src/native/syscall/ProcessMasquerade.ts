@@ -33,6 +33,7 @@
 
 import { logger } from '@utils/logger';
 import { randomBytes } from 'node:crypto';
+import { readEnvBoolean, readEnvInteger, readEnvString } from '@src/config/environment';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -107,8 +108,7 @@ let obfuscatedOriginalValues: Map<string, string> | null = null;
 
 function envFlag(name: string): boolean {
   try {
-    const v = process.env[name];
-    return v === '1' || v === 'true';
+    return readEnvBoolean(name, false);
   } catch {
     return false;
   }
@@ -681,7 +681,7 @@ function spoofProcessTitle(customTitle?: string): { applied: boolean; error?: st
   }
 
   try {
-    const defaultTitle = process.env['JSHOOK_MASQUERADE_TITLE'] || 'svchost.exe';
+    const defaultTitle = readEnvString('JSHOOK_MASQUERADE_TITLE', 'svchost.exe');
     const title = customTitle || defaultTitle;
 
     const originalTitle = process.title;
@@ -873,7 +873,7 @@ export function applyProcessMasquerade(config: MasqueradeConfig = {}): Masquerad
     config.spoofSelfParentPid !== undefined
       ? config.spoofSelfParentPid
       : envFlag('JSHOOK_BYOVD_ENABLE')
-        ? parseInt(process.env['JSHOOK_MASQUERADE_SELF_PPID'] || '0', 10)
+        ? readEnvInteger('JSHOOK_MASQUERADE_SELF_PPID', 0, { min: 0 })
         : 0;
   if (selfParentPid > 0) {
     results.selfParentPidSpoof = spoofSelfParentPidViaByovd(selfParentPid);

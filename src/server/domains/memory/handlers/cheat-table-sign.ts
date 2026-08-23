@@ -10,6 +10,7 @@
  */
 
 import * as crypto from 'node:crypto';
+import { readEnvNullableString } from '@src/config/environment';
 
 const ALGORITHM = 'sha256';
 const SIGNATURE_ELEMENT = 'Signature';
@@ -43,7 +44,7 @@ async function resolveSecret(args: Record<string, unknown>): Promise<string | un
   }
 
   // 2. Environment variable
-  const envSecret = process.env.JSHOOK_TABLE_SECRET;
+  const envSecret = readEnvNullableString('JSHOOK_TABLE_SECRET');
   if (envSecret && envSecret.length > 0) {
     return envSecret;
   }

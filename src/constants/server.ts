@@ -54,12 +54,10 @@ export const IDA_BRIDGE_ENDPOINT = str('IDA_BRIDGE_URL', 'http://127.0.0.1:18081
 
 /** Base URL for the configured external CAPTCHA solver service. */
 export const CAPTCHA_SOLVER_BASE_URL =
-  process.env.CAPTCHA_SOLVER_BASE_URL?.trim() ||
-  process.env.CAPTCHA_2CAPTCHA_BASE_URL?.trim() ||
-  '';
+  str('CAPTCHA_SOLVER_BASE_URL', '').trim() || str('CAPTCHA_2CAPTCHA_BASE_URL', '').trim();
 
 /** Extension registry base URL. Must be supplied via .env or environment. */
-export const EXTENSION_REGISTRY_BASE_URL = process.env.EXTENSION_REGISTRY_BASE_URL?.trim() || '';
+export const EXTENSION_REGISTRY_BASE_URL = str('EXTENSION_REGISTRY_BASE_URL', '').trim();
 
 /* ================================================================== */
 /*  MCP transport timeouts                                             */

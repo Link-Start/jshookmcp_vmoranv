@@ -22,6 +22,7 @@
  */
 
 import { logger } from '@utils/logger';
+import { readEnvBoolean, readEnvFloat, readEnvInteger } from '@src/config/environment';
 import type { ScanWalker, ScanObfuscationConfig } from './ScanObfuscator';
 import { createScanWalker, DEFAULT_OBFUSCATION_CONFIG } from './ScanObfuscator';
 
@@ -364,7 +365,7 @@ export function generateDummyPids(excludePids: number[], count: number): number[
  */
 export function isChaosModeEnabled(): boolean {
   try {
-    return process.env['JSHOOK_SCAN_CHAOS_MODE'] === '1';
+    return readEnvBoolean('JSHOOK_SCAN_CHAOS_MODE', false);
   } catch {
     return false;
   }
@@ -377,36 +378,35 @@ export function getChaosConfigFromEnv(): ChaosConfig {
   const config = { ...DEFAULT_CHAOS_CONFIG };
 
   try {
-    if (process.env['JSHOOK_CHAOS_BACKWARD_PROB']) {
-      config.backwardReadProbability = parseFloat(process.env['JSHOOK_CHAOS_BACKWARD_PROB']);
-    }
-    if (process.env['JSHOOK_CHAOS_THINK_MIN_MS']) {
-      config.minThinkPauseMs = parseInt(process.env['JSHOOK_CHAOS_THINK_MIN_MS'], 10);
-    }
-    if (process.env['JSHOOK_CHAOS_THINK_MAX_MS']) {
-      config.maxThinkPauseMs = parseInt(process.env['JSHOOK_CHAOS_THINK_MAX_MS'], 10);
-    }
-    if (process.env['JSHOOK_CHAOS_DUMMY_RATE']) {
-      config.dummyProcessReadRate = parseInt(process.env['JSHOOK_CHAOS_DUMMY_RATE'], 10);
-    }
-    if (process.env['JSHOOK_CHAOS_CHUNK_VARIANCE']) {
-      config.chunkVariance = Math.max(
-        0,
-        Math.min(1, parseFloat(process.env['JSHOOK_CHAOS_CHUNK_VARIANCE'])),
-      );
-    }
-    if (process.env['JSHOOK_CHAOS_INTER_CHUNK_DELAY_MIN']) {
-      config.minInterChunkDelayMs = Math.max(
-        0,
-        parseInt(process.env['JSHOOK_CHAOS_INTER_CHUNK_DELAY_MIN'], 10),
-      );
-    }
-    if (process.env['JSHOOK_CHAOS_INTER_CHUNK_DELAY_MAX']) {
-      config.maxInterChunkDelayMs = Math.max(
-        config.minInterChunkDelayMs,
-        parseInt(process.env['JSHOOK_CHAOS_INTER_CHUNK_DELAY_MAX'], 10),
-      );
-    }
+    config.backwardReadProbability = readEnvFloat(
+      'JSHOOK_CHAOS_BACKWARD_PROB',
+      config.backwardReadProbability,
+      { min: 0, max: 1 },
+    );
+    config.minThinkPauseMs = readEnvInteger('JSHOOK_CHAOS_THINK_MIN_MS', config.minThinkPauseMs, {
+      min: 0,
+    });
+    config.maxThinkPauseMs = readEnvInteger('JSHOOK_CHAOS_THINK_MAX_MS', config.maxThinkPauseMs, {
+      min: config.minThinkPauseMs,
+    });
+    config.dummyProcessReadRate = readEnvInteger(
+      'JSHOOK_CHAOS_DUMMY_RATE',
+      config.dummyProcessReadRate,
+      { min: 0 },
+    );
+    config.chunkVariance = Math.max(
+      0,
+      Math.min(1, readEnvFloat('JSHOOK_CHAOS_CHUNK_VARIANCE', config.chunkVariance)),
+    );
+    config.minInterChunkDelayMs = readEnvInteger(
+      'JSHOOK_CHAOS_INTER_CHUNK_DELAY_MIN',
+      config.minInterChunkDelayMs,
+      { min: 0 },
+    );
+    config.maxInterChunkDelayMs = Math.max(
+      config.minInterChunkDelayMs,
+      readEnvInteger('JSHOOK_CHAOS_INTER_CHUNK_DELAY_MAX', config.maxInterChunkDelayMs, { min: 0 }),
+    );
   } catch {
     // Use defaults
   }

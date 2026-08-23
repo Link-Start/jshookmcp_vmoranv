@@ -33,6 +33,7 @@ import {
   getTopPriorityFilesImpl,
 } from '@modules/collector/CodeCollectorFileQueryInternal';
 import type { ChromeLaunchOverrides } from '@modules/collector/CodeCollectorLaunchOptions';
+import { readEnvInteger } from '@src/config/environment';
 import {
   BrowserLifecycleManager,
   type CodeCollectorLaunchResult,
@@ -127,7 +128,7 @@ export class CodeCollector {
     this.MAX_FILES_PER_COLLECT = config.maxFilesPerCollect ?? 200;
     this.MAX_RESPONSE_SIZE = config.maxTotalContentSize ?? 512 * 1024;
     this.MAX_SINGLE_FILE_SIZE = config.maxSingleFileSize ?? 200 * 1024;
-    this.CONNECT_TIMEOUT_MS = Number(process.env.JSHOOK_CONNECT_TIMEOUT_MS) || 60000;
+    this.CONNECT_TIMEOUT_MS = readEnvInteger('JSHOOK_CONNECT_TIMEOUT_MS', 60_000, { min: 1 });
     this.viewport = config.viewport ?? { width: 1920, height: 1080 };
     this.userAgent =
       config.userAgent ??

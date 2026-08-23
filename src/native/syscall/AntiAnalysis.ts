@@ -10,6 +10,7 @@
  */
 
 import { logger } from '@utils/logger';
+import { readEnvBoolean } from '@src/config/environment';
 
 // ── Types ──
 
@@ -88,8 +89,7 @@ const MAX_IDLE_MS = 5 * 60 * 1000;
 
 function envFlag(name: string): boolean {
   try {
-    const v = process.env[name];
-    return v === '1' || v === 'true';
+    return readEnvBoolean(name, false);
   } catch {
     return false;
   }

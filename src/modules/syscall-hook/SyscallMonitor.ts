@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SYSCALL_TRACE_SPAWN_TIMEOUT_MS } from '@src/constants';
 import { RingBuffer } from '@utils/RingBuffer';
+import { readEnvBoolean } from '@src/config/environment';
 
 export type SyscallBackend = 'etw' | 'strace' | 'dtrace';
 
@@ -517,7 +518,7 @@ export class SyscallMonitor {
     }
 
     // If --simulate flag or JSHOOK_SIMULATE=1, use synthetic mode
-    const simulate = options?.simulate ?? process.env['JSHOOK_SIMULATE'] === '1';
+    const simulate = options?.simulate ?? readEnvBoolean('JSHOOK_SIMULATE', false);
     if (simulate) {
       this.activeState = {
         backend: requestedBackend,

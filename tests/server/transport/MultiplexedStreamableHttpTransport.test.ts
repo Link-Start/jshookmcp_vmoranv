@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JSONRPCRequest, JSONRPCResponse } from '@modelcontextprotocol/sdk/types.js';
 
 const mocks = vi.hoisted(() => {
@@ -65,6 +65,8 @@ vi.mock('@src/constants', () => ({
   MCP_HTTP_JSON_RESPONSE: false,
 }));
 
+const ORIGINAL_ENV = { ...process.env };
+
 function createReq(method: string, sessionId?: string) {
   return {
     method,
@@ -81,8 +83,15 @@ function createRes() {
 
 describe('MultiplexedStreamableHttpTransport', () => {
   beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+    delete process.env.MCP_HTTP_MAX_INFLIGHT;
+    delete process.env.MCP_HTTP_MAX_SSE_INFLIGHT;
     mocks.innerTransports.length = 0;
     mocks.innerTransportOptions.length = 0;
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
   });
 
   it('rejects repeated start calls', async () => {
@@ -324,6 +333,32 @@ describe('MultiplexedStreamableHttpTransport', () => {
 
     release();
     await Promise.allSettled([first, second, third]);
+  });
+
+  it('resolves the default in-flight cap from env when each transport is constructed', async () => {
+    process.env.MCP_HTTP_MAX_INFLIGHT = '1';
+    const transport = new MultiplexedStreamableHttpTransport();
+    await transport.start();
+    await transport.handleRequest(createReq('POST'), createRes(), {});
+    const session = mocks.innerTransports[0];
+
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    session.handleRequest.mockImplementation(async () => await gate);
+
+    const active = transport.handleRequest(createReq('POST', session.sessionId), createRes(), {});
+    await vi.waitFor(() => expect(transport.getStats().inFlight).toBe(1));
+
+    const overloaded = createRes();
+    await transport.handleRequest(createReq('POST', session.sessionId), overloaded, {});
+    expect(JSON.parse(overloaded.end.mock.calls[0]![0])).toMatchObject({
+      error: { data: { code: 'MCP_SESSION_INFLIGHT_CAPACITY', inFlightLimit: 1 } },
+    });
+
+    release();
+    await active;
   });
 
   it('does not count SSE GET streams against POST in-flight capacity', async () => {

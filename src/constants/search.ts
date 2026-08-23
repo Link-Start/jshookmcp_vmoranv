@@ -173,7 +173,7 @@ export const SEARCH_BM25_B = float('SEARCH_BM25_B', 0.75);
  *   for stability.
  * SEARCH_VECTOR_LEARN_TOP_N: rank threshold that separates "hit" from "miss".
  */
-const sharedHttpTransport = process.env.MCP_TRANSPORT?.trim().toLowerCase() === 'http';
+const sharedHttpTransport = str('MCP_TRANSPORT', 'stdio').trim().toLowerCase() === 'http';
 export const SEARCH_VECTOR_ENABLED = bool('SEARCH_VECTOR_ENABLED', sharedHttpTransport);
 export const SEARCH_VECTOR_MODEL_ID = str('SEARCH_VECTOR_MODEL_ID', DEFAULT_SEARCH_VECTOR_MODEL_ID);
 export const SEARCH_VECTOR_COSINE_WEIGHT = float('SEARCH_VECTOR_COSINE_WEIGHT', 0.53);

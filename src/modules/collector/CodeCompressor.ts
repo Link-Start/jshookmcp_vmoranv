@@ -2,6 +2,11 @@ import { gzip, gunzip } from 'zlib';
 import { promisify } from 'util';
 import { createHash } from 'crypto';
 import { logger } from '@utils/logger';
+import {
+  CODE_COMPRESSOR_RETRY_BACKOFF_MS,
+  CODE_COMPRESSOR_MIN_THRESHOLD_BYTES,
+  CODE_COMPRESSOR_MAX_RECURSION_DEPTH,
+} from '@src/constants/browser';
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
@@ -11,7 +16,7 @@ const CHUNKED_FORMAT = 'code-compressor-chunks';
 /** JSON envelope marker used by compressStream to wrap per-chunk payloads. */
 const CHUNKED_FORMAT_PREFIX = `{"format":"${CHUNKED_FORMAT}"`;
 /** Base (ms) for the linear retry backoff: `base * attempt`. */
-const RETRY_BACKOFF_BASE_MS = 100;
+const RETRY_BACKOFF_BASE_MS = CODE_COMPRESSOR_RETRY_BACKOFF_MS;
 /** Compression-level selection tiers (bytes). */
 const LEVEL_SMALL_THRESHOLD_BYTES = 10 * 1024;
 const LEVEL_MEDIUM_THRESHOLD_BYTES = 100 * 1024;
@@ -23,10 +28,10 @@ const LEVEL_LARGE = 9;
 /** Default compression level for compress() when no tier applies. */
 const DEFAULT_LEVEL = LEVEL_MEDIUM;
 /** Default `shouldCompress` threshold (bytes) — content below this is kept raw. */
-const COMPRESS_MIN_THRESHOLD_BYTES = 1024;
+const COMPRESS_MIN_THRESHOLD_BYTES = CODE_COMPRESSOR_MIN_THRESHOLD_BYTES;
 /** Max nesting depth for chunked payloads — guards decompress() recursion
  *  against adversarial deeply-nested `{"format":"code-compressor-chunks"}` envelopes. */
-const MAX_RECURSION_DEPTH = 16;
+const MAX_RECURSION_DEPTH = CODE_COMPRESSOR_MAX_RECURSION_DEPTH;
 
 export interface CompressedCode {
   compressed: string;

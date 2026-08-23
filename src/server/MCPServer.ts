@@ -292,7 +292,7 @@ export class MCPServer implements MCPServerContext {
     this.detailedData = new DetailedDataManager();
     this.eventBus = createServerEventBus();
     this.tokenBudget.setExternalCleanup(() => this.detailedData.clear());
-    const { tools, profile } = resolveToolsForRegistration();
+    const { tools, profile } = resolveToolsForRegistration(config);
     this.selectedTools = tools;
     this.baseTier = profile;
     this.enabledDomains = this.resolveEnabledDomains(this.selectedTools);
@@ -408,13 +408,16 @@ export class MCPServer implements MCPServerContext {
     );
 
     // Attach structured MCP log transport
-    this.mcpLog.attach(this.server, MCP_LOG_ENABLED);
+    const loggingConfig = config.server?.logging;
+    this.mcpLog.attach(this.server, loggingConfig?.enabled ?? MCP_LOG_ENABLED);
     const validLevels = new Set<string>(['debug', 'info', 'warning', 'error']);
-    if (validLevels.has(MCP_LOG_LEVEL)) {
-      this.mcpLog.setLevel(MCP_LOG_LEVEL as McpLogLevel);
+    const configuredLogLevel = loggingConfig?.level ?? MCP_LOG_LEVEL;
+    if (validLevels.has(configuredLogLevel)) {
+      this.mcpLog.setLevel(configuredLogLevel as McpLogLevel);
     }
-    if (MCP_LOG_FILE_DIR) {
-      this.mcpLog.enableFileLogging(MCP_LOG_FILE_DIR);
+    const configuredLogDir = loggingConfig?.fileDir ?? MCP_LOG_FILE_DIR;
+    if (configuredLogDir) {
+      this.mcpLog.enableFileLogging(configuredLogDir);
     }
 
     // Circuit breaker: deactivate blocked tools so the model won't attempt them
@@ -718,7 +721,7 @@ export class MCPServer implements MCPServerContext {
         toolLatencyTracker.record(payload.toolName, payload.durationMs);
       }
     });
-    const transportMode = MCP_TRANSPORT.toLowerCase();
+    const transportMode = (this.config.server?.transport ?? MCP_TRANSPORT).toLowerCase();
     if (transportMode === 'http') {
       await startHttpTransport(this);
     } else {

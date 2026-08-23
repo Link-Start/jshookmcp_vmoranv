@@ -15,6 +15,7 @@
 
 import { readFileSync } from 'node:fs';
 import { ToolError } from '@errors/ToolError';
+import { readEnvString } from '@src/config/environment';
 import {
   openProcessForMemory,
   OpenProcess,
@@ -243,7 +244,7 @@ function parsePEFromBuffer(dllBytes: Buffer): ParsedPE {
 const INJECTION_ENV_GATE = 'JSHOOK_INJECTION_ENABLE';
 
 function checkInjectionEnabled(): void {
-  if (process.env[INJECTION_ENV_GATE] !== '1') {
+  if (readEnvString(INJECTION_ENV_GATE, '') !== '1') {
     throw new ToolError(
       'PERMISSION',
       `Injection operations require ${INJECTION_ENV_GATE}=1 environment variable. ` +
