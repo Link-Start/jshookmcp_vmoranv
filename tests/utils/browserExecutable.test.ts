@@ -55,6 +55,13 @@ describe('browserExecutable utils', () => {
     existsSyncMock.mockImplementation((p: string) => p === '/cached-browser');
 
     const { findBrowserExecutable } = await loadModule();
+    // Importing the module chain now also loads @src/config/env-bootstrap,
+    // which walks up the directory tree calling existsSync() on candidate
+    // package.json files to locate the project root. That's unrelated to the
+    // caching behavior under test here, so clear those import-time calls
+    // before asserting on the two find calls below.
+    existsSyncMock.mockClear();
+
     expect(findBrowserExecutable()).toBe('/cached-browser');
     expect(findBrowserExecutable()).toBe('/cached-browser');
     expect(existsSyncMock).toHaveBeenCalledTimes(2);

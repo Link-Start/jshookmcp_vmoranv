@@ -20,17 +20,26 @@ function isRegularFile(path: string): boolean {
 }
 
 function hasRuntimePackageJson(directory: string): boolean {
-  const packageJsonPath = join(directory, 'package.json');
-  if (!existsSync(packageJsonPath)) {
-    return false;
-  }
-
   try {
+    const packageJsonPath = join(directory, 'package.json');
+    if (!existsSync(packageJsonPath)) {
+      return false;
+    }
+
     const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
       name?: unknown;
     };
     return packageJson.name === RUNTIME_PACKAGE_NAME;
   } catch {
+    // Any fs error — including a test mock that only replaces a subset of
+    // node:fs and doesn't export existsSync/readFileSync — must not crash
+    // this walk. findRuntimeProjectRoot() runs unconditionally at module
+    // import time (see bootstrapRuntimeEnv() below), so it is reachable from
+    // any test file that merely imports something re-exporting
+    // @src/config/environment, whether or not that test cares about config
+    // resolution at all. Treating the error as "not the runtime package
+    // root here" keeps the walk (and eventual cwd fallback) working exactly
+    // as it would for a real, non-matching directory.
     return false;
   }
 }

@@ -116,16 +116,21 @@ describe('constants env parsing', () => {
     ).toBe(withPath(TEST_URLS.root, 'test'));
   });
 
-  it('parses numeric lists and drops invalid entries without falling back', async () => {
+  it('parses numeric lists and falls back to defaults when every entry is invalid', async () => {
     expect((await loadConstants({ DEBUG_PORT_CANDIDATES: '' })).DEBUG_PORT_CANDIDATES).toEqual([
       9222, 9229, 9333, 2039,
     ]);
     expect(
       (await loadConstants({ DEBUG_PORT_CANDIDATES: '9333,foo,9444' })).DEBUG_PORT_CANDIDATES,
     ).toEqual([9333, 9444]);
+    // readEnvIntegerList/list() falls back to the default list (not []) when
+    // every comma-separated entry fails to parse — see the "Backward-compatible
+    // alias" doc comment on list() in src/config/environment.ts: an all-invalid
+    // config value preserves the effective default instead of silently
+    // emptying a list that callers then treat as "no candidates".
     expect(
       (await loadConstants({ DEBUG_PORT_CANDIDATES: 'foo,bar' })).DEBUG_PORT_CANDIDATES,
-    ).toEqual([]);
+    ).toEqual([9222, 9229, 9333, 2039]);
   });
 
   it('parses csv tiers with normalization and fallback semantics', async () => {

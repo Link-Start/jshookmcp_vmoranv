@@ -20,14 +20,27 @@ vi.mock('node:fs/promises', () => ({
 
 describe('ADBClient', () => {
   let client: ADBClient;
+  let originalAdbPath: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // ADBClient resolves its binary via readEnvString('ADB_PATH', 'adb', ...),
+    // so an ADB_PATH set in the host environment (e.g. a local Android SDK
+    // install) would silently override the 'adb' command asserted throughout
+    // this file. Clear it so these tests observe the documented default
+    // regardless of the machine they run on.
+    originalAdbPath = process.env.ADB_PATH;
+    delete process.env.ADB_PATH;
     client = new ADBClient();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    if (originalAdbPath === undefined) {
+      delete process.env.ADB_PATH;
+    } else {
+      process.env.ADB_PATH = originalAdbPath;
+    }
   });
 
   it('connects to host and port', async () => {
