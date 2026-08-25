@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import type { DeobfuscateOptions, DeobfuscateResult, ObfuscationType } from '@internal-types/index';
 import { logger } from '@utils/logger';
 

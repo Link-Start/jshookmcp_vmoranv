@@ -1,6 +1,6 @@
 import type { Browser } from 'rebrowser-puppeteer-core';
 import { logger } from '@utils/logger';
-import { existsSync } from 'fs';
+import { existsSync } from 'node:fs';
 import { findBrowserExecutableAsync } from '@utils/browserExecutable';
 import {
   resolveChromeLaunchOptions,

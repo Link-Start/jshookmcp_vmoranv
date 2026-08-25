@@ -7,7 +7,7 @@ import type {
 import { runWebcrack } from '@modules/deobfuscator/webcrack';
 import type { WebcrackPool } from '@modules/deobfuscator/webcrack-worker';
 import { detectObfuscationType as detectObfuscationTypeUtil } from '@modules/deobfuscator/Deobfuscator.utils';
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 
 export interface AdvancedDeobfuscateOptions {
   code: string;

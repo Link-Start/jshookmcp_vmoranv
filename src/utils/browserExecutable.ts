@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync } from 'node:fs';
 import { readEnvNullableString } from '@src/config/environment';
 import { logger } from './logger';
 

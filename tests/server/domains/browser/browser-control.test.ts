@@ -9,7 +9,7 @@ import type {
   BrowserSelectTabResponse,
   BrowserStatusResponse,
 } from '@tests/shared/common-test-types';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 vi.mock('@utils/logger', () => ({
   logger: {

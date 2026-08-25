@@ -7,7 +7,7 @@ import { argBool, argNumber, argString, argStringArray } from '@server/domains/s
 import { R } from '@server/domains/shared/ResponseBuilder';
 import type { ToolResponse } from '@server/types';
 import { logger } from '@utils/logger';
-import { readFile, writeFile } from 'fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import type { BrowserAttachRuntimeSnapshot } from '@server/runtime/ServerRuntimeState';
 import type { BrowserSessionCoordinator } from '@server/runtime/BrowserSessionCoordinator';
 import type { BrowserFleetRouter } from '@server/runtime/BrowserFleetRouter';

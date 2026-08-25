@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const existsSyncMock = vi.fn();
 const executablePathMock = vi.fn();
 
-vi.mock('fs', () => ({
+vi.mock('node:fs', () => ({
   existsSync: (...args: any[]) => existsSyncMock(...args),
 }));
 

@@ -1,6 +1,6 @@
-import { gzip, gunzip } from 'zlib';
-import { promisify } from 'util';
-import { createHash } from 'crypto';
+import { gzip, gunzip } from 'node:zlib';
+import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
 import { logger } from '@utils/logger';
 import {
   CODE_COMPRESSOR_RETRY_BACKOFF_MS,

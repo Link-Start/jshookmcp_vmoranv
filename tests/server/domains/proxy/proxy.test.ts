@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
-import * as child_process from 'child_process';
+import * as child_process from 'node:child_process';
 import * as http from 'node:http';
 import * as net from 'node:net';
 import { once } from 'node:events';
@@ -162,8 +162,8 @@ describe('ProxyHandlers (Integration)', () => {
 
   it('should generate an error if exporting CA without HTTPS enabled', async () => {
     // Remove CA cert so the handler can't find it
-    const fs = await import('fs');
-    const path = await import('path');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
     const home = process.env.HOME || process.env.USERPROFILE || '/tmp';
     const certPath = path.join(home, '.jshookmcp', 'ca', 'ca.pem');
     const certExisted = fs.existsSync(certPath);

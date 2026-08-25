@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { join } from 'path';
+import { join } from 'node:path';
 import type { CodeFile, PuppeteerConfig } from '@internal-types/index';
 
 const mocks = vi.hoisted(() => ({

@@ -113,7 +113,9 @@
     "prefer-const": "error",
     "eqeqeq": "error",
     "no-constant-condition": "error",
-    "unicorn/require-post-message-target-origin": "off"
+    "unicorn/require-post-message-target-origin": "off",
+    "unicorn/prefer-node-protocol": "error",
+    "import/no-cycle": "error"
   },
   "plugins": ["unicorn", "import", "typescript"],
   "ignorePatterns": ["dist/**", "node_modules/**"],

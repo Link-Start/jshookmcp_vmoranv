@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { PersistentCache } from '@utils/cache/PersistentCache';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { existsSync, rmSync } from 'fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { existsSync, rmSync } from 'node:fs';
 
 describe('PersistentCache', () => {
   const testDbPath = join(tmpdir(), `jshook-test-cache-${Date.now()}.db`);

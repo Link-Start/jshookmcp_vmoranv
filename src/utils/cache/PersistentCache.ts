@@ -1,5 +1,5 @@
-import { dirname, join } from 'path';
-import { mkdirSync, existsSync } from 'fs';
+import { dirname, join } from 'node:path';
+import { mkdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { logger } from '@utils/logger';
 

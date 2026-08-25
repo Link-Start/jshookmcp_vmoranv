@@ -103,7 +103,7 @@ describe('WorkerPool', () => {
       () => 'test-worker.js',
     );
 
-    const expected = Math.max(2, require('os').cpus().length - 1);
+    const expected = Math.max(2, require('node:os').cpus().length - 1);
     expect(pool.getStats().workerCount).toBe(expected);
   });
 
