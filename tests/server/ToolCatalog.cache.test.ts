@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   getAllDomains: vi.fn<() => ReadonlySet<string>>(),
   getAllRegistrations: vi.fn(),
   getRegistrationByName: vi.fn(),
+  onRegistryInvalidate: vi.fn(),
 }));
 
 vi.mock('@server/registry/index', () => ({
@@ -27,6 +28,7 @@ vi.mock('@server/registry/index', () => ({
   getAllDomains: mocks.getAllDomains,
   getAllRegistrations: mocks.getAllRegistrations,
   getRegistrationByName: mocks.getRegistrationByName,
+  onRegistryInvalidate: mocks.onRegistryInvalidate,
 }));
 
 import {
