@@ -127,6 +127,18 @@ export function getTlsKeyLogDir(): string {
   return getConfig().paths.tlsKeyLogDir;
 }
 
+/**
+ * Directory for TLS keylog files that are sealed (encrypted) immediately
+ * after parsing. Deliberately separate from getTlsKeyLogDir(): the latter is
+ * the historical SSLKEYLOGFILE target (still the default because BoringSSL/
+ * Node's TLS stack itself writes there — this process cannot intercept that
+ * write), while this one is where TLSKeyLogExtractor.sealKeyLog() writes the
+ * post-parse encrypted envelope once the plaintext source has been wiped.
+ */
+export function getEphemeralKeylogDir(): string {
+  return resolve(getTlsKeyLogDir(), 'sealed');
+}
+
 export function getSystemTempRoots(): string[] {
   const roots = new Set<string>();
   const candidates = [process.env.TEMP, process.env.TMP, tmpdir()];

@@ -3,11 +3,12 @@
  * Ensures all tool outputs go to well-structured directories with consistent naming.
  */
 
-import { mkdir, open, realpath } from 'node:fs/promises';
+import { mkdir, open, realpath, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, resolve, relative, normalize } from 'node:path';
 import { getProjectRoot } from '@utils/outputPaths';
 import { isPathWithinRoot } from '@utils/safeOutput';
+import { encryptBuffer, generateEphemeralKey } from '@utils/crypto/ephemeralCipher';
 
 export type ArtifactCategory =
   | 'wasm'
@@ -204,6 +205,39 @@ export function getArtifactsRoot(): string {
  */
 export function getArtifactDir(category: ArtifactCategory): string {
   return resolve(getProjectRoot(), ARTIFACT_BASE, category);
+}
+
+/**
+ * Write artifact content to a path already reserved by resolveArtifactPath().
+ * When `encrypt` is set, the content is wrapped in an AES-256-GCM envelope
+ * (see @utils/crypto/ephemeralCipher) instead of written as plaintext, and
+ * the caller gets back the hex key needed to decrypt it later — nothing is
+ * persisted that would let a disk-forensics pass recover the key on its own.
+ *
+ * Deliberately opt-in per call rather than defaulted by category: some
+ * categories that hold sensitive content (e.g. heap-snapshots) are also
+ * consumed by external tools in plaintext form by design — v8_heap_snapshot_export
+ * writes a .heapsnapshot file specifically so Chrome DevTools' Memory panel
+ * can load it directly, so forcing encryption there would break that tool's
+ * stated contract. Callers that hold genuinely sensitive artifacts (memory
+ * dumps, captured secrets) should pass `encrypt: true` explicitly.
+ */
+export async function writeArtifactContent(
+  absolutePath: string,
+  content: string | Uint8Array,
+  options?: { encrypt?: boolean },
+): Promise<{ encryptionKeyHex?: string }> {
+  const buffer = typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content);
+
+  if (!options?.encrypt) {
+    await writeFile(absolutePath, buffer);
+    return {};
+  }
+
+  const key = generateEphemeralKey();
+  const envelope = encryptBuffer(buffer, key);
+  await writeFile(absolutePath, JSON.stringify(envelope), { mode: 0o600 });
+  return { encryptionKeyHex: key.toString('hex') };
 }
 
 async function realpathIfExists(inputPath: string): Promise<string | null> {

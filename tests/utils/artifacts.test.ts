@@ -7,18 +7,20 @@ vi.mock('node:fs/promises', () => ({
   mkdir: vi.fn(async () => undefined),
   open: vi.fn(async () => ({ close: vi.fn(async () => undefined) })),
   realpath: vi.fn(async (p: string) => p),
+  writeFile: vi.fn(async () => undefined),
 }));
 
 vi.mock('@src/utils/outputPaths', () => ({
   getProjectRoot: vi.fn(() => ROOT),
 }));
 
-import { mkdir, open, realpath } from 'node:fs/promises';
+import { mkdir, open, realpath, writeFile } from 'node:fs/promises';
 import {
   generateShortId,
   getArtifactDir,
   getArtifactsRoot,
   resolveArtifactPath,
+  writeArtifactContent,
 } from '@utils/artifacts';
 
 function eexistError(): NodeJS.ErrnoException {
@@ -218,5 +220,42 @@ describe('artifacts utils', () => {
     expect(mockedMkdir).toHaveBeenCalledTimes(65);
     await resolveArtifactPath({ category: 'tmp', toolName: 'x', ext: 'txt', customDir: 'lru-1' });
     expect(mockedMkdir).toHaveBeenCalledTimes(66);
+  });
+});
+
+describe('writeArtifactContent', () => {
+  beforeEach(() => {
+    vi.mocked(writeFile).mockClear();
+  });
+
+  it('writes plaintext content as-is when encrypt is not requested', async () => {
+    const result = await writeArtifactContent(resolve(ROOT, 'artifacts/tmp/x.txt'), 'hello world');
+    expect(result.encryptionKeyHex).toBeUndefined();
+    expect(writeFile).toHaveBeenCalledWith(
+      resolve(ROOT, 'artifacts/tmp/x.txt'),
+      Buffer.from('hello world', 'utf8'),
+    );
+  });
+
+  it('encrypts content and returns a key when encrypt is requested', async () => {
+    const result = await writeArtifactContent(resolve(ROOT, 'artifacts/dumps/x.bin'), 'sensitive', {
+      encrypt: true,
+    });
+    expect(result.encryptionKeyHex).toMatch(/^[0-9a-f]{64}$/);
+
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    const [writtenPath, writtenContent, writeOptions] = vi.mocked(writeFile).mock.calls[0]!;
+    expect(writtenPath).toBe(resolve(ROOT, 'artifacts/dumps/x.bin'));
+    expect(writeOptions).toEqual({ mode: 0o600 });
+
+    const envelope = JSON.parse(writtenContent as string);
+    expect(envelope.algorithm).toBe('aes-256-gcm');
+    expect(envelope.payload).not.toContain('sensitive');
+  });
+
+  it('accepts Uint8Array content for both plaintext and encrypted writes', async () => {
+    const bytes = new Uint8Array([1, 2, 3, 4]);
+    await writeArtifactContent(resolve(ROOT, 'artifacts/dumps/bin.dat'), bytes, { encrypt: true });
+    expect(writeFile).toHaveBeenCalledTimes(1);
   });
 });

@@ -20,6 +20,14 @@ export const tlsAnalysisTools: Tool[] = [
     },
   ),
   objectTool(
+    'tls_keylog_seal',
+    'Encrypt the current keylog file in place with a fresh ephemeral key and securely wipe the ' +
+      'plaintext source. Mitigates disk-forensics exposure (pagefile/hibernation/TEMP scraping) ' +
+      'of captured TLS secrets. The returned keyHex is not persisted anywhere — hold onto it to ' +
+      'decrypt the sealed envelope later, or it is unrecoverable once the process exits.',
+    {},
+  ),
+  objectTool(
     'tls_decrypt_payload',
     'Decrypt a TLS payload using a provided key, nonce, and algorithm.',
     {
