@@ -19,6 +19,7 @@ import {
   type KoffiCallable,
   type Koffi,
 } from './koffi-loader';
+import { parseContext, CONTEXT_SIZE, CONTEXT_FLAGS, IS_ARM64_WINDOWS } from './Win32Debug';
 
 export interface CallStackFrame {
   frameIndex: number;
@@ -44,14 +45,8 @@ const THREAD_SUSPEND_RESUME = 0x0002;
 const PROCESS_QUERY_INFORMATION = 0x0400;
 const PROCESS_VM_READ = 0x0010;
 const PROCESS_VM_OPERATION = 0x0008;
-const CONTEXT_FULL_X64 = 0x00100007;
+// CONTEXT_FULL is sourced from Win32Debug (arch-aware: AMD64 vs ARM64).
 const MAX_FRAMES = 128;
-
-// CONTEXT64 register offsets for manual Buffer.readBigUInt64LE access
-const CONTEXT_RBP_OFFSET = 0xa0;
-const CONTEXT_RIP_OFFSET = 0xf8;
-const CONTEXT_SIZE = 1232;
-const CONTEXT_FLAGS_OFFSET = 0x30;
 
 // ── koffi struct type definitions ──
 // NOTE: These types are passed as opaque pointers to FFI functions.
@@ -364,17 +359,23 @@ export function walkCallStack(pid: number, threadId?: number): CallStackFrame[] 
   // Suspend + get context
   getSuspendThread()(hThread);
 
-  const ctx = Buffer.alloc(CONTEXT_SIZE);
-  ctx.writeUInt32LE(CONTEXT_FULL_X64, CONTEXT_FLAGS_OFFSET);
-  if (!getGetThreadContext()(hThread, requireKoffi().address(ctx))) {
-    getResumeThread()(hThread);
-    getCloseHandle()(hThread);
-    getCloseHandle()(hProcess);
-    throw new Error(`Failed to get thread context for thread ${targetTid}.`);
-  }
+  const ctx = parseContext(
+    (() => {
+      const buf = Buffer.alloc(CONTEXT_SIZE);
+      // CONTEXT_FULL is arch-aware (AMD64 vs ARM64 flag values + offsets).
+      buf.writeUInt32LE(CONTEXT_FLAGS.FULL, IS_ARM64_WINDOWS ? 0x00 : 0x30);
+      if (!getGetThreadContext()(hThread, requireKoffi().address(buf))) {
+        getResumeThread()(hThread);
+        getCloseHandle()(hThread);
+        getCloseHandle()(hProcess);
+        throw new Error(`Failed to get thread context for thread ${targetTid}.`);
+      }
+      return buf;
+    })(),
+  );
 
-  const rip = ctx.readBigUInt64LE(CONTEXT_RIP_OFFSET);
-  const rbp = ctx.readBigUInt64LE(CONTEXT_RBP_OFFSET);
+  const rip = ctx.rip;
+  const rbp = ctx.rbp;
 
   // Walk the frame-pointer chain
   const frames: CallStackFrame[] = [];
