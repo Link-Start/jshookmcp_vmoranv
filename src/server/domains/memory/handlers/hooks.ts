@@ -716,19 +716,35 @@ export class HookHandlers {
 
   async handleCallStack(args: Record<string, unknown>) {
     return handleSafe(async () => {
-      if (process.platform !== 'win32') {
-        throw new Error(
-          `${TOOL_CALL_STACK}: call stack walking is only supported on Windows (x64). ` +
-            'This tool requires dbghelp.dll / kernel32 Toolhelp32 APIs.',
-        );
-      }
-
       const pid = await this.resolvePid(args.pid);
       const threadId = argNumber(args, 'threadId');
       const maxFrames = argNumber(args, 'maxFrames');
 
       const { walkCallStack } = await import('@native/CallStack');
-      const frames = walkCallStack(pid, threadId ?? undefined);
+      let frames: ReturnType<typeof walkCallStack>;
+      try {
+        frames = walkCallStack(pid, threadId ?? undefined);
+      } catch (err) {
+        // walkCallStack is the source of truth for platform support — it
+        // throws a descriptive error on non-Windows. Surface that to the
+        // caller as a structured response instead of letting the error
+        // bubble up as an MCP exception, so the test/mocked path stays in
+        // step with real-environment behaviour.
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          success: false,
+          pid,
+          threadId: threadId ?? null,
+          frameCount: 0,
+          totalFrames: 0,
+          truncated: false,
+          frames: [],
+          error: `${TOOL_CALL_STACK}: ${message}`,
+          hint:
+            'Call stack walking requires Windows (x64) with dbghelp.dll / kernel32 Toolhelp32 APIs. ' +
+            'On other platforms no frames are available.',
+        };
+      }
 
       const sliced = maxFrames && maxFrames > 0 ? frames.slice(0, maxFrames) : frames;
 
