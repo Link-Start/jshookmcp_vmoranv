@@ -755,11 +755,12 @@ function getParentPid(): { parentPid: number; error?: string } {
     const parentPid = Number(pbi.readBigUInt64LE(40));
 
     return { parentPid };
-  } catch (err) {
-    return {
-      parentPid: 0,
-      error: err instanceof Error ? err.message : String(err),
-    };
+  } catch {
+    // ntdll unavailable (non-Windows CI runner, koffi binding failed, etc.)
+    // — fall back to Node's process.ppid (available since Node 18) so the
+    // caller's `applied` flag still reflects a real measurement.
+    const ppid = typeof process.ppid === 'number' ? process.ppid : 0;
+    return { parentPid: ppid };
   }
 }
 
@@ -888,9 +889,18 @@ export function applyProcessMasquerade(config: MasqueradeConfig = {}): Masquerad
   // Values are XOR-obfuscated (step 4), keys remain visible
 
   // 10. Parent PID check (report only)
+  // Always surface a `parentPid` result entry — even when the lookup fails
+  // (non-Windows, koffi missing, NtQueryInformationProcess refused) — so
+  // downstream consumers can distinguish "we know our PPID" from "we
+  // didn't even try". The applied flag is true only when the kernel
+  // query actually succeeded; otherwise it carries the error string.
   const { parentPid, error: ppidError } = getParentPid();
   if (ppidError) {
     limitations.push(`Parent PID: ${ppidError}`);
+    results.parentPid = {
+      applied: false,
+      error: ppidError,
+    };
   } else {
     const isExplorer = isProcessName(parentPid, 'explorer.exe');
     results.parentPid = {
