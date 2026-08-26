@@ -5,7 +5,7 @@
  * Win32 APIs are mocked.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CodeInjector } from '@native/CodeInjector';
 import {
   ReadProcessMemory,
@@ -93,10 +93,22 @@ vi.mock('@native/ManualMapInjector', () => ({
 
 describe('CodeInjector', () => {
   let injector: CodeInjector;
+  let originalPlatform: NodeJS.Platform;
 
   beforeEach(() => {
     injector = new CodeInjector();
     vi.clearAllMocks();
+    // Force win32 so platform guards in injectDll / injectShellcode don't
+    // short-circuit before the mocked Win32 API surface is exercised.
+    originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', {
+      value: originalPlatform,
+      configurable: true,
+    });
   });
 
   describe('patchBytes', () => {
