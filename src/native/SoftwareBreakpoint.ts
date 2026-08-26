@@ -43,6 +43,7 @@ import {
   openThreadForDebug,
   parseContext,
   writeContext,
+  setSingleStepFlag,
   EXCEPTION_CODE,
   DBG,
   CONTEXT_FLAGS,
@@ -309,12 +310,10 @@ export class SoftwareBreakpointEngine {
         CloseHandle(handle);
       }
 
-      // Enable single-step (TF = bit 8 in EFLAGS/RFLAGS)
-      const eflags = ctx.eflags | 0x100;
-      ctxBuf.writeUInt32LE(eflags, 0x44);
-      // Set RIP back to the INT3 address so the restored original instruction runs
-      ctxBuf.writeBigUInt64LE(excAddr, 0xf8);
-      writeContext(ctxBuf, { contextFlags: CONTEXT_FLAGS.ALL });
+      // Enable single-step (arch-aware: EFLAGS.TF on x64, PSTATE.SS on ARM64)
+      setSingleStepFlag(ctxBuf, true);
+      // Set PC back to the INT3 address so the restored original instruction runs
+      writeContext(ctxBuf, { rip: excAddr, contextFlags: CONTEXT_FLAGS.ALL });
       SetThreadContext(hThread, ctxBuf);
       ResumeThread(hThread);
 

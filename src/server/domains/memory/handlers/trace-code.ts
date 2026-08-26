@@ -43,8 +43,7 @@ import {
   GetThreadContext,
   SetThreadContext,
   openThreadForDebug,
-  parseContext,
-  writeContext,
+  setSingleStepFlag,
   EXCEPTION_CODE,
   DEBUG_EVENT_CODE,
   DBG,
@@ -282,9 +281,9 @@ export class TraceCodeHandlers {
                   try {
                     SuspendThread(tHandle);
                     const ctxBuf = GetThreadContext(tHandle, CONTEXT_FLAGS.CONTROL);
-                    const ctx = parseContext(ctxBuf);
-                    ctx.eflags |= 0x100; // TF (Trap Flag)
-                    writeContext(ctxBuf, ctx);
+                    // Set the single-step flag arch-aware (EFLAGS.TF on x64,
+                    // PSTATE.SS on ARM64) so INT3 re-arming resumes step-by-step.
+                    setSingleStepFlag(ctxBuf, true);
                     SetThreadContext(tHandle, ctxBuf);
                     ResumeThread(tHandle);
                   } finally {
@@ -306,14 +305,12 @@ export class TraceCodeHandlers {
                 try {
                   WriteProcessMemory(memHandle, stepAddr, Buffer.from([0xcc]));
 
-                  // Clear TF
+                  // Clear the single-step flag (arch-aware)
                   const tHandle = openThreadForDebug(threadId);
                   try {
                     SuspendThread(tHandle);
                     const ctxBuf = GetThreadContext(tHandle, CONTEXT_FLAGS.CONTROL);
-                    const ctx = parseContext(ctxBuf);
-                    ctx.eflags &= ~0x100;
-                    writeContext(ctxBuf, ctx);
+                    setSingleStepFlag(ctxBuf, false);
                     SetThreadContext(tHandle, ctxBuf);
                     ResumeThread(tHandle);
                   } finally {
