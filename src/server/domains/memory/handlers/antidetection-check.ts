@@ -130,30 +130,38 @@ export class AntiDetectionCheckHandlers {
     let patchDetails: Record<string, boolean> = {};
     let etwMonitoring: Record<string, unknown> = {};
 
-    try {
-      const { isPatched, getPatchDetails, getEtwMonitoringSummary } =
-        await import('@src/native/syscall/InProcessPatcher');
-      etwAmsiPatched = isPatched();
-      if (includeDetails) {
-        patchDetails = getPatchDetails();
-      }
-      etwMonitoring = getEtwMonitoringSummary() as unknown as Record<string, unknown>;
+    // ETW/AMSI patch status is a Windows-only concept. On other platforms
+    // the patcher is a no-op stub and `isPatched()` returns false, which
+    // would otherwise incorrectly penalise the score. Skip both the lookup
+    // and the penalty on non-Windows; expose the unavailable status in
+    // `checks` so callers can still tell the difference.
+    const isWindows = process.platform === 'win32';
+    if (isWindows) {
+      try {
+        const { isPatched, getPatchDetails, getEtwMonitoringSummary } =
+          await import('@src/native/syscall/InProcessPatcher');
+        etwAmsiPatched = isPatched();
+        if (includeDetails) {
+          patchDetails = getPatchDetails();
+        }
+        etwMonitoring = getEtwMonitoringSummary() as unknown as Record<string, unknown>;
 
-      if (!etwAmsiPatched) {
-        score -= penaltyPerFail;
-        recommendations.push(
-          'ETW/AMSI not patched — call memory_antidetection action=harden to apply',
-        );
+        if (!etwAmsiPatched) {
+          score -= penaltyPerFail;
+          recommendations.push(
+            'ETW/AMSI not patched — call memory_antidetection action=harden to apply',
+          );
+        }
+      } catch {
+        score -= penaltyPerWarn;
+        recommendations.push('Could not check ETW/AMSI patch status');
       }
-    } catch {
-      score -= penaltyPerWarn;
-      recommendations.push('Could not check ETW/AMSI patch status');
     }
 
     // ── 2. Debugger detection ─────────────────────────────────────────────
     let debuggerAttached = false;
 
-    if (process.platform === 'win32') {
+    if (isWindows) {
       try {
         const koffi = require('koffi');
         const k32 = koffi.load('kernel32.dll');
@@ -205,7 +213,7 @@ export class AntiDetectionCheckHandlers {
     let hvciEnabled = false;
     let vbsEnabled = false;
 
-    if (process.platform === 'win32') {
+    if (isWindows) {
       try {
         // Check HVCI via registry: HKLM\System\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity
         const { execSync } = require('node:child_process');
@@ -244,7 +252,7 @@ export class AntiDetectionCheckHandlers {
     // ── 4. Anti-cheat / EDR / debugger process detection ──────────────────
     let acProcesses: string[] = [];
 
-    if (process.platform === 'win32') {
+    if (isWindows) {
       try {
         const { execSync } = require('node:child_process');
         const tasklistOutput = execSync('tasklist /FO CSV /NH', {
