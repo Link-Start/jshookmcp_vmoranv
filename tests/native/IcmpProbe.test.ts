@@ -176,7 +176,10 @@ describe('IcmpProbe Windows ICMP_ECHO_REPLY32 (x86 layout)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(process, 'platform', { value: 'win32' });
-    Object.defineProperty(process, 'arch', { value: 'x86' });
+    // Node's real 32-bit arch value is 'ia32' (Windows/other platforms use
+    // 'x64' / 'arm64' / 'ia32' — never 'x86'). Using the real value keeps the
+    // width gate (`process.arch !== 'ia32'`) exercising the 32-bit layout.
+    Object.defineProperty(process, 'arch', { value: 'ia32' });
   });
 
   afterEach(() => {

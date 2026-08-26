@@ -189,7 +189,9 @@ function parseReply(buf: Buffer): { address: number; status: number; rtt: number
   //   x64 (ICMP_ECHO_REPLY):   Address(PVOID @0, 8B) Status(@8) RoundTripTime(@12)
   // Reading the 32-bit offsets on x64 shifts every field: "status" would read
   // the upper half of the Address pointer and "rtt" would read Status.
-  const is64 = process.arch === 'x64';
+  // ICMP_ECHO_REPLY layout differs by pointer width. Both x64 and ARM64 use
+  // 8-byte pointers (PVOID), so only the 32-bit x86 target uses the small layout.
+  const is64 = process.arch !== 'ia32';
   return {
     address: is64 ? Number(buf.readBigUInt64LE(0)) & 0xffffffff : buf.readUInt32LE(0),
     status: buf.readUInt32LE(is64 ? 8 : 4),
