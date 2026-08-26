@@ -73,8 +73,10 @@ import {
   parseContext,
   writeContext,
   encodeDR7,
+  writeBreakpointRegisters,
   CONTEXT_FLAGS,
   CONTEXT_SIZE,
+  IS_ARM64_WINDOWS,
 } from './Win32Debug';
 import {
   CloseHandle,
@@ -447,6 +449,17 @@ export class VehDebuggerEngine {
 
   /** Inject VEH handler into target, create shared memory + named event. */
   async attach(pid: number): Promise<void> {
+    if (IS_ARM64_WINDOWS) {
+      // This engine injects an x86-64 shellcode (VEH stub + shared-memory header)
+      // into the target — not portable to a native ARM64 process. The honest
+      // boundary is to refuse rather than inject wrong-arch bytes. Watchpoint
+      // access-breakpoints on WOA are served by HardwareBreakpointEngine (Bcr/Wvr).
+      throw new ToolError(
+        'PREREQUISITE',
+        'VEH debugger injection is x64-only and is not supported on Windows-on-ARM64; ' +
+          'use memory_breakpoint (hardware watchpoint) instead',
+      );
+    }
     if (this.sessions.has(pid)) return;
 
     const hProcess = openProcessForMemory(pid, true);
@@ -810,6 +823,13 @@ export class VehDebuggerEngine {
 
   /** Rearm DR registers after a hit: clear DR6 + set RF on all threads. */
   private rearmDR(pid: number): void {
+    if (IS_ARM64_WINDOWS) {
+      // On ARM64 there is no DR6 or EFLAGS.RF — watchpoints auto-disable on the
+      // faulting access and are re-armed by the next writeBreakpointRegisters.
+      // Nothing else to reset here.
+      void pid;
+      return;
+    }
     const threads = EnumerateProcessThreads(pid);
     for (const tid of threads) {
       let hThread: bigint;
@@ -854,8 +874,6 @@ export class VehDebuggerEngine {
       read: 'read',
     };
 
-    const drOffsets = [0x48, 0x50, 0x58, 0x60];
-
     for (const tid of threads) {
       let hThread: bigint;
       try {
@@ -868,32 +886,31 @@ export class VehDebuggerEngine {
         SuspendThread(hThread);
         const ctxBuf = GetThreadContext(hThread, CONTEXT_FLAGS.ALL);
 
-        if (enable) {
-          ctxBuf.writeBigUInt64LE(address, drOffsets[drIndex]!);
-        } else {
-          ctxBuf.writeBigUInt64LE(0n, drOffsets[drIndex]!);
+        // Arch-aware debug-register write (AMD64: DR0-3+DR7; ARM64: Wvr/Wcr).
+        writeBreakpointRegisters(ctxBuf, drIndex, enable ? address : null, enable, access);
+
+        if (!IS_ARM64_WINDOWS) {
+          const entries = Array.from(this.breakpoints.values())
+            .filter((bp) => bp.enabled && bp.pid === pid)
+            .map((bp) => ({
+              drIndex: bp.drIndex,
+              enabled: true,
+              access: drAccessMap[bp.access],
+              size: bp.size,
+            }));
+
+          if (enable) {
+            entries.push({
+              drIndex,
+              enabled: true,
+              access: drAccessMap[access],
+              size,
+            });
+          }
+
+          const dr7 = encodeDR7(entries);
+          ctxBuf.writeBigUInt64LE(dr7, 0x70);
         }
-
-        const entries = Array.from(this.breakpoints.values())
-          .filter((bp) => bp.enabled && bp.pid === pid)
-          .map((bp) => ({
-            drIndex: bp.drIndex,
-            enabled: true,
-            access: drAccessMap[bp.access],
-            size: bp.size,
-          }));
-
-        if (enable) {
-          entries.push({
-            drIndex,
-            enabled: true,
-            access: drAccessMap[access],
-            size,
-          });
-        }
-
-        const dr7 = encodeDR7(entries);
-        ctxBuf.writeBigUInt64LE(dr7, 0x70);
 
         writeContext(ctxBuf, { contextFlags: CONTEXT_FLAGS.ALL });
         SetThreadContext(hThread, ctxBuf);

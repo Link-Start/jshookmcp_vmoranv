@@ -75,9 +75,13 @@ vi.mock('@native/Win32Debug', () => ({
     rip: 0x7ffe1234n,
   })),
   writeContext: vi.fn(),
+  writeBreakpointRegisters: vi.fn(),
+  readBreakpointRegisterAddress: vi.fn(() => 0n),
+  setSingleStepFlag: vi.fn(),
   encodeDR7: vi.fn(() => 0n),
   CONTEXT_FLAGS: { ALL: 0x0010001f },
   CONTEXT_SIZE: 1232,
+  IS_ARM64_WINDOWS: false,
   EXCEPTION_CODE: { SINGLE_STEP: 0x80000004 },
   DBG: { CONTINUE: 0x00010002 },
 }));
