@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, afterAll, vi } from 'vitest';
 import {
   applyProcessMasquerade,
   restoreProcessMasquerade,
@@ -6,6 +6,25 @@ import {
 import type { MasqueradeConfig } from '@src/native/syscall/ProcessMasquerade';
 
 describe('ProcessMasquerade', () => {
+  let originalPlatform: NodeJS.Platform;
+
+  beforeAll(() => {
+    // applyProcessMasquerade is a Windows-only module — many of its koffi
+    // branches early-return on non-Windows, which the unit tests below
+    // don't want. Stub platform to win32 for the entire suite (restored
+    // in afterAll). The dedicated "non-Windows" test below temporarily
+    // toggles it back.
+    originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(process, 'platform', {
+      value: originalPlatform,
+      configurable: true,
+    });
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -84,17 +103,18 @@ describe('ProcessMasquerade', () => {
     });
 
     it('applyProcessMasquerade on non-Windows still returns valid structure', () => {
-      const originalPlatform = process.platform;
+      const realPlatform = process.platform;
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
 
       const result = applyProcessMasquerade();
       expect(result).toHaveProperty('applied');
       expect(result).toHaveProperty('limitations');
-      // parentPid is not added on non-Windows (getParentPid returns error)
+      // On non-Windows, getParentPid() returns an error so the lookup
+      // result lands in `limitations` for visibility.
       expect(result.limitations.some((l) => l.includes('Parent PID'))).toBe(true);
 
       Object.defineProperty(process, 'platform', {
-        value: originalPlatform,
+        value: realPlatform,
         configurable: true,
       });
     });
