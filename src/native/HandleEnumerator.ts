@@ -380,6 +380,23 @@ export class HandleElevationError extends Error {
  * @returns Enumeration result with resolved handles
  */
 export function enumerateProcessHandles(pid: number, opts: EnumerateOptions = {}): EnumerateResult {
+  // Check koffi availability BEFORE the platform check. On a non-Windows
+  // machine the koffi binding is what makes this module usable at all
+  // (loading kernel32/ntdll), so a missing binding should be reported
+  // as the more actionable "koffi native library is not available" error
+  // rather than the generic platform error.
+  try {
+    requireKoffi();
+  } catch (err) {
+    return {
+      success: false,
+      entries: [],
+      totalSystemHandles: 0,
+      typeIndexCache: new Map(),
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
   if (!isWindows()) {
     return {
       success: false,
