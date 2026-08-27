@@ -4129,7 +4129,7 @@ export const GENERATED_TOOL_CATALOG = [
     tool: {
       name: 'canvas_inject_draw_hook',
       description:
-        'Intercept Canvas 2D (drawImage/fillText/strokeText) and WebGL (drawArrays/drawElements) draw calls into a ring buffer on the page. Actions: install (wrap prototypes), read (dump captured calls), uninstall (restore).',
+        'Intercept Canvas 2D (drawImage/fillText/strokeText) and WebGL (drawArrays/drawElements) draw calls into a ring buffer on the page. Actions: install (wrap prototypes), read (dump captured calls), uninstall (restore). Set timing=true at install to also sample a requestAnimationFrame loop; then includeTiming=true at read to get frame-level stats (avg/p95 frame time, dropped frames, 60fps budget misses).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -4154,6 +4154,25 @@ export const GENERATED_TOOL_CATALOG = [
           clear: {
             type: 'boolean',
             description: 'Clear the buffer after reading (read only)',
+            default: false,
+          },
+          timing: {
+            type: 'boolean',
+            description: 'Start a requestAnimationFrame sampler alongside the hook (install only)',
+            default: false,
+          },
+          maxFrames: {
+            type: 'number',
+            description:
+              'Frame-timeline ring-buffer cap before sampling self-stops (install + timing only, bounds page-heap growth)',
+            default: 1800,
+            minimum: 1,
+            maximum: 100000,
+          },
+          includeTiming: {
+            type: 'boolean',
+            description:
+              'Include frame timeline + stats (avg/p95 frame time, dropped frames, budget misses) in the read result (read only, requires timing=true at install)',
             default: false,
           },
         },
@@ -12932,7 +12951,7 @@ export const GENERATED_TOOL_CATALOG = [
     tool: {
       name: 'memory_call_stack',
       description:
-        'Walk the call stack of a target process thread using the x64 RBP frame-pointer chain. Suspends the thread, reads the CONTEXT to get RBP/RSP/RIP, then follows the linked list of [saved_RBP][return_address] frames via ReadProcessMemory. Resolves module names using Toolhelp32 module snapshots. Returns an array of {frameIndex, returnAddress, moduleName, functionName}. Equivalent to x64dbg\'s "standard" call stack mode. Win32 (x64) only — requires Administrator privileges.',
+        'Walk the call stack of a target process thread using the x64 RBP frame-pointer chain. Suspends the thread, reads the CONTEXT to get RBP/RSP/RIP, then follows the linked list of saved_RBP / return_address frames via ReadProcessMemory. Resolves module names using Toolhelp32 module snapshots. Returns an array of {frameIndex, returnAddress, moduleName, functionName}. Equivalent to x64dbg\'s "standard" call stack mode. Win32 (x64) only — requires Administrator privileges.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -24567,6 +24586,19 @@ export const GENERATED_TOOL_CATALOG = [
   },
   {
     tool: {
+      name: 'tls_keylog_seal',
+      description:
+        'Encrypt the current keylog file in place with a fresh ephemeral key and securely wipe the plaintext source. Mitigates disk-forensics exposure (pagefile/hibernation/TEMP scraping) of captured TLS secrets. The returned keyHex is not persisted anywhere — hold onto it to decrypt the sealed envelope later, or it is unrecoverable once the process exits.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+    domain: 'boringssl-inspector',
+  },
+  {
+    tool: {
       name: 'tls_keylog_summarize',
       description:
         'Summarize an SSLKEYLOGFILE: per-label distribution, secret-type classification (TLS 1.2 master-secret vs TLS 1.3 traffic-secret kinds), TLS version inference, and unique session (client_random) count.',
@@ -25299,7 +25331,7 @@ export const GENERATED_TOOL_CATALOG = [
     tool: {
       name: 'v8_allocation_track',
       description:
-        'Track live V8 allocations via CDP HeapProfiler object tracking. Starts allocation tracking for a capture window (default 3s), then returns currently-live objects seen during the window with their allocation stack (top frame + size). Useful for finding objects that survive GC during a specific interaction. Requires browser/page CDP context and V8 natives for full stack resolution.',
+        'Track live V8 allocations via CDP HeapProfiler object tracking. Enables the HeapProfiler, calls startTrackingHeapObjects({ trackAllocations: true }) to collect lastSeenObjectId events for a capture window (default 3s), then stopTrackingHeapObjects (with an explicit takeHeapSnapshot fallback) to return currently-live objects seen during the window with their allocation stack (top frame + size). Useful for finding objects that survive GC during a specific interaction. Requires browser/page CDP context and V8 natives for full stack resolution.',
       inputSchema: {
         type: 'object',
         properties: {

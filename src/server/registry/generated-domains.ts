@@ -284,7 +284,7 @@ export const DOMAIN_PROFILE_MAP: Readonly<Record<string, readonly string[]>> = {
 export const DOMAIN_TOOL_COUNT_MAP: Readonly<Record<string, number>> = {
   'adb-bridge': 26,
   'binary-instrument': 44,
-  'boringssl-inspector': 28,
+  'boringssl-inspector': 29,
   browser: 80,
   canvas: 9,
   coordination: 12,
