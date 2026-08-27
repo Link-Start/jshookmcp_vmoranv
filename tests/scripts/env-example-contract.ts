@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { relative } from 'node:path';
-import ts from 'typescript';
+// TS 7.0 ships no compiler API; use the TS 6 compat package for AST access.
+import ts from 'typescript6';
 
 const TYPED_READER_NAMES = new Set([
   'autoInt',

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { glob } from 'tinyglobby';
 import { readFile } from 'node:fs/promises';
 import { relative } from 'node:path';
-import ts from 'typescript';
+// TS 7.0 ships no compiler API; use the TS 6 compat package for AST access.
+import ts from 'typescript6';
 
 const ALLOWED_LITERAL_PATTERNS = [
   'tests/shared/test-urls.ts',
