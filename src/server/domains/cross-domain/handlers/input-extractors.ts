@@ -66,73 +66,59 @@ export function extractSkiaSceneTree(value: unknown): SkiaSceneTree {
 }
 
 export function extractJSObjectArray(value: unknown): JSObjectDescriptor[] {
-  return readRecordArray(value).map(
-    (item): JSObjectDescriptor => ({
-      objectId: readString(item['objectId']),
-      className: readString(item['className']),
-      name: readString(item['name']),
-      stringProps: readStringArray(item['stringProps']),
-      numericProps: readNumberRecord(item['numericProps']),
-      colorProps: readStringArray(item['colorProps']),
-      urlProps: readStringArray(item['urlProps']),
-    }),
-  );
+  return readRecordArray(value).map((item): JSObjectDescriptor => ({
+    objectId: readString(item['objectId']),
+    className: readString(item['className']),
+    name: readString(item['name']),
+    stringProps: readStringArray(item['stringProps']),
+    numericProps: readNumberRecord(item['numericProps']),
+    colorProps: readStringArray(item['colorProps']),
+    urlProps: readStringArray(item['urlProps']),
+  }));
 }
 
 export function extractMojoMessages(value: unknown): MojoMessage[] {
-  return readRecordArray(value).map(
-    (item): MojoMessage => ({
-      interface: readString(item['interface']),
-      method: readString(item['method']),
-      timestamp: readNumber(item['timestamp']),
-      messageId: readString(item['messageId']),
-    }),
-  );
+  return readRecordArray(value).map((item): MojoMessage => ({
+    interface: readString(item['interface']),
+    method: readString(item['method']),
+    timestamp: readNumber(item['timestamp']),
+    messageId: readString(item['messageId']),
+  }));
 }
 
 export function extractCDPEvents(value: unknown): CDPEvent[] {
-  return readRecordArray(value).map(
-    (item): CDPEvent => ({
-      eventType: readString(item['eventType']),
-      timestamp: readNumber(item['timestamp']),
-      url: readOptionalString(item['url']),
-    }),
-  );
+  return readRecordArray(value).map((item): CDPEvent => ({
+    eventType: readString(item['eventType']),
+    timestamp: readNumber(item['timestamp']),
+    url: readOptionalString(item['url']),
+  }));
 }
 
 export function extractNetworkRequests(value: unknown): NetworkRequest[] {
-  return readRecordArray(value).map(
-    (item): NetworkRequest => ({
-      requestId: readString(item['requestId']),
-      url: readString(item['url']),
-      timestamp: readNumber(item['timestamp']),
-    }),
-  );
+  return readRecordArray(value).map((item): NetworkRequest => ({
+    requestId: readString(item['requestId']),
+    url: readString(item['url']),
+    timestamp: readNumber(item['timestamp']),
+  }));
 }
 
 export function extractSyscallEvents(value: unknown): SyscallEvent[] {
-  return readRecordArray(value).map(
-    (item): SyscallEvent => ({
-      pid: readNumber(item['pid']),
-      tid: readNumber(item['tid']),
-      syscallName: readString(item['syscallName']),
-      timestamp: readNumber(item['timestamp']),
-    }),
-  );
+  return readRecordArray(value).map((item): SyscallEvent => ({
+    pid: readNumber(item['pid']),
+    tid: readNumber(item['tid']),
+    syscallName: readString(item['syscallName']),
+    timestamp: readNumber(item['timestamp']),
+  }));
 }
 
 export function extractJSStacks(value: unknown): JSStack[] {
-  return readRecordArray(value).map(
-    (item): JSStack => ({
-      threadId: readNumber(item['threadId']),
-      timestamp: readNumber(item['timestamp']),
-      frames: readRecordArray(item['frames']).map(
-        (frame): JSStackFrame => ({
-          functionName: readString(frame['functionName']),
-        }),
-      ),
-    }),
-  );
+  return readRecordArray(value).map((item): JSStack => ({
+    threadId: readNumber(item['threadId']),
+    timestamp: readNumber(item['timestamp']),
+    frames: readRecordArray(item['frames']).map((frame): JSStackFrame => ({
+      functionName: readString(frame['functionName']),
+    })),
+  }));
 }
 
 export function extractGhidraOutput(value: unknown): GhidraOutput | null {
@@ -145,14 +131,12 @@ export function extractGhidraOutput(value: unknown): GhidraOutput | null {
     return null;
   }
 
-  const functions = readRecordArray(value['functions']).map(
-    (item): GhidraFunction => ({
-      name: readString(item['name']),
-      moduleName: readString(item['moduleName']),
-      address: readOptionalString(item['address']),
-      calledFrom: readOptionalStringArray(item['calledFrom']),
-    }),
-  );
+  const functions = readRecordArray(value['functions']).map((item): GhidraFunction => ({
+    name: readString(item['name']),
+    moduleName: readString(item['moduleName']),
+    address: readOptionalString(item['address']),
+    calledFrom: readOptionalStringArray(item['calledFrom']),
+  }));
 
   return { functions, moduleName };
 }

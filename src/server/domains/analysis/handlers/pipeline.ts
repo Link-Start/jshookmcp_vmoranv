@@ -132,14 +132,13 @@ export async function handleJsSolveConstraints(args: ToolArgs): Promise<ToolResp
   const replaceInPlace = argBool(args, 'replaceInPlace', true);
   const maxIterations = argNumber(args, 'maxIterations', 100);
 
-  return cpuLimit(
-    async (): Promise<ToolResponse> =>
-      asJsonResponse(
-        solveConstraints({
-          code,
-          replaceInPlace,
-          maxIterations,
-        }),
-      ),
+  return cpuLimit(async (): Promise<ToolResponse> =>
+    asJsonResponse(
+      solveConstraints({
+        code,
+        replaceInPlace,
+        maxIterations,
+      }),
+    ),
   );
 }

@@ -305,13 +305,11 @@ export class ToolSearchEngine {
     // ── Re-ranker: build domain keywords from tool metadata ──
     this.reRanker = new ReRanker();
     this.reRanker.buildFromTools(
-      this.docs.map(
-        (d): ToolMetadata => ({
-          name: d.name,
-          domain: d.domain ?? '',
-          description: d.description,
-        }),
-      ),
+      this.docs.map((d): ToolMetadata => ({
+        name: d.name,
+        domain: d.domain ?? '',
+        description: d.description,
+      })),
     );
 
     // ── Tool affinity graph (§4.1.4 dependency hull expansion) ──

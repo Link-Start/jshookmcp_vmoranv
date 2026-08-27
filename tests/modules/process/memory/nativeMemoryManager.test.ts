@@ -14,12 +14,10 @@ function createMockProvider(): PlatformMemoryAPI & {
   openProcessMock: ReturnType<typeof vi.fn>;
   closeProcessMock: ReturnType<typeof vi.fn>;
 } {
-  const openProcess = vi.fn(
-    (_pid: number, _write: boolean): ProcessHandle => ({
-      pid: _pid,
-      writeAccess: _write,
-    }),
-  );
+  const openProcess = vi.fn((_pid: number, _write: boolean): ProcessHandle => ({
+    pid: _pid,
+    writeAccess: _write,
+  }));
   const closeProcess = vi.fn();
   const queryRegion = vi.fn();
   const readMemory = vi.fn();

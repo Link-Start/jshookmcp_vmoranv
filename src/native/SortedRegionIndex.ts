@@ -74,13 +74,11 @@ export class SortedRegionIndex {
    */
   build(regions: MemoryRegionInfo[]): void {
     this.regions = regions
-      .map(
-        (r): SortedRegionEntry => ({
-          baseAddress: r.baseAddress,
-          size: r.size,
-          isReadable: r.isReadable,
-        }),
-      )
+      .map((r): SortedRegionEntry => ({
+        baseAddress: r.baseAddress,
+        size: r.size,
+        isReadable: r.isReadable,
+      }))
       .toSorted((a, b) => {
         if (a.baseAddress < b.baseAddress) return -1;
         if (a.baseAddress > b.baseAddress) return 1;
