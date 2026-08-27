@@ -53,10 +53,12 @@ interface HandleEntry {
 }
 
 export class HandleEnumHandlers {
-  constructor(
-    private readonly processManager?: UnifiedProcessManager,
-    private readonly ctx?: MCPServerContext,
-  ) {}
+  private readonly processManager?: UnifiedProcessManager;
+  private readonly ctx?: MCPServerContext;
+  constructor(processManager?: UnifiedProcessManager, ctx?: MCPServerContext) {
+    this.processManager = processManager;
+    this.ctx = ctx;
+  }
 
   private async resolvePid(value: unknown): Promise<number> {
     return await resolveMemoryDomainPid(value, this.processManager, this.ctx);

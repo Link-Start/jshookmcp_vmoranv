@@ -128,16 +128,24 @@ function capMaxResults(value: number | undefined): number {
 }
 
 export class ScanHandlers {
+  private readonly scanner: MemoryScanner;
+  private readonly eventBus?: EventBus<ServerEventMap>;
+  private readonly processManager?: UnifiedProcessManager;
+  private readonly ctx?: MCPServerContext;
   private readonly auditTrail: MemoryAuditTrail | null;
   readonly customTypes = new CustomTypeRegistry();
 
   constructor(
-    private readonly scanner: MemoryScanner,
-    private readonly eventBus?: EventBus<ServerEventMap>,
-    private readonly processManager?: UnifiedProcessManager,
-    private readonly ctx?: MCPServerContext,
+    scanner: MemoryScanner,
+    eventBus?: EventBus<ServerEventMap>,
+    processManager?: UnifiedProcessManager,
+    ctx?: MCPServerContext,
     auditTrail?: MemoryAuditTrail | null,
   ) {
+    this.scanner = scanner;
+    this.eventBus = eventBus;
+    this.processManager = processManager;
+    this.ctx = ctx;
     this.auditTrail = auditTrail ?? null;
   }
 

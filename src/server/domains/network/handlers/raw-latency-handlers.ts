@@ -48,7 +48,10 @@ type PinnedLookupAllCallback = (
 ) => void;
 
 export class RawLatencyHandlers {
-  constructor(private readonly eventBus?: EventBus<ServerEventMap>) {}
+  private readonly eventBus?: EventBus<ServerEventMap>;
+  constructor(eventBus?: EventBus<ServerEventMap>) {
+    this.eventBus = eventBus;
+  }
 
   async handleNetworkRttMeasure(args: Record<string, unknown>) {
     const urlRaw = parseOptionalString(args.url, 'url');

@@ -34,15 +34,24 @@ import { NETWORK_SMART_HANDLE_THRESHOLD_BYTES } from '@src/constants';
 import type { ToolResponse } from '@server/types';
 
 export class NetworkHandlersCore {
+  protected collector: CodeCollector;
+  protected consoleMonitor: ConsoleMonitor;
+  protected eventBus?: EventBus<ServerEventMap>;
+  protected traceRecorderGetter?: () => TraceRecorder | null;
   protected performanceMonitor: PerformanceMonitor | null = null;
   protected detailedDataManager = getDetailedDataManager();
 
   constructor(
-    protected collector: CodeCollector,
-    protected consoleMonitor: ConsoleMonitor,
-    protected eventBus?: EventBus<ServerEventMap>,
-    protected traceRecorderGetter?: () => TraceRecorder | null,
-  ) {}
+    collector: CodeCollector,
+    consoleMonitor: ConsoleMonitor,
+    eventBus?: EventBus<ServerEventMap>,
+    traceRecorderGetter?: () => TraceRecorder | null,
+  ) {
+    this.collector = collector;
+    this.consoleMonitor = consoleMonitor;
+    this.eventBus = eventBus;
+    this.traceRecorderGetter = traceRecorderGetter;
+  }
 
   protected emit(event: keyof ServerEventMap, payload: ServerEventMap[keyof ServerEventMap]): void {
     void this.eventBus?.emit(event as never, payload);

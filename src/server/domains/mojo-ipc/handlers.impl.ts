@@ -84,11 +84,14 @@ function toJsonSafe(value: unknown): unknown {
 }
 
 export class MojoIPCHandlers {
-  constructor(
-    private monitor?: MojoMonitor,
-    private decoder?: MojoDecoder,
-    private eventBus?: EventBus<ServerEventMap>,
-  ) {}
+  private monitor?: MojoMonitor;
+  private decoder?: MojoDecoder;
+  private eventBus?: EventBus<ServerEventMap>;
+  constructor(monitor?: MojoMonitor, decoder?: MojoDecoder, eventBus?: EventBus<ServerEventMap>) {
+    this.monitor = monitor;
+    this.decoder = decoder;
+    this.eventBus = eventBus;
+  }
 
   async handleMojoMonitorDispatchTool(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => await this.handleMojoMonitorDispatch(args));

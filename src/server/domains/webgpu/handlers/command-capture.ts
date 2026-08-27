@@ -19,13 +19,12 @@ const COMMAND_CAPTURE_POLL_INTERVAL_MS = 50;
  * Captures GPU command queue submissions (render passes, compute dispatches)
  */
 export class CommandCaptureHandler {
+  private deps: WebGPUDomainDependencies;
   private ddm: DetailedDataManager;
   private pageLockManager = getPageLockManager();
 
-  constructor(
-    _ctx: MCPServerContext,
-    private deps: WebGPUDomainDependencies,
-  ) {
+  constructor(_ctx: MCPServerContext, deps: WebGPUDomainDependencies) {
+    this.deps = deps;
     this.ddm = DetailedDataManager.getInstance();
   }
 

@@ -130,7 +130,10 @@ function wsInstanceInjectionFn(): unknown {
 }
 
 export class WsHandlers {
-  constructor(private s: StreamingSharedState) {}
+  private s: StreamingSharedState;
+  constructor(s: StreamingSharedState) {
+    this.s = s;
+  }
 
   private async teardownWsSession(): Promise<void> {
     if (this.s.wsSession && this.s.wsListeners) {

@@ -148,14 +148,20 @@ function normalizeStructureForExport(raw: unknown): InferredStruct {
 }
 
 export class StructureHandlers {
+  private readonly structAnalyzer: StructureAnalyzer;
+  private readonly processManager?: UnifiedProcessManager;
+  private readonly ctx?: MCPServerContext;
   private readonly auditTrail: MemoryAuditTrail | null;
 
   constructor(
-    private readonly structAnalyzer: StructureAnalyzer,
-    private readonly processManager?: UnifiedProcessManager,
-    private readonly ctx?: MCPServerContext,
+    structAnalyzer: StructureAnalyzer,
+    processManager?: UnifiedProcessManager,
+    ctx?: MCPServerContext,
     auditTrail?: MemoryAuditTrail | null,
   ) {
+    this.structAnalyzer = structAnalyzer;
+    this.processManager = processManager;
+    this.ctx = ctx;
     this.auditTrail = auditTrail ?? null;
   }
 

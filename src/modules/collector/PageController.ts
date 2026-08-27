@@ -98,6 +98,7 @@ async function dismissDialog(dialog: { dismiss: () => Promise<void> }): Promise<
 }
 
 export class PageController {
+  private collector: CodeCollector;
   private pagePersistentScripts = new WeakMap<
     Page,
     Map<string, { source: string; identifier: string }>
@@ -109,7 +110,9 @@ export class PageController {
     (dialog: { dismiss: () => Promise<void> }) => Promise<void>
   >();
 
-  constructor(private collector: CodeCollector) {}
+  constructor(collector: CodeCollector) {
+    this.collector = collector;
+  }
 
   private getChromeNavigationWaitUntil(
     waitUntil: PageNavigationWaitUntil = 'networkidle',

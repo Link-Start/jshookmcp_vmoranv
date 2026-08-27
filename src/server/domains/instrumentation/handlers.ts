@@ -24,10 +24,15 @@ interface InstrumentationHandlerDeps {
 const INSTRUMENTATION_TYPES = new Set<InstrumentationType>(Object.values(InstrumentationType));
 
 export class InstrumentationHandlers {
+  private readonly sessionManager: InstrumentationSessionManager;
+  private readonly deps: InstrumentationHandlerDeps;
   constructor(
-    private readonly sessionManager: InstrumentationSessionManager,
-    private readonly deps: InstrumentationHandlerDeps = {},
-  ) {}
+    sessionManager: InstrumentationSessionManager,
+    deps: InstrumentationHandlerDeps = {},
+  ) {
+    this.sessionManager = sessionManager;
+    this.deps = deps;
+  }
 
   async handleSessionDispatch(args: Record<string, unknown>) {
     const action = argString(args, 'action');

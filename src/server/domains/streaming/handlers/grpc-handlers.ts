@@ -76,10 +76,13 @@ interface PendingRequest {
 }
 
 export class GrpcHandlers {
+  private s: StreamingSharedState;
   /** Provisional request metadata (method/url/content-type) before responseReceived. */
   private readonly pending = new Map<string, PendingRequest>();
 
-  constructor(private s: StreamingSharedState) {}
+  constructor(s: StreamingSharedState) {
+    this.s = s;
+  }
 
   private async teardownGrpcSession(): Promise<void> {
     if (this.s.grpcSession && this.s.grpcListeners) {

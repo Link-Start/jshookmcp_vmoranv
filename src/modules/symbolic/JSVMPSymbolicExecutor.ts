@@ -8,42 +8,44 @@ import { logger } from '@utils/logger';
 import { JSVMP_SYMBOLIC_MAX_STEPS, JSVMP_SYMBOLIC_TIMEOUT_MS } from '@src/constants';
 import type { VMType } from '@internal-types/index';
 
-export enum JSVMPOpcode {
-  PUSH = 0x01,
-  POP = 0x02,
-  DUP = 0x03,
+export const JSVMPOpcode = {
+  PUSH: 0x01,
+  POP: 0x02,
+  DUP: 0x03,
 
-  ADD = 0x10,
-  SUB = 0x11,
-  MUL = 0x12,
-  DIV = 0x13,
-  MOD = 0x14,
+  ADD: 0x10,
+  SUB: 0x11,
+  MUL: 0x12,
+  DIV: 0x13,
+  MOD: 0x14,
 
-  AND = 0x20,
-  OR = 0x21,
-  NOT = 0x22,
-  XOR = 0x23,
+  AND: 0x20,
+  OR: 0x21,
+  NOT: 0x22,
+  XOR: 0x23,
 
-  EQ = 0x30,
-  NE = 0x31,
-  LT = 0x32,
-  LE = 0x33,
-  GT = 0x34,
-  GE = 0x35,
+  EQ: 0x30,
+  NE: 0x31,
+  LT: 0x32,
+  LE: 0x33,
+  GT: 0x34,
+  GE: 0x35,
 
-  JMP = 0x40,
-  JZ = 0x41,
-  JNZ = 0x42,
-  CALL = 0x43,
-  RET = 0x44,
+  JMP: 0x40,
+  JZ: 0x41,
+  JNZ: 0x42,
+  CALL: 0x43,
+  RET: 0x44,
 
-  LOAD = 0x50,
-  STORE = 0x51,
-  LOAD_CONST = 0x52,
+  LOAD: 0x50,
+  STORE: 0x51,
+  LOAD_CONST: 0x52,
 
-  NOP = 0x00,
-  HALT = 0xff,
-}
+  NOP: 0x00,
+  HALT: 0xff,
+} as const;
+
+export type JSVMPOpcode = (typeof JSVMPOpcode)[keyof typeof JSVMPOpcode];
 
 export interface JSVMPInstruction {
   opcode: JSVMPOpcode;

@@ -123,6 +123,7 @@ export interface ObjectPropertyInfo {
 }
 
 export class DebuggerManager {
+  private collector: CodeCollector;
   private cdpSession: CDPSession | null = null;
   private enabled = false;
   private initPromise?: Promise<void>;
@@ -148,7 +149,8 @@ export class DebuggerManager {
 
   private sessionManager: DebuggerSessionManager;
 
-  constructor(private collector: CodeCollector) {
+  constructor(collector: CodeCollector) {
+    this.collector = collector;
     this.sessionManager = new DebuggerSessionManager(this);
     this.touchInternalStateForTypeCheck();
   }

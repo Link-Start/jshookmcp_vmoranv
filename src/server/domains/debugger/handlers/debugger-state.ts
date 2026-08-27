@@ -10,7 +10,10 @@ interface DebuggerStateHandlersDeps {
 }
 
 export class DebuggerStateHandlers {
-  constructor(private deps: DebuggerStateHandlersDeps) {}
+  private deps: DebuggerStateHandlersDeps;
+  constructor(deps: DebuggerStateHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleDebuggerWaitForPaused(args: Record<string, unknown>) {
     const timeout = argNumber(args, 'timeout', DEBUGGER_WAIT_FOR_PAUSED_TIMEOUT_MS);

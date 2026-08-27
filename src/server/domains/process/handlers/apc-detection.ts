@@ -13,7 +13,10 @@ import { detectApcInjection } from '@native/APCDetector';
 import type { ProcessHandlerDeps } from './shared-types';
 
 export class ApcDetectionHandlers {
-  constructor(private deps?: ProcessHandlerDeps) {}
+  private deps?: ProcessHandlerDeps;
+  constructor(deps?: ProcessHandlerDeps) {
+    this.deps = deps;
+  }
 
   async handleProcessDetectApc(args: Record<string, unknown>): Promise<unknown> {
     const startedAt = Date.now();

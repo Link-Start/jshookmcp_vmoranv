@@ -56,7 +56,10 @@ interface BrowserControlHandlersDeps {
 }
 
 export class BrowserControlHandlers {
-  constructor(private deps: BrowserControlHandlersDeps) {}
+  private deps: BrowserControlHandlersDeps;
+  constructor(deps: BrowserControlHandlersDeps) {
+    this.deps = deps;
+  }
 
   private pickPreferredAttachPage(
     pages: Array<{ index: number; url: string; title: string }>,

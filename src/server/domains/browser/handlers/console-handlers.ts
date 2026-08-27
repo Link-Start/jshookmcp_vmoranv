@@ -11,7 +11,10 @@ interface ConsoleHandlersDeps {
 }
 
 export class ConsoleHandlers {
-  constructor(private deps: ConsoleHandlersDeps) {}
+  private deps: ConsoleHandlersDeps;
+  constructor(deps: ConsoleHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleConsoleMonitor(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => {

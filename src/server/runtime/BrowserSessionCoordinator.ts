@@ -114,20 +114,34 @@ interface SelectedExecution {
 }
 
 export class BrowserSessionQueueError extends Error {
+  public readonly code:
+    | 'BROWSER_SESSION_QUEUE_FULL'
+    | 'BROWSER_SESSION_QUEUE_TIMEOUT'
+    | 'BROWSER_SESSION_QUEUE_CANCELLED'
+    | 'BROWSER_SESSION_CLOSED'
+    | 'BROWSER_SESSION_LIMIT_REACHED'
+    | 'BROWSER_SESSION_CROSS_SESSION_REENTRY';
+  public readonly retryAfterMs: number | null;
+  public readonly queueDepth: number | null;
+  public readonly queueLimit: number | null;
   constructor(
     message: string,
-    public readonly code:
+    code:
       | 'BROWSER_SESSION_QUEUE_FULL'
       | 'BROWSER_SESSION_QUEUE_TIMEOUT'
       | 'BROWSER_SESSION_QUEUE_CANCELLED'
       | 'BROWSER_SESSION_CLOSED'
       | 'BROWSER_SESSION_LIMIT_REACHED'
       | 'BROWSER_SESSION_CROSS_SESSION_REENTRY',
-    public readonly retryAfterMs: number | null = null,
-    public readonly queueDepth: number | null = null,
-    public readonly queueLimit: number | null = null,
+    retryAfterMs: number | null = null,
+    queueDepth: number | null = null,
+    queueLimit: number | null = null,
   ) {
     super(message);
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+    this.queueDepth = queueDepth;
+    this.queueLimit = queueLimit;
     this.name = 'BrowserSessionQueueError';
   }
 }
@@ -227,6 +241,8 @@ export function parseBrowserSessionSnapshot(
 }
 
 export class BrowserSessionCoordinator {
+  private readonly getCollector: () => CodeCollector | null | undefined;
+  private readonly now: () => number;
   private readonly executionContext = new AsyncLocalStorage<{ sessionId: string }>();
   private readonly sessions = new Map<string, BrowserSessionEntry>();
   private readonly browserOwners = new Set<string>();
@@ -270,10 +286,12 @@ export class BrowserSessionCoordinator {
   private maxQueueWaitMs = 0;
 
   constructor(
-    private readonly getCollector: () => CodeCollector | null | undefined,
+    getCollector: () => CodeCollector | null | undefined,
     options: Partial<BrowserSessionSchedulerOptions & BrowserSessionLifecycleOptions> = {},
-    private readonly now: () => number = () => performance.now(),
+    now: () => number = () => performance.now(),
   ) {
+    this.getCollector = getCollector;
+    this.now = now;
     const maxPending = positiveInteger(options.maxPending, DEFAULT_SCHEDULER_OPTIONS.maxPending);
     this.schedulerOptions = {
       maxPending,

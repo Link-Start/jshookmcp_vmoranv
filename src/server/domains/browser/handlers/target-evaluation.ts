@@ -12,7 +12,10 @@ interface TargetEvaluationHandlersDeps {
 }
 
 export class TargetEvaluationHandlers {
-  constructor(private deps: TargetEvaluationHandlersDeps) {}
+  private deps: TargetEvaluationHandlersDeps;
+  constructor(deps: TargetEvaluationHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleBrowserEvaluateCdpTarget(args: Record<string, unknown>): Promise<ToolResponse> {
     try {

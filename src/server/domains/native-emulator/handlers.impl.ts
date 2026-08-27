@@ -120,11 +120,10 @@ interface ProfileCallNode {
  * dropped along with the emulator instead of leaking past its lifetime.
  */
 class ReleaseNotifyingSessionManager extends SessionManager {
-  constructor(
-    private readonly onRelease: (sessionId: string) => void,
-    options?: SessionManagerOptions,
-  ) {
+  private readonly onRelease: (sessionId: string) => void;
+  constructor(onRelease: (sessionId: string) => void, options?: SessionManagerOptions) {
     super(options);
+    this.onRelease = onRelease;
   }
 
   protected override release(session: EmulatorSession): void {

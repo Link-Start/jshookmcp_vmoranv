@@ -61,14 +61,16 @@ export interface CallStackInfo {
 }
 
 export class RuntimeInspector {
+  private collector: CodeCollector;
+  private debuggerManager: DebuggerManager;
   private cdpSession: CDPSession | null = null;
   private enabled = false;
   private initPromise?: Promise<void>;
 
-  constructor(
-    private collector: CodeCollector,
-    private debuggerManager: DebuggerManager,
-  ) {}
+  constructor(collector: CodeCollector, debuggerManager: DebuggerManager) {
+    this.collector = collector;
+    this.debuggerManager = debuggerManager;
+  }
 
   async init(): Promise<void> {
     if (this.enabled) {

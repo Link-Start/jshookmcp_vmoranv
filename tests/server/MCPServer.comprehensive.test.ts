@@ -32,13 +32,21 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {
   class ResourceTemplate {
+    public readonly uriTemplate: string;
+    private readonly options: {
+      list?: (...args: any[]) => Promise<any> | any;
+      complete?: Record<string, (...args: any[]) => Promise<any> | any>;
+    };
     constructor(
-      public readonly uriTemplate: string,
-      private readonly options: {
+      uriTemplate: string,
+      options: {
         list?: (...args: any[]) => Promise<any> | any;
         complete?: Record<string, (...args: any[]) => Promise<any> | any>;
       },
-    ) {}
+    ) {
+      this.uriTemplate = uriTemplate;
+      this.options = options;
+    }
     get listCallback() {
       return this.options.list;
     }

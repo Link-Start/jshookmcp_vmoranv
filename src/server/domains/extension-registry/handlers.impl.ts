@@ -97,12 +97,14 @@ function toManifestCandidate(record: Record<string, unknown>): Partial<Registere
 }
 
 export class ExtensionRegistryHandlers {
+  private registry?: PluginRegistry;
+  private webhook?: WebhookBridge;
   private webhookServer?: WebhookServer;
 
-  constructor(
-    private registry?: PluginRegistry,
-    private webhook?: WebhookBridge,
-  ) {}
+  constructor(registry?: PluginRegistry, webhook?: WebhookBridge) {
+    this.registry = registry;
+    this.webhook = webhook;
+  }
 
   async handleInstallTool(args: ToolArgs): Promise<ToolResponse> {
     return handleSafe(async () => await this.handleInstall(args));

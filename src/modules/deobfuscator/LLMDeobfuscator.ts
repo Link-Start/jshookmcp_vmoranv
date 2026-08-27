@@ -28,7 +28,10 @@ export interface NameSuggestion {
 }
 
 export class LLMDeobfuscator {
-  constructor(private readonly bridge: LLMSamplingBridge) {}
+  private readonly bridge: LLMSamplingBridge;
+  constructor(bridge: LLMSamplingBridge) {
+    this.bridge = bridge;
+  }
 
   /**
    * Check if the underlying sampling bridge supports LLM delegation.

@@ -19,6 +19,7 @@ import type { EvidenceEdgeType } from '@server/evidence/types';
 import type { InstrumentationOperation, InstrumentationArtifact } from './types';
 
 export class EvidenceGraphBridge {
+  private readonly graph: ReverseEvidenceGraph;
   /** Maps operationId → primary evidence node ID for edge linking. */
   private readonly operationNodeMap = new Map<string, string>();
   /** Maps operationId → request node ID for manual linking / replay chaining. */
@@ -27,7 +28,9 @@ export class EvidenceGraphBridge {
   /** Independent cap on bridge-side maps to prevent unbounded growth. */
   private static readonly MAX_MAP_ENTRIES = 10_000;
 
-  constructor(private readonly graph: ReverseEvidenceGraph) {}
+  constructor(graph: ReverseEvidenceGraph) {
+    this.graph = graph;
+  }
 
   // ── Helpers ─────────────────────────────────────────────
 

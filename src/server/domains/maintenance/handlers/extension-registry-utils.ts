@@ -178,9 +178,9 @@ type RegistryIndexKind = 'plugins' | 'workflows';
 const EXTENSION_SDK_PACKAGE = '@jshookmcp/extension-sdk';
 const LOCAL_EXTENSION_SDK_SPEC_PREFIXES = ['workspace:', 'link:', 'file:'];
 
-const enum RegistryLimit {
-  FETCH_TIMEOUT_MS = 10_000,
-}
+const RegistryLimit = {
+  FETCH_TIMEOUT_MS: 10_000,
+} as const;
 
 function getRegistryCacheDir(): string {
   return getConfig().paths.registryCacheDir;
@@ -202,14 +202,22 @@ export interface RegistryFetchResult<T> {
 }
 
 export class RegistryFetchError extends Error {
+  readonly code: RegistryFetchCode;
+  readonly url: string;
+  readonly cachePath?: string;
+  readonly status?: number;
   constructor(
-    readonly code: RegistryFetchCode,
-    readonly url: string,
+    code: RegistryFetchCode,
+    url: string,
     message: string,
-    readonly cachePath?: string,
-    readonly status?: number,
+    cachePath?: string,
+    status?: number,
   ) {
     super(message);
+    this.code = code;
+    this.url = url;
+    this.cachePath = cachePath;
+    this.status = status;
     this.name = 'RegistryFetchError';
   }
 }

@@ -36,12 +36,21 @@ function assertInjectionEnabled(): void {
 // Memory I/O still via MemoryController / Win32API (synchronous koffi) — not yet
 // migrated to createPlatformProvider(); see a4-01/b3-09 (commit c047a09b).
 export class AutoAssemblerHandlers {
+  private readonly injector: CodeInjector;
+  private readonly scanner: MemoryScanner;
+  private readonly memCtrl: MemoryController;
+  private readonly processManager?: UnifiedProcessManager;
   constructor(
-    private readonly injector: CodeInjector,
-    private readonly scanner: MemoryScanner,
-    private readonly memCtrl: MemoryController,
-    private readonly processManager?: UnifiedProcessManager,
-  ) {}
+    injector: CodeInjector,
+    scanner: MemoryScanner,
+    memCtrl: MemoryController,
+    processManager?: UnifiedProcessManager,
+  ) {
+    this.injector = injector;
+    this.scanner = scanner;
+    this.memCtrl = memCtrl;
+    this.processManager = processManager;
+  }
 
   private async resolvePid(raw: unknown): Promise<number> {
     return resolveMemoryDomainPid(raw, this.processManager);

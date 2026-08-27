@@ -70,6 +70,7 @@ export type { ConsoleMessage, StackFrame, ExceptionInfo } from './ConsoleMonitor
 type PlaywrightNetworkMonitorPage = ConstructorParameters<typeof PlaywrightNetworkMonitor>[0];
 
 export class ConsoleMonitor {
+  private collector: CodeCollector;
   private cdpSession: CDPSessionLike | null = null;
   private networkMonitor: NetworkMonitorLike | null = null;
   private fetchInterceptor: FetchInterceptor | null = null;
@@ -89,7 +90,8 @@ export class ConsoleMonitor {
   private inflight: Map<string, Promise<InspectedObjectProperties>> = new Map();
   private initPromise?: Promise<void>;
   private lastEnableOptions: { enableNetwork?: boolean; enableExceptions?: boolean } = {};
-  constructor(private collector: CodeCollector) {
+  constructor(collector: CodeCollector) {
+    this.collector = collector;
     this.touchSplitMembersForTypeCheck();
   }
   private touchSplitMembersForTypeCheck(): void {

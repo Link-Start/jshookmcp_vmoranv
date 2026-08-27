@@ -74,7 +74,10 @@ async function checkCamoufoxDependencies(): Promise<string | null> {
 }
 
 export class CamoufoxBrowserHandlers {
-  constructor(private deps: CamoufoxBrowserHandlersDeps) {}
+  private deps: CamoufoxBrowserHandlersDeps;
+  constructor(deps: CamoufoxBrowserHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleCamoufoxServerLaunch(args: Record<string, unknown>): Promise<ToolResponse> {
     try {

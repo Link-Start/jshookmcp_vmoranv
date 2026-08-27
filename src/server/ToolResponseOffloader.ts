@@ -71,16 +71,15 @@ interface OffloadPlaceholder {
 const DETAILID_RE = /"_?offload"|detailId|_filePath/;
 
 export class LargeDataOffloader {
+  private readonly detailedData: DetailedDataManager;
   private readonly detailThreshold: number;
   private readonly fileThreshold: number;
   private readonly excludeTools: Set<string>;
   private readonly outputDir: string;
   private readonly maxOffloadFiles: number | undefined;
 
-  constructor(
-    private readonly detailedData: DetailedDataManager,
-    config: OffloaderConfig = {},
-  ) {
+  constructor(detailedData: DetailedDataManager, config: OffloaderConfig = {}) {
+    this.detailedData = detailedData;
     this.detailThreshold = config.detailThreshold ?? OFFLOADER_DETAIL_THRESHOLD_BYTES;
     this.fileThreshold = config.fileThreshold ?? OFFLOADER_FILE_THRESHOLD_BYTES;
     this.excludeTools = config.excludeTools ?? new Set();

@@ -22,7 +22,10 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
 };
 
 export class ScopeInspectionHandlers {
-  constructor(private deps: ScopeInspectionHandlersDeps) {}
+  private deps: ScopeInspectionHandlersDeps;
+  constructor(deps: ScopeInspectionHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleGetScopeVariablesEnhanced(args: Record<string, unknown>) {
     const callFrameId = argString(args, 'callFrameId');

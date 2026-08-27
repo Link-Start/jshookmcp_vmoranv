@@ -17,10 +17,13 @@ type SavedDebuggerSessionSummary = {
  * Delegates all actual debugging operations back to DebuggerManager.
  */
 export class DebuggerSessionManager {
+  private debuggerManager: DebuggerManager;
   private readonly SESSION_IMPORT_BATCH_SIZE = 8;
   private readonly SESSION_FILE_READ_BATCH_SIZE = 8;
 
-  constructor(private debuggerManager: DebuggerManager) {}
+  constructor(debuggerManager: DebuggerManager) {
+    this.debuggerManager = debuggerManager;
+  }
 
   private async processInBatches<T>(
     items: readonly T[],

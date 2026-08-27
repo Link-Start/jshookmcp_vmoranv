@@ -30,15 +30,22 @@ export function demangleMsvcName(name: string): string {
 }
 
 export class RttiParser {
+  private provider: PlatformMemoryAPI;
+  private readCString: (
+    handle: ProcessHandle,
+    address: bigint,
+    maxLen: number,
+  ) => Promise<string | null>;
+  private isValidReadablePointer: (handle: ProcessHandle, address: bigint) => boolean;
   constructor(
-    private provider: PlatformMemoryAPI,
-    private readCString: (
-      handle: ProcessHandle,
-      address: bigint,
-      maxLen: number,
-    ) => Promise<string | null>,
-    private isValidReadablePointer: (handle: ProcessHandle, address: bigint) => boolean,
-  ) {}
+    provider: PlatformMemoryAPI,
+    readCString: (handle: ProcessHandle, address: bigint, maxLen: number) => Promise<string | null>,
+    isValidReadablePointer: (handle: ProcessHandle, address: bigint) => boolean,
+  ) {
+    this.provider = provider;
+    this.readCString = readCString;
+    this.isValidReadablePointer = isValidReadablePointer;
+  }
 
   /**
    * Parse RTTI Complete Object Locator (MSVC x64 layout).

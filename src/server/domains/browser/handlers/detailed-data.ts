@@ -12,7 +12,10 @@ interface DetailedDataHandlersDeps {
 }
 
 export class DetailedDataHandlers {
-  constructor(private deps: DetailedDataHandlersDeps) {}
+  private deps: DetailedDataHandlersDeps;
+  constructor(deps: DetailedDataHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleGetDetailedData(args: Record<string, unknown>): Promise<ToolResponse> {
     try {

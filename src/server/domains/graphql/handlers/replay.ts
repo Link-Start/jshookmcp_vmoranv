@@ -269,7 +269,10 @@ function extractGraphqlErrors(responseJson: unknown): {
 }
 
 export class ReplayHandlers {
-  constructor(private collector: CodeCollector) {}
+  private collector: CodeCollector;
+  constructor(collector: CodeCollector) {
+    this.collector = collector;
+  }
 
   async handleGraphqlReplay(args: Record<string, unknown>) {
     try {

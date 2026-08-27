@@ -68,9 +68,12 @@ function normalizePattern(pattern: Buffer | string): Buffer {
 }
 
 export class LinuxMemoryProviderImpl implements PlatformMemoryAPI {
+  private readonly pid: number;
   readonly platform = 'linux';
 
-  constructor(private readonly pid: number = process.pid) {}
+  constructor(pid: number = process.pid) {
+    this.pid = pid;
+  }
 
   isAvailable(): boolean {
     return isLinuxRuntime();

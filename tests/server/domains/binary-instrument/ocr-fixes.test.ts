@@ -29,15 +29,22 @@ import type { MCPServerContext } from '@server/MCPServer.context';
 import { R } from '@server/domains/shared/ResponseBuilder';
 
 class StubFridaSession {
-  constructor(
-    private readonly options: {
-      available: boolean;
-      sessionId?: string;
-      diagnosticsStatus?: 'attached' | 'detached' | 'error';
-      lastError?: string;
-      scriptError?: string;
-    },
-  ) {}
+  private readonly options: {
+    available: boolean;
+    sessionId?: string;
+    diagnosticsStatus?: 'attached' | 'detached' | 'error';
+    lastError?: string;
+    scriptError?: string;
+  };
+  constructor(options: {
+    available: boolean;
+    sessionId?: string;
+    diagnosticsStatus?: 'attached' | 'detached' | 'error';
+    lastError?: string;
+    scriptError?: string;
+  }) {
+    this.options = options;
+  }
 
   async getAvailability() {
     return this.options.available

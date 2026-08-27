@@ -125,11 +125,18 @@ export function parseAccessedAddresses(
 // Instruction-byte read still via MemoryController.dumpMemory (sync on win32) —
 // not yet migrated to createPlatformProvider(); see a4-01/b3-09 (commit c047a09b).
 export class ReverseMWTHandlers {
+  private readonly memCtrl: MemoryController;
+  private readonly processManager?: UnifiedProcessManager;
+  private readonly ctx?: MCPServerContext;
   constructor(
-    private readonly memCtrl: MemoryController,
-    private readonly processManager?: UnifiedProcessManager,
-    private readonly ctx?: MCPServerContext,
-  ) {}
+    memCtrl: MemoryController,
+    processManager?: UnifiedProcessManager,
+    ctx?: MCPServerContext,
+  ) {
+    this.memCtrl = memCtrl;
+    this.processManager = processManager;
+    this.ctx = ctx;
+  }
 
   private async resolvePid(value: unknown): Promise<number> {
     return await resolveMemoryDomainPid(value, this.processManager, this.ctx);

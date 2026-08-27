@@ -73,9 +73,11 @@ function isHeapSnapshotChunk(value: unknown): value is HeapSnapshotChunk {
 }
 
 export class JSHeapSearchHandlers {
+  private deps: JSHeapSearchDeps;
   private detailedDataManager: DetailedDataManager;
 
-  constructor(private deps: JSHeapSearchDeps) {
+  constructor(deps: JSHeapSearchDeps) {
+    this.deps = deps;
     this.detailedDataManager = DetailedDataManager.getInstance();
   }
 

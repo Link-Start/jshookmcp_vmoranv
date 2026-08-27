@@ -70,6 +70,7 @@ const DEFAULT_MAX_ROWS = 100_000;
 const IMMEDIATE_PRUNE_INTERVAL = 1000;
 
 export class TraceDB {
+  private readonly options: TraceDBOptions;
   private readonly db: import('better-sqlite3').Database;
   private readonly batchSize: number;
   private readonly maxRows: number;
@@ -89,7 +90,8 @@ export class TraceDB {
   private insertConsoleLogStmt!: import('better-sqlite3').Statement;
   private insertExceptionStmt!: import('better-sqlite3').Statement;
 
-  constructor(private readonly options: TraceDBOptions) {
+  constructor(options: TraceDBOptions) {
+    this.options = options;
     if (!Database) {
       throw new Error(formatBetterSqlite3Error(new Error("Cannot find package 'better-sqlite3'")));
     }

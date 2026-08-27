@@ -16,12 +16,11 @@ const SCAN_EXPORT_MAX_BYTES = 16 * 1024 * 1024;
 const SESSION_EXPORT_MAX_ADDRESSES = 100_000;
 
 export class SessionHandlers {
+  private readonly sessionManager: MemoryScanSessionManager;
   private readonly auditTrail: MemoryAuditTrail | null;
 
-  constructor(
-    private readonly sessionManager: MemoryScanSessionManager,
-    auditTrail?: MemoryAuditTrail | null,
-  ) {
+  constructor(sessionManager: MemoryScanSessionManager, auditTrail?: MemoryAuditTrail | null) {
+    this.sessionManager = sessionManager;
     this.auditTrail = auditTrail ?? null;
   }
 

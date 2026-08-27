@@ -114,7 +114,10 @@ function readTimeout(value: unknown, fallback: number): number {
 }
 
 export class TabWorkflowHandlers {
-  constructor(private deps: TabWorkflowDeps) {}
+  private deps: TabWorkflowDeps;
+  constructor(deps: TabWorkflowDeps) {
+    this.deps = deps;
+  }
 
   private get registry(): TabRegistry {
     return this.deps.getTabRegistry();

@@ -29,13 +29,12 @@ interface ShaderAst {
  * with a human-readable disassembly of entry points, bindings, and structs).
  */
 export class ShaderDisassembleHandler {
+  private ctx: MCPServerContext;
   private ddm: DetailedDataManager;
   private disassemblyCache = getShaderDisassemblyCache();
 
-  constructor(
-    private ctx: MCPServerContext,
-    _deps: WebGPUDomainDependencies,
-  ) {
+  constructor(ctx: MCPServerContext, _deps: WebGPUDomainDependencies) {
+    this.ctx = ctx;
     this.ddm = DetailedDataManager.getInstance();
   }
 

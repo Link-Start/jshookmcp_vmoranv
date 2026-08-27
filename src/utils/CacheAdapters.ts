@@ -4,12 +4,15 @@ import type { CodeCache } from '@modules/collector/CodeCache';
 import type { CodeCompressor } from '@modules/collector/CodeCompressor';
 
 export class DetailedDataManagerAdapter implements CacheInstance {
+  private manager: DetailedDataManager;
   name = 'DetailedDataManager';
 
   /** Rough per-entry byte estimate for in-memory entries (avg ~50KB each). */
   private static readonly ESTIMATED_AVG_ENTRY_BYTES = 50 * 1024;
 
-  constructor(private manager: DetailedDataManager) {}
+  constructor(manager: DetailedDataManager) {
+    this.manager = manager;
+  }
 
   getStats(): CacheStats {
     const stats = this.manager.getStats();
@@ -33,9 +36,12 @@ export class DetailedDataManagerAdapter implements CacheInstance {
 }
 
 export class CodeCacheAdapter implements CacheInstance {
+  private cache: CodeCache;
   name = 'CodeCache';
 
-  constructor(private cache: CodeCache) {}
+  constructor(cache: CodeCache) {
+    this.cache = cache;
+  }
 
   async getStats(): Promise<CacheStats> {
     const stats = await this.cache.getStats();
@@ -57,9 +63,12 @@ export class CodeCacheAdapter implements CacheInstance {
 }
 
 export class CodeCompressorAdapter implements CacheInstance {
+  private compressor: CodeCompressor;
   name = 'CodeCompressor';
 
-  constructor(private compressor: CodeCompressor) {}
+  constructor(compressor: CodeCompressor) {
+    this.compressor = compressor;
+  }
 
   getStats(): CacheStats {
     const stats = this.compressor.getStats();

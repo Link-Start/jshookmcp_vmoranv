@@ -2,6 +2,7 @@ import type { CDPSession } from 'rebrowser-puppeteer-core';
 import { logger } from '@utils/logger';
 
 export class BlackboxManager {
+  private cdpSession: CDPSession;
   private blackboxedPatterns: Set<string> = new Set();
 
   static readonly COMMON_LIBRARY_PATTERNS = [
@@ -20,7 +21,8 @@ export class BlackboxManager {
     '*vendor*.js',
   ];
 
-  constructor(private cdpSession: CDPSession) {
+  constructor(cdpSession: CDPSession) {
+    this.cdpSession = cdpSession;
     logger.info('BlackboxManager initialized with shared CDP session');
   }
 

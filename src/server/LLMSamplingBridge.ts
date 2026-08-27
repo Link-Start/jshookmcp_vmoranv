@@ -34,7 +34,10 @@ export interface SampleTextParams {
 }
 
 export class LLMSamplingBridge {
-  constructor(private readonly mcpServer: McpServer) {}
+  private readonly mcpServer: McpServer;
+  constructor(mcpServer: McpServer) {
+    this.mcpServer = mcpServer;
+  }
 
   /**
    * Check whether the connected client has declared `capabilities.sampling`.

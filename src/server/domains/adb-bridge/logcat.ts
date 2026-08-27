@@ -26,10 +26,13 @@ const DEFAULT_MAX_STDERR_BYTES = 64 * 1024;
 const MAX_PENDING_LINE_CHARS = 64 * 1024;
 
 export class LogcatLineCollector {
+  private readonly filter: LogcatLineFilter;
   private readonly lines: string[] = [];
   private pending = '';
 
-  constructor(private readonly filter: LogcatLineFilter) {}
+  constructor(filter: LogcatLineFilter) {
+    this.filter = filter;
+  }
 
   pushChunk(chunk: string): void {
     this.pending += chunk;

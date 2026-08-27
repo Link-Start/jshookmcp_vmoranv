@@ -14,12 +14,19 @@ import { UnifiedProcessManager } from '@modules/process/UnifiedProcessManager';
 import { logger } from '@utils/logger';
 import { readEnvString } from '@src/config/environment';
 
-export enum InjectionValidationMode {
-  STRICT = 'strict', // All checks enforced, confirmation required for unsigned processes
-  BALANCED = 'balanced', // Validation + warnings, no confirmation required (default)
-  PERMISSIVE = 'permissive', // Basic checks only (PID exists, file exists)
-  DISABLED = 'disabled', // No validation (backward compatible)
-}
+export const InjectionValidationMode = {
+  /** All checks enforced, confirmation required for unsigned processes */
+  STRICT: 'strict',
+  /** Validation + warnings, no confirmation required (default) */
+  BALANCED: 'balanced',
+  /** Basic checks only (PID exists, file exists) */
+  PERMISSIVE: 'permissive',
+  /** No validation (backward compatible) */
+  DISABLED: 'disabled',
+} as const;
+
+export type InjectionValidationMode =
+  (typeof InjectionValidationMode)[keyof typeof InjectionValidationMode];
 
 export interface InjectionValidatorConfig {
   mode: InjectionValidationMode;

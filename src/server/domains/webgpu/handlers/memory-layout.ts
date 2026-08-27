@@ -39,12 +39,14 @@ const fallbackSnapshots = new Map<string, MemorySnapshot>();
  * `track` omitted/false the behavior is unchanged (single point snapshot).
  */
 export class MemoryLayoutHandler {
+  private ctx: MCPServerContext;
+  private deps: WebGPUDomainDependencies;
   private pageLockManager = getPageLockManager();
 
-  constructor(
-    private ctx: MCPServerContext,
-    private deps: WebGPUDomainDependencies,
-  ) {}
+  constructor(ctx: MCPServerContext, deps: WebGPUDomainDependencies) {
+    this.ctx = ctx;
+    this.deps = deps;
+  }
 
   async handle(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => {

@@ -121,10 +121,12 @@ export function buildRipgrepArgs(opts: NormalizedSearchOptions): string[] {
  * via a subclass while keeping the default surface dependency-free.
  */
 export class RipgrepEngine {
-  constructor(
-    private readonly spawnFn: typeof spawn = spawn,
-    private readonly rgExecutable: string = 'rg',
-  ) {}
+  private readonly spawnFn: typeof spawn;
+  private readonly rgExecutable: string;
+  constructor(spawnFn: typeof spawn = spawn, rgExecutable: string = 'rg') {
+    this.spawnFn = spawnFn;
+    this.rgExecutable = rgExecutable;
+  }
 
   async run(opts: NormalizedSearchOptions): Promise<EngineRunOutcome> {
     const absDir = resolvePath(opts.decompileDir);

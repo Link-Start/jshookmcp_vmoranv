@@ -11,7 +11,10 @@ interface ScriptManagementHandlersDeps {
 }
 
 export class ScriptManagementHandlers {
-  constructor(private deps: ScriptManagementHandlersDeps) {}
+  private deps: ScriptManagementHandlersDeps;
+  constructor(deps: ScriptManagementHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleGetAllScripts(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => {

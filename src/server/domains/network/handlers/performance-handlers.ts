@@ -26,7 +26,10 @@ export interface PerformanceHandlerDeps {
 }
 
 export class PerformanceHandlers {
-  constructor(private deps: PerformanceHandlerDeps) {}
+  private deps: PerformanceHandlerDeps;
+  constructor(deps: PerformanceHandlerDeps) {
+    this.deps = deps;
+  }
 
   async handlePerformanceGetMetrics(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => {

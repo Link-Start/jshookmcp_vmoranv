@@ -136,17 +136,29 @@ type BreakpointType = 'hardware' | 'software';
 type BreakpointEngine = HardwareBreakpointEngine | SoftwareBreakpointEngine | VehDebuggerEngine;
 
 export class HookHandlers {
+  private readonly bpEngine: HardwareBreakpointEngine | null;
+  private readonly vehEngine: VehDebuggerEngine | null;
+  private readonly softBpEngine: SoftwareBreakpointEngine | null;
+  private readonly injector: CodeInjector;
+  private readonly processManager?: UnifiedProcessManager;
+  private readonly ctx?: MCPServerContext;
   private readonly auditTrail: MemoryAuditTrail | null;
 
   constructor(
-    private readonly bpEngine: HardwareBreakpointEngine | null,
-    private readonly vehEngine: VehDebuggerEngine | null,
-    private readonly softBpEngine: SoftwareBreakpointEngine | null,
-    private readonly injector: CodeInjector,
-    private readonly processManager?: UnifiedProcessManager,
-    private readonly ctx?: MCPServerContext,
+    bpEngine: HardwareBreakpointEngine | null,
+    vehEngine: VehDebuggerEngine | null,
+    softBpEngine: SoftwareBreakpointEngine | null,
+    injector: CodeInjector,
+    processManager?: UnifiedProcessManager,
+    ctx?: MCPServerContext,
     auditTrail?: MemoryAuditTrail | null,
   ) {
+    this.bpEngine = bpEngine;
+    this.vehEngine = vehEngine;
+    this.softBpEngine = softBpEngine;
+    this.injector = injector;
+    this.processManager = processManager;
+    this.ctx = ctx;
     this.auditTrail = auditTrail ?? null;
   }
 

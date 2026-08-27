@@ -36,11 +36,18 @@ function protectionToString(prot: MemoryProtection): string {
 }
 
 export class ProtectHandlers {
+  private readonly processManager?: UnifiedProcessManager;
+  private readonly ctx?: MCPServerContext;
+  private readonly auditTrail?: MemoryAuditTrail | null;
   constructor(
-    private readonly processManager?: UnifiedProcessManager,
-    private readonly ctx?: MCPServerContext,
-    private readonly auditTrail?: MemoryAuditTrail | null,
-  ) {}
+    processManager?: UnifiedProcessManager,
+    ctx?: MCPServerContext,
+    auditTrail?: MemoryAuditTrail | null,
+  ) {
+    this.processManager = processManager;
+    this.ctx = ctx;
+    this.auditTrail = auditTrail;
+  }
 
   private async resolvePid(value: unknown): Promise<number> {
     return await resolveMemoryDomainPid(value, this.processManager, this.ctx);

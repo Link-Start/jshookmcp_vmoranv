@@ -52,7 +52,10 @@ interface PageEvaluationHandlersDeps {
 }
 
 export class PageEvaluationHandlers {
-  constructor(private deps: PageEvaluationHandlersDeps) {}
+  private deps: PageEvaluationHandlersDeps;
+  constructor(deps: PageEvaluationHandlersDeps) {
+    this.deps = deps;
+  }
 
   private resolveEvaluationSource(args: Record<string, unknown>): string | null {
     const code =

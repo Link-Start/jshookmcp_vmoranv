@@ -85,9 +85,12 @@ function createTargetSessionResolver(ctx: MCPServerContext): TargetSessionResolv
 }
 
 export class V8InspectorHandlers {
+  private readonly deps: V8InspectorDomainDependencies;
   private readonly currentSnapshotIds = new Map<string, string>();
 
-  constructor(private readonly deps: V8InspectorDomainDependencies) {}
+  constructor(deps: V8InspectorDomainDependencies) {
+    this.deps = deps;
+  }
 
   private getCurrentSessionId(): string {
     const sessionId = getToolRequestContext()?.sessionId;

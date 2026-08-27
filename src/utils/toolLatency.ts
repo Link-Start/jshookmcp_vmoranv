@@ -74,9 +74,12 @@ export function computePercentiles(samples: number[]): ToolLatencyPercentiles {
 }
 
 export class ToolLatencyTracker {
+  private readonly sampleLimit: number;
   private readonly buffers = new Map<string, RingBuffer<number>>();
 
-  constructor(private readonly sampleLimit: number = DEFAULT_TOOL_LATENCY_SAMPLES) {}
+  constructor(sampleLimit: number = DEFAULT_TOOL_LATENCY_SAMPLES) {
+    this.sampleLimit = sampleLimit;
+  }
 
   record(toolName: string, durationMs: number): void {
     if (!Number.isFinite(durationMs) || durationMs < 0) return;

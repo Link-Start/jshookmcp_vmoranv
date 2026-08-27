@@ -170,6 +170,13 @@ function normalizeRemoteAddress(ip: unknown, port: unknown): Record<string, unkn
 // ── NetworkMonitor implementation ──
 
 export class NetworkMonitor implements NetworkMonitorLike {
+  private cdpSession: CDPSessionLike;
+  private readonly identity: {
+    sessionId?: string;
+    targetId?: string;
+    targetType?: string;
+    requestIdPrefix?: string;
+  };
   private networkEnabled = false;
   private requests: Map<string, NetworkRequest> = new Map();
   private responses: Map<string, NetworkResponse> = new Map();
@@ -198,14 +205,16 @@ export class NetworkMonitor implements NetworkMonitorLike {
   } = {};
 
   constructor(
-    private cdpSession: CDPSessionLike,
-    private readonly identity: {
+    cdpSession: CDPSessionLike,
+    identity: {
       sessionId?: string;
       targetId?: string;
       targetType?: string;
       requestIdPrefix?: string;
     } = {},
   ) {
+    this.cdpSession = cdpSession;
+    this.identity = identity;
     // Mark as disabled on session drop — ConsoleMonitor will recreate us on reconnect
     this.cdpSession.on('disconnected', () => {
       logger.warn('NetworkMonitor: CDP session disconnected');

@@ -275,12 +275,15 @@ function parseSnapshotMeta(meta: SnapshotMetaLike): {
 }
 
 export class HeapSnapshotParser {
+  private snapshotData: string;
   private parsed = false;
   private nodesCache: ParsedNode[] = [];
   private edgesCache: ParsedEdge[] = [];
   private chunkBuffer: string[] = [];
 
-  constructor(private snapshotData = '') {}
+  constructor(snapshotData = '') {
+    this.snapshotData = snapshotData;
+  }
 
   feedChunk(chunks: string[]): void {
     if (this.parsed) {

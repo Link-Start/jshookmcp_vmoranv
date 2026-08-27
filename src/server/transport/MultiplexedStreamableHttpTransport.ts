@@ -81,6 +81,7 @@ function keyForRequestId(id: RequestId): string {
 }
 
 export class MultiplexedStreamableHttpTransport implements Transport {
+  private readonly options: MultiplexedStreamableHttpTransportOptions;
   onclose?: () => void;
   onerror?: (error: Error) => void;
   onmessage?: <T extends JSONRPCMessage>(message: T, extra?: MessageExtraInfo) => void;
@@ -95,7 +96,8 @@ export class MultiplexedStreamableHttpTransport implements Transport {
   private pendingSessionAdmissions = 0;
   private requestSequence = 0;
 
-  constructor(private readonly options: MultiplexedStreamableHttpTransportOptions = {}) {
+  constructor(options: MultiplexedStreamableHttpTransportOptions = {}) {
+    this.options = options;
     this.maxInFlight =
       options.maxInFlight ??
       readEnvInteger('MCP_HTTP_MAX_INFLIGHT', DEFAULT_MAX_INFLIGHT, { min: 1 });

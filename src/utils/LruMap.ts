@@ -13,8 +13,10 @@
  *   cache.peek('a');      // read without promoting
  */
 export class LruMap<K, V> extends Map<K, V> {
-  constructor(private readonly capacity: number) {
+  private readonly capacity: number;
+  constructor(capacity: number) {
     super();
+    this.capacity = capacity;
     if (!Number.isInteger(capacity) || capacity < 1) {
       throw new RangeError('LruMap capacity must be an integer >= 1');
     }

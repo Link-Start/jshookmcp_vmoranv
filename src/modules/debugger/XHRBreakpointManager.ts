@@ -10,10 +10,12 @@ export interface XHRBreakpoint {
 }
 
 export class XHRBreakpointManager {
+  private cdpSession: CDPSession;
   private xhrBreakpoints: Map<string, XHRBreakpoint> = new Map();
   private breakpointCounter = 0;
 
-  constructor(private cdpSession: CDPSession) {
+  constructor(cdpSession: CDPSession) {
+    this.cdpSession = cdpSession;
     logger.info('XHRBreakpointManager initialized with shared CDP session');
   }
 

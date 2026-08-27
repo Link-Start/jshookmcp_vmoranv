@@ -3,12 +3,14 @@
  * Drop-in replacement for arrays used as bounded FIFO queues.
  */
 export class RingBuffer<T> {
+  private capacity: number;
   private buf: (T | undefined)[];
   private head = 0;
   private tail = 0;
   private count = 0;
 
-  constructor(private capacity: number) {
+  constructor(capacity: number) {
+    this.capacity = capacity;
     this.buf = Array.from<T | undefined>({ length: capacity });
   }
 

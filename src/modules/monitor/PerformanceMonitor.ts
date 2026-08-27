@@ -34,6 +34,7 @@ async function PING(cdp: CDPSession): Promise<void> {
 }
 
 export class PerformanceMonitor {
+  private collector: CodeCollector;
   private cdpSession: CDPSession | null = null;
   private coverageEnabled = false;
   private profilerEnabled = false;
@@ -42,7 +43,9 @@ export class PerformanceMonitor {
   private coveragePage: Page | null = null;
   private tracingPage: Page | null = null;
 
-  constructor(private collector: CodeCollector) {}
+  constructor(collector: CodeCollector) {
+    this.collector = collector;
+  }
 
   private async ensureCDPSession(): Promise<CDPSession> {
     if (!this.cdpSession) {

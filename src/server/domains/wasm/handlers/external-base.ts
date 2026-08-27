@@ -21,7 +21,10 @@ type TextToolResponse = {
 };
 
 export class ExternalToolHandlersBase {
-  constructor(protected readonly state: WasmSharedState) {}
+  protected readonly state: WasmSharedState;
+  constructor(state: WasmSharedState) {
+    this.state = state;
+  }
 
   protected ok(payload: Record<string, unknown>): TextToolResponse {
     return {

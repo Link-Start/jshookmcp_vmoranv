@@ -97,15 +97,14 @@ interface MinimalOrchestratorContext {
 }
 
 export class CrossDomainOrchestratorImpl {
+  private readonly context: MinimalOrchestratorContext;
   private readonly config: Required<CrossDomainOrchestratorConfig>;
   private readonly executionHistory: ExecutionRecord[] = [];
   private readonly workflowDefinitions = new Map<string, WorkflowDefinition>();
   private initialized = false;
 
-  constructor(
-    private readonly context: MinimalOrchestratorContext,
-    config: CrossDomainOrchestratorConfig = {},
-  ) {
+  constructor(context: MinimalOrchestratorContext, config: CrossDomainOrchestratorConfig = {}) {
+    this.context = context;
     this.config = {
       timeoutPerStep:
         typeof config.timeoutPerStep === 'number'

@@ -21,7 +21,10 @@ interface FrameworkStateHandlersDeps {
 }
 
 export class FrameworkStateHandlers {
-  constructor(private deps: FrameworkStateHandlersDeps) {}
+  private deps: FrameworkStateHandlersDeps;
+  constructor(deps: FrameworkStateHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleFrameworkStateExtract(args: Record<string, unknown>): Promise<ToolResponse> {
     const framework = argString(args, 'framework', 'auto');

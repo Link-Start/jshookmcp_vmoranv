@@ -31,10 +31,13 @@ export interface WatchResult {
 }
 
 export class WatchExpressionManager {
+  private runtimeInspector: RuntimeInspector;
   private watches: Map<string, WatchExpression> = new Map();
   private watchCounter = 0;
 
-  constructor(private runtimeInspector: RuntimeInspector) {}
+  constructor(runtimeInspector: RuntimeInspector) {
+    this.runtimeInspector = runtimeInspector;
+  }
 
   addWatch(expression: string, name?: string): string {
     const watchId = `watch_${++this.watchCounter}`;

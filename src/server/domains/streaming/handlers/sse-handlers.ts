@@ -288,7 +288,10 @@ function sseInjectionFn(config: {
 }
 
 export class SseHandlers {
-  constructor(private s: StreamingSharedState) {}
+  private s: StreamingSharedState;
+  constructor(s: StreamingSharedState) {
+    this.s = s;
+  }
 
   private async enableSseInterceptor(
     maxEvents: number,

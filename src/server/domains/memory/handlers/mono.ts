@@ -16,12 +16,14 @@ import type { MCPServerContext } from '@server/MCPServer.context';
 import type { MonoAnalyzer } from '@native/MonoAnalyzer';
 
 export class MonoHandlers {
+  private readonly processManager?: UnifiedProcessManager;
+  private readonly ctx?: MCPServerContext | null;
   private analyzerInstance: MonoAnalyzer | null = null;
 
-  constructor(
-    private readonly processManager?: UnifiedProcessManager,
-    private readonly ctx?: MCPServerContext | null,
-  ) {}
+  constructor(processManager?: UnifiedProcessManager, ctx?: MCPServerContext | null) {
+    this.processManager = processManager;
+    this.ctx = ctx;
+  }
 
   private async getAnalyzer(): Promise<MonoAnalyzer> {
     if (!this.analyzerInstance) {

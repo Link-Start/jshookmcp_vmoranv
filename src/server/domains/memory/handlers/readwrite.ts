@@ -74,14 +74,20 @@ function sleep(ms: number): Promise<void> {
 // Read/write still via MemoryController (win32 sync readBuffer/writeBuffer) —
 // not yet migrated to createPlatformProvider(); see a4-01/b3-09 (commit c047a09b).
 export class ReadWriteHandlers {
+  private readonly memCtrl: MemoryController;
+  private readonly processManager?: UnifiedProcessManager;
+  private readonly ctx?: MCPServerContext;
   private readonly auditTrail: MemoryAuditTrail | null;
 
   constructor(
-    private readonly memCtrl: MemoryController,
-    private readonly processManager?: UnifiedProcessManager,
-    private readonly ctx?: MCPServerContext,
+    memCtrl: MemoryController,
+    processManager?: UnifiedProcessManager,
+    ctx?: MCPServerContext,
     auditTrail?: MemoryAuditTrail | null,
   ) {
+    this.memCtrl = memCtrl;
+    this.processManager = processManager;
+    this.ctx = ctx;
     this.auditTrail = auditTrail ?? null;
   }
 

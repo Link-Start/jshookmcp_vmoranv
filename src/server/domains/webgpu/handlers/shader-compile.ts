@@ -27,13 +27,13 @@ import type { WebGPUDomainDependencies, ShaderMetadata } from '../types';
  *             to WGSL when GPU-side validation is required.
  */
 export class ShaderCompileHandler {
+  private deps: WebGPUDomainDependencies;
   private pageLockManager = getPageLockManager();
   private compileCache = getShaderCompileCache();
 
-  constructor(
-    _ctx: MCPServerContext,
-    private deps: WebGPUDomainDependencies,
-  ) {}
+  constructor(_ctx: MCPServerContext, deps: WebGPUDomainDependencies) {
+    this.deps = deps;
+  }
 
   async handle(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => {

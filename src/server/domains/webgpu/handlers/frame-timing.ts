@@ -23,12 +23,12 @@ import type { WebGPUDomainDependencies } from '../types';
  * rAF + timestamp-query loops.
  */
 export class FrameTimingHandler {
+  private deps: WebGPUDomainDependencies;
   private pageLockManager = getPageLockManager();
 
-  constructor(
-    _ctx: MCPServerContext,
-    private deps: WebGPUDomainDependencies,
-  ) {}
+  constructor(_ctx: MCPServerContext, deps: WebGPUDomainDependencies) {
+    this.deps = deps;
+  }
 
   async handle(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => {

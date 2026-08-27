@@ -12,7 +12,10 @@ type PausedState = Awaited<ReturnType<DebuggerManager['waitForPaused']>>;
 type BreakpointInfo = Awaited<ReturnType<DebuggerManager['setBreakpoint']>>;
 
 export class DebuggerControlHandlers {
-  constructor(private deps: DebuggerControlHandlersDeps) {}
+  private deps: DebuggerControlHandlersDeps;
+  constructor(deps: DebuggerControlHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleDebuggerLifecycle(args: Record<string, unknown>) {
     const action = argString(args, 'action');

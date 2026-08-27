@@ -23,7 +23,10 @@ interface CursorSpec {
 }
 
 export class IndexedDBDumpHandlers {
-  constructor(private deps: IndexedDBDumpHandlersDeps) {}
+  private deps: IndexedDBDumpHandlersDeps;
+  constructor(deps: IndexedDBDumpHandlersDeps) {
+    this.deps = deps;
+  }
 
   async handleIndexedDBDump(args: Record<string, unknown>): Promise<ToolResponse> {
     const database = argString(args, 'database', '');

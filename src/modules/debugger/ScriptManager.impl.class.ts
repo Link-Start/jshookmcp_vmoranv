@@ -98,6 +98,7 @@ interface DebuggerScriptParsedEvent {
 }
 
 export class ScriptManager {
+  private collector: CodeCollector;
   private static readonly SOURCE_LOAD_BATCH_SIZE = 8;
   private static readonly SEARCH_LINE_YIELD_INTERVAL = 250;
   private static readonly SEARCH_SCRIPT_YIELD_INTERVAL = 10;
@@ -117,7 +118,9 @@ export class ScriptManager {
   /** Serializes the zombie-detection → reinit path across concurrent callers. */
   private ensureSessionPromise?: Promise<void>;
 
-  constructor(private collector: CodeCollector) {}
+  constructor(collector: CodeCollector) {
+    this.collector = collector;
+  }
 
   async init(): Promise<void> {
     if (this.initialized) {

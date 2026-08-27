@@ -314,7 +314,10 @@ function webrtcInjectionFn(config: {
 }
 
 export class WebRtcHandlers {
-  constructor(private s: StreamingSharedState) {}
+  private s: StreamingSharedState;
+  constructor(s: StreamingSharedState) {
+    this.s = s;
+  }
 
   private async enable(
     maxEvents: number,

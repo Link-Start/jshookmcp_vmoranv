@@ -325,13 +325,24 @@ function toErrorMessage(error: unknown): string {
 }
 
 export class SyscallHookHandlers {
+  private monitor?: SyscallMonitor;
+  private mapper?: SyscallToJSMapper;
+  private eventBus?: EventBus<ServerEventMap>;
+  private directNt: DirectNtApiHandlers;
+  private ctx?: MCPServerContext;
   constructor(
-    private monitor?: SyscallMonitor,
-    private mapper?: SyscallToJSMapper,
-    private eventBus?: EventBus<ServerEventMap>,
-    private directNt = new DirectNtApiHandlers(),
-    private ctx?: MCPServerContext,
-  ) {}
+    monitor?: SyscallMonitor,
+    mapper?: SyscallToJSMapper,
+    eventBus?: EventBus<ServerEventMap>,
+    directNt = new DirectNtApiHandlers(),
+    ctx?: MCPServerContext,
+  ) {
+    this.monitor = monitor;
+    this.mapper = mapper;
+    this.eventBus = eventBus;
+    this.directNt = directNt;
+    this.ctx = ctx;
+  }
 
   async handleSyscallStartMonitorTool(args: Record<string, unknown>): Promise<ToolResponse> {
     return handleSafe(async () => await this.handleSyscallStartMonitor(args));

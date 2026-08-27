@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
   StreamableHTTPServerTransport: class MockStreamableHTTPServerTransport {
+    private readonly options: { sessionIdGenerator: () => string; enableJsonResponse?: boolean };
     public sessionId?: string;
     // eslint-disable-next-line unicorn/prefer-add-event-listener
     public onmessage?: (message: any, extra?: any) => void;
@@ -42,9 +43,8 @@ vi.mock('@modelcontextprotocol/sdk/server/streamableHttp.js', () => ({
       }
     });
 
-    constructor(
-      private readonly options: { sessionIdGenerator: () => string; enableJsonResponse?: boolean },
-    ) {
+    constructor(options: { sessionIdGenerator: () => string; enableJsonResponse?: boolean }) {
+      this.options = options;
       if (mocks.failNextConstruct) {
         throw new Error('inner transport construction failed');
       }

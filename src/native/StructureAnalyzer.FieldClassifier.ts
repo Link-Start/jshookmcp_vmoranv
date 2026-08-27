@@ -19,16 +19,25 @@ interface FieldClassification {
 }
 
 export class FieldClassifier {
+  private provider: PlatformMemoryAPI;
+  private readCString: (
+    handle: ProcessHandle,
+    address: bigint,
+    maxLen: number,
+  ) => Promise<string | null>;
+  private isValidReadablePointer: (handle: ProcessHandle, address: bigint) => boolean;
+  private isValidExecutablePointer: (handle: ProcessHandle, address: bigint) => boolean;
   constructor(
-    private provider: PlatformMemoryAPI,
-    private readCString: (
-      handle: ProcessHandle,
-      address: bigint,
-      maxLen: number,
-    ) => Promise<string | null>,
-    private isValidReadablePointer: (handle: ProcessHandle, address: bigint) => boolean,
-    private isValidExecutablePointer: (handle: ProcessHandle, address: bigint) => boolean,
-  ) {}
+    provider: PlatformMemoryAPI,
+    readCString: (handle: ProcessHandle, address: bigint, maxLen: number) => Promise<string | null>,
+    isValidReadablePointer: (handle: ProcessHandle, address: bigint) => boolean,
+    isValidExecutablePointer: (handle: ProcessHandle, address: bigint) => boolean,
+  ) {
+    this.provider = provider;
+    this.readCString = readCString;
+    this.isValidReadablePointer = isValidReadablePointer;
+    this.isValidExecutablePointer = isValidExecutablePointer;
+  }
 
   /**
    * Classify the value at a given offset in the buffer.

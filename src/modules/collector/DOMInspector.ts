@@ -84,6 +84,7 @@ function assertSafeQueryInput(value: string, field: string): void {
 }
 
 export class DOMInspector {
+  protected collector: CodeCollector;
   protected cdpSession: CDPSession | null = null;
 
   /** Default wait for the page to reach readyState 'complete' (ms). */
@@ -93,7 +94,9 @@ export class DOMInspector {
   /** Default readyState wait budget when the caller does not supply one (ms). */
   private static readonly DEFAULT_READY_STATE_TIMEOUT_MS = DOM_DEFAULT_READY_STATE_TIMEOUT_MS;
 
-  constructor(protected collector: CodeCollector) {}
+  constructor(collector: CodeCollector) {
+    this.collector = collector;
+  }
 
   private async waitForReadyState(
     page: { evaluate: <T>(fn: () => T) => Promise<T>; frames?: () => unknown[] },

@@ -42,9 +42,12 @@ export interface ReplayHandlerDeps {
 }
 
 export class ReplayHandlers {
+  private deps: ReplayHandlerDeps;
   private detailedDataManager = getDetailedDataManager();
 
-  constructor(private deps: ReplayHandlerDeps) {}
+  constructor(deps: ReplayHandlerDeps) {
+    this.deps = deps;
+  }
 
   async handleNetworkExtractAuth(args: Record<string, unknown>) {
     return handleSafe(async () => {

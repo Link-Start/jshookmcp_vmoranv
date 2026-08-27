@@ -28,14 +28,20 @@ function isValidPointerChain(value: unknown): value is PointerChain {
 }
 
 export class PointerChainHandlers {
+  private readonly ptrEngine: PointerChainEngine;
+  private readonly processManager?: UnifiedProcessManager;
+  private readonly ctx?: MCPServerContext;
   private readonly auditTrail: MemoryAuditTrail | null;
 
   constructor(
-    private readonly ptrEngine: PointerChainEngine,
-    private readonly processManager?: UnifiedProcessManager,
-    private readonly ctx?: MCPServerContext,
+    ptrEngine: PointerChainEngine,
+    processManager?: UnifiedProcessManager,
+    ctx?: MCPServerContext,
     auditTrail?: MemoryAuditTrail | null,
   ) {
+    this.ptrEngine = ptrEngine;
+    this.processManager = processManager;
+    this.ctx = ctx;
     this.auditTrail = auditTrail ?? null;
   }
 

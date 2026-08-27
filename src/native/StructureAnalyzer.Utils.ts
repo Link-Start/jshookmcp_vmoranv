@@ -10,7 +10,10 @@ import type { ProcessHandle } from './platform/types.js';
 import { nativeMemoryManager } from './NativeMemoryManager.impl';
 
 export class StructAnalyzerUtils {
-  constructor(private provider: PlatformMemoryAPI) {}
+  private provider: PlatformMemoryAPI;
+  constructor(provider: PlatformMemoryAPI) {
+    this.provider = provider;
+  }
 
   async readCString(
     handle: ProcessHandle,

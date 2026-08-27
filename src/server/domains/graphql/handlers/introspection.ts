@@ -99,7 +99,10 @@ function buildFederationPayload(result: BrowserFetchResult | undefined): Record<
 }
 
 export class IntrospectionHandlers {
-  constructor(private collector: CodeCollector) {}
+  private collector: CodeCollector;
+  constructor(collector: CodeCollector) {
+    this.collector = collector;
+  }
 
   async handleGraphqlIntrospect(args: Record<string, unknown>) {
     try {
