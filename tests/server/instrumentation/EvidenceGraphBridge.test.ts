@@ -27,11 +27,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op1',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'runtime-hook',
         target: 'signFunction',
         config: {},
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       const nodeId = bridge.onOperation(op);
@@ -48,11 +48,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op2',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'runtime-hook',
         target: 'encryptData',
         config: { scriptId: 'script-42' },
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       bridge.onOperation(op);
@@ -65,11 +65,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op3',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'runtime-hook',
         target: 'noScript',
         config: {},
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       bridge.onOperation(op);
@@ -86,11 +86,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op4',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'network-intercept',
         target: withPath(TEST_URLS.api, 'login'),
         config: { initiator: 'fetchWrapper' },
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       bridge.onOperation(op);
@@ -103,11 +103,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op5',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'network-intercept',
         target: withPath(TEST_URLS.api, 'data'),
         config: { initiator: { stack: 'at fetchWrapper (app.js:42)' } },
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       bridge.onOperation(op);
@@ -120,11 +120,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op6',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'network-intercept',
         target: withPath(TEST_URLS.api, 'sign'),
         config: { initiator: 'fetchCall', initiatorScriptId: 'script-99' },
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       bridge.onOperation(op);
@@ -137,11 +137,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op7',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'network-intercept',
         target: withPath(TEST_URLS.cdn, 'lib.js'),
         config: {},
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       bridge.onOperation(op);
@@ -158,11 +158,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op8',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'function-trace',
         target: 'calculateHMAC',
         config: { scriptId: 'script-7' },
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       const nodeId = bridge.onOperation(op);
@@ -180,11 +180,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op9',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'before-load-inject',
         target: 'hookXHR.js',
         config: {},
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       const nodeId = bridge.onOperation(op);
@@ -202,11 +202,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op10',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'runtime-hook',
         target: 'signRequest',
         config: {},
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       bridge.onOperation(op);
@@ -231,11 +231,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op11',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'network-intercept',
         target: withPath(TEST_URLS.api, 'data'),
         config: {},
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       bridge.onOperation(op);
@@ -268,11 +268,11 @@ describe('EvidenceGraphBridge', () => {
       const op: InstrumentationOperation = {
         id: 'op12',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'runtime-hook',
         target: 'decrypt',
         config: {},
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       };
 
       bridge.onOperation(op);
@@ -330,11 +330,11 @@ describe('EvidenceGraphBridge', () => {
         tinyBridge.onOperation({
           id: 'op-evict-1',
           sessionId: 'sess1',
-          // @ts-expect-error
           type: 'runtime-hook',
           target: 'signFunction',
           config: { scriptId: 'script-1' },
-          registeredAt: new Date().toISOString(),
+          createdAt: Date.now(),
+          status: 'active',
         }),
       ).not.toThrow();
     });
@@ -347,11 +347,11 @@ describe('EvidenceGraphBridge', () => {
       tinyBridge.onOperation({
         id: 'op-evict-2',
         sessionId: 'sess1',
-        // @ts-expect-error
         type: 'runtime-hook',
         target: 'decrypt',
         config: {},
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       });
 
       // Evict the operation's primary node (breakpoint-hook) by adding more nodes.
@@ -407,22 +407,22 @@ describe('EvidenceGraphBridge', () => {
       bridge.onOperation({
         id: 'chain-net',
         sessionId: 'sess-chain',
-        // @ts-expect-error
         type: 'network-intercept',
         target: withPath(TEST_URLS.api, 'sign'),
         config: { initiator: 'signModule', initiatorScriptId: 'script-main' },
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       });
 
       // 2. Runtime hook
       bridge.onOperation({
         id: 'chain-hook',
         sessionId: 'sess-chain',
-        // @ts-expect-error
         type: 'runtime-hook',
         target: 'generateSignature',
         config: { scriptId: 'script-main' },
-        registeredAt: new Date().toISOString(),
+        createdAt: Date.now(),
+        status: 'active',
       });
 
       // 3. Artifact capture

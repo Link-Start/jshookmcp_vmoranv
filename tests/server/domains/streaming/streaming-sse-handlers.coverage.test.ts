@@ -282,16 +282,19 @@ describe('SseHandlers', () => {
 
     it('captures SSE events when the injected function is serialized into page context', async () => {
       class MockEventSource {
+        readonly sourceUrl: string | URL;
+        readonly _eventSourceInitDict?: EventSourceInit;
         static CONNECTING = 0;
         static OPEN = 1;
         static CLOSED = 2;
 
         readonly listeners = new Map<string, EventListener[]>();
 
-        constructor(
-          readonly sourceUrl: string | URL,
-          readonly _eventSourceInitDict?: EventSourceInit,
-        ) {}
+        constructor(sourceUrl: string | URL, _eventSourceInitDict?: EventSourceInit) {
+          this.sourceUrl = sourceUrl;
+          // eslint-disable-next-line no-underscore-dangle
+          this._eventSourceInitDict = _eventSourceInitDict;
+        }
 
         addEventListener(type: string, listener: EventListener) {
           const existing = this.listeners.get(type) ?? [];
@@ -704,14 +707,17 @@ describe('SseHandlers', () => {
 
   describe('sseInjectionFn data cap + batch eviction (b2-7 / b2-8)', () => {
     class MockEventSource {
+      readonly sourceUrl: string | URL;
+      readonly _eventSourceInitDict?: EventSourceInit;
       static CONNECTING = 0;
       static OPEN = 1;
       static CLOSED = 2;
       readonly listeners = new Map<string, EventListener[]>();
-      constructor(
-        readonly sourceUrl: string | URL,
-        readonly _eventSourceInitDict?: EventSourceInit,
-      ) {}
+      constructor(sourceUrl: string | URL, _eventSourceInitDict?: EventSourceInit) {
+        this.sourceUrl = sourceUrl;
+        // eslint-disable-next-line no-underscore-dangle
+        this._eventSourceInitDict = _eventSourceInitDict;
+      }
       addEventListener(type: string, listener: EventListener) {
         const existing = this.listeners.get(type) ?? [];
         existing.push(listener);
