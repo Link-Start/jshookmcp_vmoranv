@@ -156,7 +156,6 @@
     "tsdown": "^0.22.3",
     "tsx": "^4.22.4",
     "typescript": "^7.0.2",
-    "typescript6": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.1.5",
     "vitepress": "2.0.0-alpha.18",
     "vitest": "^4.1.9",
