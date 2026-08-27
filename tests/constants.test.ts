@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TEST_URLS, withPath } from '@tests/shared/test-urls';
 
+// Block `.env` loading so fallback assertions always observe the source
+// defaults. Without this, a local (gitignored, search-tune generated) `.env`
+// re-injects keys during the env-bootstrap that runs on every constants
+// re-import, silently overriding the defaults under test. Mirrors the
+// isolation pattern used by tests/utils/config.test.ts.
+const { dotenvMock } = vi.hoisted(() => ({
+  dotenvMock: {
+    config: vi.fn(() => ({ error: Object.assign(new Error('ENOENT'), { code: 'ENOENT' }) })),
+  },
+}));
+
+vi.mock('dotenv', () => dotenvMock);
+
 const ORIGINAL_ENV = { ...process.env };
 
 async function loadConstants(overrides: Record<string, string | undefined> = {}) {

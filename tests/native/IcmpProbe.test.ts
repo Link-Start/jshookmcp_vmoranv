@@ -22,9 +22,10 @@ const { state, mockKoffi, posixMocks } = vi.hoisted(() => {
       replySize: number,
     ) => {
       shared.replySizes.push(replySize);
-      if (process.arch === 'x64') {
-        // ICMP_ECHO_REPLY (x64): Address is a ULONG_PTR at 0 (8B), Status at 8,
-        // RoundTripTime at 12.
+      if (process.arch !== 'ia32') {
+        // ICMP_ECHO_REPLY (64-bit pointer width; x64 and ARM64 both use
+        // 8-byte pointers): Address is a ULONG_PTR at 0 (8B), Status at 8,
+        // RoundTripTime at 12. Mirrors the source gate in parseReply().
         replyBuf.writeBigUInt64LE(BigInt(destAddr >>> 0), 0);
         replyBuf.writeUInt32LE(0, 8);
         replyBuf.writeUInt32LE(7, 12);

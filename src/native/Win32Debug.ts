@@ -29,16 +29,21 @@ export const THREAD_ACCESS = {
 } as const;
 
 /**
- * True when the current process is a native ARM64 build that would run the
- * Windows-on-ARM64 kernel CONTEXT layout (ARM64_NT_CONTEXT) rather than the
- * x64 (AMD64) one. Mirrors the `IS_AARCH64` arch-gating precedent in
- * platform/linux/LinuxInt3AccessBreakpoint.ts.
+ * True when the current process is a native ARM64 build running on Windows
+ * (Windows-on-ARM64), where the kernel uses the ARM64_NT_CONTEXT layout
+ * instead of the x64 (AMD64) one. Mirrors the `IS_AARCH64` arch-gating
+ * precedent in platform/linux/LinuxInt3AccessBreakpoint.ts.
+ *
+ * The platform check is required: `process.arch === 'arm64'` alone also
+ * matches Apple Silicon (darwin) and Linux aarch64 hosts, where this
+ * Win32 module never runs real FFI and the AMD64 layout must stay the
+ * default (tests exercise it via mocks on those hosts).
  *
  * Note: under x64 emulation (WOW64) on a Windows-on-ARM64 machine the Node
  * process itself is x64, so `process.arch` is `'x64'` and we correctly take
  * the AMD64 path (GetThreadContext kernel32 marshals compatibility).
  */
-export const IS_ARM64_WINDOWS = process.arch === 'arm64';
+export const IS_ARM64_WINDOWS = process.platform === 'win32' && process.arch === 'arm64';
 
 /** CONTEXT flags for GetThreadContext / SetThreadContext */
 export const CONTEXT_FLAGS = IS_ARM64_WINDOWS
