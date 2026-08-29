@@ -367,11 +367,6 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
 
     ctx.detailedData.shutdown();
 
-    // Drain background tasks: cancel working operations (running their
-    // cancel handlers) so process exit does not abandon in-flight work
-    // or leave orphaned child processes behind.
-    await ctx.taskManager.shutdown();
-
     const activationController = getInst
       ? getInst<{ dispose?: () => void }>('activationController')
       : ((ctx as MCPServerContext & { activationController?: { dispose?: () => void } })
@@ -397,6 +392,14 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
       ctx.httpSockets.clear();
       ctx.httpServer = undefined;
     }
+
+    // Drain background tasks: cancel working operations (running their cancel
+    // handlers) so shutdown does not abandon in-flight work or leave orphaned
+    // child processes behind. Optional-chained because closeServer must
+    // tolerate partial contexts (tests, degraded mode). Deliberately placed
+    // AFTER the httpServer force-close timer registration so the synchronous
+    // lead-in of closeServer is unchanged (fake-timer tests rely on it).
+    await ctx.taskManager?.shutdown();
 
     // Unified disposable cleanup: iterate all closable domain instances.
     // Each entry: [field name for logging, instance ref, close method name].
