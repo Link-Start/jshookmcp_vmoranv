@@ -367,6 +367,11 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
 
     ctx.detailedData.shutdown();
 
+    // Drain background tasks: cancel working operations (running their
+    // cancel handlers) so process exit does not abandon in-flight work
+    // or leave orphaned child processes behind.
+    await ctx.taskManager.shutdown();
+
     const activationController = getInst
       ? getInst<{ dispose?: () => void }>('activationController')
       : ((ctx as MCPServerContext & { activationController?: { dispose?: () => void } })

@@ -6,6 +6,7 @@
  */
 
 import type { TaskManager, TaskRecord, TaskStatus } from '@server/tasks/TaskManager';
+import { getToolRequestContext } from '@server/runtime/ToolRequestContext';
 import { argNumber, argString } from '@server/domains/shared/parse-args';
 import { R, handleSafe } from '@server/domains/shared/ResponseBuilder';
 import type { ToolArgs, ToolResponse } from '@server/types';
@@ -22,6 +23,11 @@ function isTerminal(status: TaskStatus): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Owning session of the current tool call, if any — used for task scoping. */
+function callerSession(): string | null {
+  return getToolRequestContext()?.sessionId ?? null;
 }
 
 function serializeTask(task: TaskRecord): Record<string, unknown> {
@@ -52,7 +58,7 @@ export class TaskToolsHandlers {
       const taskId = argString(args, 'taskId');
       if (!taskId) return R.fail('taskId is required').json();
 
-      const task = this.taskManager.getTask(taskId);
+      const task = this.taskManager.getTask(taskId, callerSession());
       if (!task) {
         return R.fail(`Unknown task: ${taskId}`).set('notFound', true).json();
       }
@@ -68,10 +74,10 @@ export class TaskToolsHandlers {
       const waitMs = Math.min(Math.max(argNumber(args, 'waitMs', 5000), 0), MAX_WAIT_MS);
 
       const deadline = Date.now() + waitMs;
-      let task = this.taskManager.getTask(taskId);
+      let task = this.taskManager.getTask(taskId, callerSession());
       while (task && !isTerminal(task.status) && Date.now() < deadline) {
         await sleep(POLL_INTERVAL_MS);
-        task = this.taskManager.getTask(taskId);
+        task = this.taskManager.getTask(taskId, callerSession());
       }
 
       if (!task) {
@@ -79,7 +85,7 @@ export class TaskToolsHandlers {
         return R.fail(`Unknown task: ${taskId}`).set('notFound', true).json();
       }
 
-      const payload = this.taskManager.getTaskPayload(taskId);
+      const payload = this.taskManager.getTaskPayload(taskId, callerSession());
       return R.ok()
         .merge(serializeTask(task))
         .merge({
@@ -97,12 +103,12 @@ export class TaskToolsHandlers {
       const taskId = argString(args, 'taskId');
       if (!taskId) return R.fail('taskId is required').json();
 
-      const task = this.taskManager.getTask(taskId);
+      const task = this.taskManager.getTask(taskId, callerSession());
       if (!task) {
         return R.fail(`Unknown task: ${taskId}`).set('notFound', true).json();
       }
 
-      const cancelled = await this.taskManager.cancelTask(taskId);
+      const cancelled = await this.taskManager.cancelTask(taskId, callerSession());
       if (!cancelled) {
         return R.fail(`Task ${taskId} is not cancellable (status: ${task.status})`).json();
       }
@@ -117,7 +123,7 @@ export class TaskToolsHandlers {
       const nameFilter = argString(args, 'name');
       const limit = Math.min(Math.max(argNumber(args, 'limit', 50), 1), 500);
 
-      let tasks = this.taskManager.listTasks();
+      let tasks = this.taskManager.listTasks(callerSession());
       if (statusFilter) {
         tasks = tasks.filter((t) => t.status === statusFilter);
       }

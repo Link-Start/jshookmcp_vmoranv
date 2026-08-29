@@ -412,10 +412,12 @@ export class MCPServer implements MCPServerContext {
           // MCP 2.0 Tasks protocol: the SDK's Protocol base class installs the
           // tasks/get, tasks/result, tasks/list and tasks/cancel handlers when
           // a taskStore is supplied (ServerOptions.taskStore).
+          // requests.tools.call intentionally omitted: no handler creates
+          // tasks via extra.taskStore yet — declaring it would promise
+          // CreateTaskResult-shaped replies that tools/call never produces.
           tasks: {
             list: {},
             cancel: {},
-            requests: { tools: { call: {} } },
           },
         },
         taskStore: new TaskStoreAdapter(this.taskManager),
