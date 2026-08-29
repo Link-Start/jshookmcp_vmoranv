@@ -235,7 +235,10 @@ export class FridaHandlers {
           name: 'frida_run_script',
           executor: async (ctx) => {
             ctx.updateProgress(5, 100, 'Executing Frida script...');
-            const execution = await frida.executeScript(script, { timeoutMs: taskTimeoutMs });
+            const execution = await frida.executeScript(script, {
+              timeoutMs: taskTimeoutMs,
+              signal: ctx.signal,
+            });
             ctx.updateProgress(100, 100, 'Script execution finished');
             return execution;
           },
@@ -643,6 +646,7 @@ export class FridaHandlers {
               size: rawSize,
               max: rawMax,
               timeoutMs: taskTimeoutMs,
+              signal: ctx.signal,
             });
             ctx.updateProgress(100, 100, `Scan finished: ${matches.length} match(es)`);
             return { sessionId, pattern, matches, count: matches.length };

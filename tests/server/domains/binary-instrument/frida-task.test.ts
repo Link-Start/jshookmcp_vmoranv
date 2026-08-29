@@ -85,6 +85,28 @@ describe('FridaHandlers — task mode (MCP 2.0 Tasks retrofit)', () => {
     );
   });
 
+  it('frida_memory_scan task cancellation aborts the executor signal', async () => {
+    const tm = new TaskManager();
+    let seen: AbortSignal | undefined;
+    const memoryScan = vi.fn(async (_pattern: string, opts: { signal?: AbortSignal }) => {
+      seen = opts.signal;
+      await new Promise((r) => setTimeout(r, 200));
+      return [];
+    });
+    const session = makeFakeSession({ memoryScan });
+    const handlers = new FridaHandlers(makeState(tm, session));
+
+    const res = parse(
+      await handlers.handleFridaMemoryScan({
+        sessionId: 's1',
+        pattern: 'aa',
+        async: true,
+      } as Record<string, unknown>),
+    );
+    await tm.cancelTask(res.taskId as string);
+    expect(seen?.aborted).toBe(true);
+  });
+
   it('frida_memory_scan without async keeps the synchronous behavior (no task)', async () => {
     const tm = new TaskManager();
     const memoryScan = vi.fn(async () => [{ address: '0x1', size: 1 }]);

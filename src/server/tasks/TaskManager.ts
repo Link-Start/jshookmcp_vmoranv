@@ -55,11 +55,18 @@ export interface CreateTaskOptions<TResult = unknown> {
 export interface TaskExecutionContext {
   taskId: string;
   isCancelled: () => boolean;
+  /**
+   * Aborted by cancelTask()/shutdown(). Long-running executors should pass
+   * this into cancellable child operations (e.g. frida CLI processes) and/or
+   * poll it between stages instead of only relying on isCancelled().
+   */
+  signal: AbortSignal;
   updateProgress: (progress: number, total?: number, message?: string) => void;
 }
 
 export class TaskManager {
   private readonly tasks = new Map<string, TaskRecord>();
+  private readonly abortControllers = new Map<string, AbortController>();
   private readonly defaultTtlMs: number;
   private readonly maxTasks: number;
   /**
@@ -109,9 +116,13 @@ export class TaskManager {
 
     this.tasks.set(taskId, task as TaskRecord);
 
+    const abortController = new AbortController();
+    this.abortControllers.set(taskId, abortController);
+
     const executionContext: TaskExecutionContext = {
       taskId,
       isCancelled: () => task.status === 'cancelled',
+      signal: abortController.signal,
       updateProgress: (progress: number, total = 100, message?: string) => {
         if (task.status === 'working') {
           task.progress = progress;
@@ -160,6 +171,7 @@ export class TaskManager {
   async shutdown(): Promise<void> {
     const working = Array.from(this.tasks.values()).filter((t) => t.status === 'working');
     await Promise.allSettled(working.map((t) => this.cancelTask(t.taskId)));
+    this.abortControllers.clear();
     this.tasks.clear();
   }
 
@@ -220,6 +232,7 @@ export class TaskManager {
 
     task.status = 'cancelled';
     task.lastUpdatedAt = new Date().toISOString();
+    this.abortControllers.get(taskId)?.abort();
 
     if (task.cancelHandler) {
       try {
@@ -265,6 +278,7 @@ export class TaskManager {
       const updatedAt = new Date(task.lastUpdatedAt).getTime();
       if (now - updatedAt > task.ttl) {
         this.tasks.delete(id);
+        this.abortControllers.delete(id);
       }
     }
 
@@ -280,6 +294,7 @@ export class TaskManager {
         const entry = sorted[i];
         if (entry) {
           this.tasks.delete(entry[0]);
+          this.abortControllers.delete(entry[0]);
         }
       }
     }

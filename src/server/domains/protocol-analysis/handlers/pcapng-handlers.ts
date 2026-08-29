@@ -55,9 +55,14 @@ export class ProtocolAnalysisPcapngHandlers extends ProtocolAnalysisFingerprintH
       maxBytesPerPacket?: number;
       interfaceFilter?: number;
       offloadPacket?: (hex: string, packetIndex: number) => Promise<string>;
+      signal?: AbortSignal;
     },
   ): Promise<PcapngReadPayload> {
     const buffer = await readFile(path);
+    // Cooperative abort between the I/O and parse stages (task cancellation).
+    if (options.signal?.aborted) {
+      throw new Error('pcapng read aborted');
+    }
     if (buffer.length < 12) {
       throw new Error('PCAPNG file is too small to contain a Section Header Block');
     }
@@ -118,6 +123,7 @@ export class ProtocolAnalysisPcapngHandlers extends ProtocolAnalysisFingerprintH
               maxPackets,
               maxBytesPerPacket,
               interfaceFilter,
+              signal: ctx.signal,
             });
             ctx.updateProgress(100, 100, `Parsed ${result.blockCount} block(s)`);
             return result;

@@ -158,6 +158,23 @@ describe('TaskManager (MCP 2.0 Tasks Protocol)', () => {
     expect(record?.error).toContain('maxWorkingAgeMs');
   });
 
+  it('aborts the execution-context signal on cancellation', async () => {
+    const manager = new TaskManager();
+    let observed: AbortSignal | undefined;
+    const task = await manager.createTask({
+      name: 'cancellable_scan',
+      executor: async (ctx) => {
+        observed = ctx.signal;
+        await new Promise((r) => setTimeout(r, 200));
+        return 'done';
+      },
+    });
+
+    expect(observed?.aborted).toBe(false);
+    await manager.cancelTask(task.taskId);
+    expect(observed?.aborted).toBe(true);
+  });
+
   it('hides tasks from callers of a different owning session', async () => {
     const { runWithToolRequestContext } = await import('@server/runtime/ToolRequestContext');
     const manager = new TaskManager();
