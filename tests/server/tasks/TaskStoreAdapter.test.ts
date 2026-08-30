@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ProtocolErrorCode } from '@modelcontextprotocol/server';
 import { TaskManager } from '@server/tasks/TaskManager';
 import { TaskStoreAdapter } from '@server/tasks/TaskStoreAdapter';
 
@@ -46,7 +47,9 @@ describe('TaskStoreAdapter (legacy 2025-11-25 task methods over v2)', () => {
     expect(res.ttl).toBeTypeOf('number');
     expect(['working', 'completed']).toContain(res.status);
 
-    await expect(call('tasks/get', { taskId: 'ghost' })).rejects.toThrow('Task not found');
+    await expect(call('tasks/get', { taskId: 'ghost' })).rejects.toMatchObject({
+      code: ProtocolErrorCode.InvalidParams,
+    });
   });
 
   it('tasks/result returns the stored payload for completed tasks', async () => {
@@ -54,16 +57,30 @@ describe('TaskStoreAdapter (legacy 2025-11-25 task methods over v2)', () => {
     const adapter = new TaskStoreAdapter(tm);
     const task = await tm.createTask({
       name: 'demo',
-      executor: async () => ({ blockCount: 3 }),
+      executor: async () => ({ content: [{ type: 'text', text: 'done' }], blockCount: 3 }),
     });
     const { call } = installSpy(adapter);
 
-    const res = (await call('tasks/result', { taskId: task.taskId })) as {
-      status: string;
-      result?: unknown;
-    };
-    expect(res.status).toBe('completed');
-    expect(res.result).toEqual({ blockCount: 3 });
+    const res = (await call('tasks/result', { taskId: task.taskId })) as Record<string, unknown>;
+    expect(res).toMatchObject({ content: [{ type: 'text', text: 'done' }], blockCount: 3 });
+    expect(res._meta).toMatchObject({
+      ['io.modelcontextprotocol/related-task']: { taskId: task.taskId },
+    });
+  });
+
+  it('tasks/result waits for a working task to reach a terminal state', async () => {
+    let resolveExecutor!: (value: { content: never[] }) => void;
+    const executorDone = new Promise<{ content: never[] }>((resolve) => {
+      resolveExecutor = resolve;
+    });
+    const tm = new TaskManager();
+    const adapter = new TaskStoreAdapter(tm);
+    const task = await tm.createTask({ name: 'deferred', executor: async () => executorDone });
+    const { call } = installSpy(adapter);
+    const resultPromise = call('tasks/result', { taskId: task.taskId });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    resolveExecutor({ content: [] });
+    await expect(resultPromise).resolves.toMatchObject({ content: [] });
   });
 
   it('tasks/result throws for failed and unknown tasks', async () => {
@@ -78,7 +95,9 @@ describe('TaskStoreAdapter (legacy 2025-11-25 task methods over v2)', () => {
     const { call } = installSpy(adapter);
 
     await expect(call('tasks/result', { taskId: failing.taskId })).rejects.toThrow('bad');
-    await expect(call('tasks/result', { taskId: 'ghost' })).rejects.toThrow('Task not found');
+    await expect(call('tasks/result', { taskId: 'ghost' })).rejects.toMatchObject({
+      code: ProtocolErrorCode.InvalidParams,
+    });
   });
 
   it('tasks/cancel cancels a working task and returns its post-cancel state', async () => {
@@ -98,6 +117,21 @@ describe('TaskStoreAdapter (legacy 2025-11-25 task methods over v2)', () => {
     };
     expect(res.status).toBe('cancelled');
     expect(tm.getTask(task.taskId)?.status).toBe('cancelled');
+  });
+
+  it('tasks/cancel rejects unknown and terminal tasks with InvalidParams', async () => {
+    const tm = new TaskManager();
+    const adapter = new TaskStoreAdapter(tm);
+    const completed = await tm.createTask({ name: 'done', executor: async () => 1 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const { call } = installSpy(adapter);
+
+    await expect(call('tasks/cancel', { taskId: 'ghost' })).rejects.toMatchObject({
+      code: ProtocolErrorCode.InvalidParams,
+    });
+    await expect(call('tasks/cancel', { taskId: completed.taskId })).rejects.toMatchObject({
+      code: ProtocolErrorCode.InvalidParams,
+    });
   });
 
   it('tasks/list maps every record to the wire shape', async () => {
