@@ -12,6 +12,7 @@
  *
  * @module TaskStoreAdapter
  */
+import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
 import type { Server, Task } from '@modelcontextprotocol/server';
 import {
   CancelTaskResultSchema,
@@ -27,6 +28,18 @@ import { z } from 'zod';
 const TaskIdParamsSchema = z.object({ taskId: z.string() });
 const ListTasksParamsSchema = z.object({ cursor: z.string().optional() });
 import type { TaskManager, TaskRecord } from './TaskManager';
+
+const MAX_RESULT_WAIT_MS = 30_000;
+const RESULT_POLL_INTERVAL_MS = 100;
+const TERMINAL_STATUSES = new Set<TaskRecord['status']>(['completed', 'failed', 'cancelled']);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function invalidTask(taskId: string): ProtocolError {
+  return new ProtocolError(ProtocolErrorCode.InvalidParams, `Unknown task: ${taskId}`);
+}
 
 /**
  * Adapts a {@link TaskManager} to the legacy (2025-11-25) task method surface.
@@ -60,17 +73,52 @@ export class TaskStoreAdapter {
     protocol.setRequestHandler(
       'tasks/result',
       { params: TaskIdParamsSchema, result: GetTaskPayloadResultSchema },
-      (params, ctx) => {
-        const payload = this.taskManager.getTaskPayload(params.taskId, ctx?.sessionId);
+      async (params, ctx) => {
+        const deadline = Date.now() + MAX_RESULT_WAIT_MS;
+        let payload = this.taskManager.getTaskPayload(params.taskId, ctx?.sessionId);
+        while (payload && !TERMINAL_STATUSES.has(payload.status) && Date.now() < deadline) {
+          await sleep(RESULT_POLL_INTERVAL_MS);
+          payload = this.taskManager.getTaskPayload(params.taskId, ctx?.sessionId);
+        }
         if (!payload) {
-          throw new Error(`Task not found: ${params.taskId}`);
+          throw invalidTask(params.taskId);
+        }
+        if (!TERMINAL_STATUSES.has(payload.status)) {
+          throw new ProtocolError(
+            ProtocolErrorCode.InternalError,
+            `Task result timed out while task remained ${payload.status}: ${params.taskId}`,
+          );
         }
         if (payload.status === 'failed') {
-          throw new Error(payload.error ?? 'Task failed');
+          throw new ProtocolError(ProtocolErrorCode.InternalError, payload.error ?? 'Task failed');
         }
+        if (payload.status === 'cancelled') {
+          throw new ProtocolError(
+            ProtocolErrorCode.InvalidParams,
+            `Task cancelled: ${params.taskId}`,
+          );
+        }
+        const relatedTaskMeta = {
+          ['io.modelcontextprotocol/related-task']: { taskId: params.taskId },
+        };
+        if (payload.result === undefined) return { _meta: relatedTaskMeta };
+        if (
+          typeof payload.result !== 'object' ||
+          payload.result === null ||
+          Array.isArray(payload.result)
+        ) {
+          return {
+            content: [{ type: 'text', text: String(payload.result) }],
+            _meta: relatedTaskMeta,
+          };
+        }
+        const result = payload.result as Record<string, unknown>;
         return {
-          status: payload.status,
-          ...(payload.result !== undefined ? { result: payload.result } : {}),
+          ...result,
+          _meta: {
+            ...(typeof result._meta === 'object' && result._meta !== null ? result._meta : {}),
+            ...relatedTaskMeta,
+          },
         };
       },
     );
@@ -88,9 +136,20 @@ export class TaskStoreAdapter {
       'tasks/cancel',
       { params: TaskIdParamsSchema, result: CancelTaskResultSchema },
       async (params, ctx) => {
-        await this.taskManager.cancelTask(params.taskId, ctx?.sessionId);
+        const task = this.taskManager.getTask(params.taskId, ctx?.sessionId);
+        if (!task || task.status !== 'working') {
+          throw invalidTask(params.taskId);
+        }
+        const cancelled = await this.taskManager.cancelTask(params.taskId, ctx?.sessionId);
+        if (!cancelled) {
+          throw invalidTask(params.taskId);
+        }
         // CancelTaskResult is flat — the task fields sit at the result top level.
-        return this.toSdkTask(this.taskManager.getTask(params.taskId, ctx?.sessionId)!);
+        const cancelledTask = this.taskManager.getTask(params.taskId, ctx?.sessionId);
+        if (!cancelledTask) {
+          throw invalidTask(params.taskId);
+        }
+        return this.toSdkTask(cancelledTask);
       },
     );
   }
@@ -108,7 +167,7 @@ export class TaskStoreAdapter {
   } {
     const payload = this.taskManager.getTaskPayload(taskId);
     if (!payload) {
-      throw new Error(`Task not found: ${taskId}`);
+      throw invalidTask(taskId);
     }
     return payload;
   }
@@ -116,7 +175,7 @@ export class TaskStoreAdapter {
   private getTaskOrThrow(taskId: string, callerSession?: string | null): Task {
     const record = this.taskManager.getTask(taskId, callerSession);
     if (!record) {
-      throw new Error(`Task not found: ${taskId}`);
+      throw invalidTask(taskId);
     }
     return this.toSdkTask(record);
   }

@@ -166,7 +166,10 @@ export async function runEnvironmentDoctor(options?: {
   const corepackCommand = normalizeCorepackCheck(corepackCheck, pnpmCommand);
 
   const packages: DoctorCheck[] = [
-    checkPackage('@modelcontextprotocol/sdk'),
+    checkPackage('@modelcontextprotocol/core'),
+    checkPackage('@modelcontextprotocol/node'),
+    checkPackage('@modelcontextprotocol/server'),
+    checkPackage('@modelcontextprotocol/client'),
     checkPackage('rebrowser-puppeteer-core'),
     checkBetterSqlite3(),
     checkPackage('camoufox-js', 'Optional Firefox anti-detect driver'),

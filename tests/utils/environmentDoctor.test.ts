@@ -145,9 +145,16 @@ describe('runEnvironmentDoctor', () => {
 
   it('reports installed packages', async () => {
     const report = await runEnvironmentDoctor({ includeBridgeHealth: false });
-    const mcpSdk = report.packages.find((p) => p.name === '@modelcontextprotocol/sdk');
-    expect(mcpSdk).toBeDefined();
-    expect(['ok', 'missing']).toContain(mcpSdk!.status);
+    for (const packageName of [
+      '@modelcontextprotocol/core',
+      '@modelcontextprotocol/node',
+      '@modelcontextprotocol/server',
+      '@modelcontextprotocol/client',
+    ]) {
+      const packageCheck = report.packages.find((p) => p.name === packageName);
+      expect(packageCheck).toBeDefined();
+      expect(['ok', 'missing']).toContain(packageCheck!.status);
+    }
   });
 
   it('includes better-sqlite3 health in package checks', async () => {
