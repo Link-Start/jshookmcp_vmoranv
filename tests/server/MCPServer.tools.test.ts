@@ -146,6 +146,37 @@ describe('MCPServer.tools', () => {
     expect(ctx.executeToolWithTracking).toHaveBeenCalledWith('extensions_reload', {});
   });
 
+  it('forwards MCP annotations and output schema metadata to the SDK', () => {
+    mocks.buildZodShape.mockReturnValue({});
+    const ctx = createCtx();
+
+    registerSingleTool(ctx, {
+      name: 'structured_query',
+      description: 'Structured query',
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: { count: { type: 'number' } },
+        required: ['count'],
+      },
+      inputSchema: { type: 'object', properties: {} },
+    } as any);
+
+    const config = ctx.registrationsForTest[0].config;
+    expect(config.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    expect(config.outputSchema).toBeDefined();
+  });
+
   it('throws McpError on ToolError failures', async () => {
     mocks.buildZodShape.mockReturnValue({});
     const ctx = createCtx({
