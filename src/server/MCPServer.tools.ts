@@ -1,4 +1,4 @@
-import { ProtocolError, ProtocolErrorCode } from '@modelcontextprotocol/server';
+import { ProtocolError, ProtocolErrorCode, fromJsonSchema } from '@modelcontextprotocol/server';
 import type { McpServer, RegisteredTool, Tool } from '@modelcontextprotocol/server';
 import { ZodError, z } from 'zod';
 import { logger } from '@utils/logger';
@@ -171,11 +171,21 @@ export function registerSingleTool(ctx: MCPServerContext, toolDef: Tool): Regist
       ? buildZodShape(rawSchema as Record<string, unknown>)
       : {};
   const description = toolDef.description ?? toolDef.name;
+  const registrationMetadata = {
+    ...(toolDef.annotations ? { annotations: toolDef.annotations } : {}),
+    ...(builtTool.outputSchema
+      ? { outputSchema: fromJsonSchema(builtTool.outputSchema as any) }
+      : {}),
+  };
 
   if (Object.keys(shape).length > 0) {
     const registeredTool = ctx.server.registerTool(
       toolDef.name,
-      { description, inputSchema: shape as unknown as Record<string, z.ZodType> },
+      {
+        description,
+        inputSchema: shape as unknown as Record<string, z.ZodType>,
+        ...registrationMetadata,
+      },
       // Param is named `extra` (not v2's `ctx`) on purpose: the surrounding
       // scope already binds `ctx` to the MCPServerContext. ToolRequestExtra is
       // a structural subset of the v2 ServerContext, so the shape is correct.
@@ -206,7 +216,7 @@ export function registerSingleTool(ctx: MCPServerContext, toolDef: Tool): Regist
 
   const registeredTool = ctx.server.registerTool(
     toolDef.name,
-    { description },
+    { description, ...registrationMetadata },
     async (_args: unknown, extra?: ToolRequestExtra) => {
       return runWithToolRequestContext(extra, async () => {
         try {
