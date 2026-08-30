@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
+import type { NodeMcpRequestHandler } from '@modelcontextprotocol/node';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import {
   HTTP_CAPACITY_RETRY_AFTER_MS,
@@ -182,12 +183,67 @@ export async function startHttpTransport(ctx: MCPServerContext): Promise<void> {
 
   await ctx.server.connect(transport);
 
+  // MCP 2.0 modern leg. The factory creates a fresh SDK server for every
+  // request while delegating execution to the shared runtime context. Keeping
+  // this on /mcp/v2 makes the migration opt-in and leaves existing /mcp
+  // sessionful clients untouched.
+  let modernHandlerPromise:
+    | Promise<{ node: NodeMcpRequestHandler; mcp: { close: () => Promise<void> } }>
+    | undefined;
+
   ctx.httpServer = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
 
     // Health check endpoint — no auth, no rate limit
     if (url.pathname === '/health' && req.method === 'GET') {
       handleHealthCheck(ctx, res);
+      return;
+    }
+
+    if (url.pathname === '/mcp/v2') {
+      if (!checkOrigin(req, res, authConfig)) return;
+      const authenticated = checkAuth(req, res, authConfig);
+      if (!authenticated) return;
+      if (!checkRateLimit(req, res, authenticated, rateLimitConfig)) return;
+      const dispatch = (parsedBody?: unknown) => {
+        modernHandlerPromise ??= (async () => {
+          const [{ createMcpHandler }, { toNodeHandler }, { createModernMcpServer }] =
+            await Promise.all([
+              import('@modelcontextprotocol/server'),
+              import('@modelcontextprotocol/node'),
+              import('@server/MCPServer.modern'),
+            ]);
+          const mcp = createMcpHandler(
+            (requestContext) => createModernMcpServer(ctx, requestContext),
+            {
+              legacy: 'reject',
+              onerror: (error) => logger.warn('[http/v2] MCP handler error:', error),
+            },
+          );
+          ctx.setDomainInstance?.('modernHttpHandler', mcp);
+          return { node: toNodeHandler(mcp), mcp };
+        })();
+        void modernHandlerPromise
+          .then(({ node }) => node(req, res, parsedBody))
+          .catch((error) => {
+            modernHandlerPromise = undefined;
+            logger.warn('[http/v2] failed to initialize MCP handler:', error);
+          });
+      };
+
+      // Parse every POST through the bounded streaming reader. This enforces
+      // maxBodyBytes for chunked requests as well as requests with a declared
+      // Content-Length; the parsed JSON is passed to toNodeHandler so the
+      // adapter does not need to consume the request stream a second time.
+      if (req.method === 'POST') {
+        const bodyPromise =
+          httpConfig?.maxBodyBytes === undefined
+            ? readBodyWithLimit(req, res)
+            : readBodyWithLimit(req, res, httpConfig.maxBodyBytes);
+        bodyPromise.then(dispatch).catch(() => undefined);
+      } else {
+        dispatch();
+      }
       return;
     }
 
@@ -344,6 +400,14 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
     // Flush snapshots before any other cleanup
     const getInst =
       typeof ctx.getDomainInstance === 'function' ? ctx.getDomainInstance.bind(ctx) : null;
+    const modernHttpHandler = getInst?.<{ close: () => Promise<void> }>('modernHttpHandler');
+    if (modernHttpHandler) {
+      try {
+        await modernHttpHandler.close();
+      } catch (error) {
+        logger.warn('MCP 2.0 HTTP handler close failed:', error);
+      }
+    }
     if (getInst) {
       const scheduler =
         getInst<import('@server/persistence/RuntimeSnapshotScheduler').RuntimeSnapshotScheduler>(
