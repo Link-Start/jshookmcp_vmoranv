@@ -714,5 +714,7 @@
   "tasks_get": "查询后台任务的当前状态（MCP 2.0 Tasks 协议）。返回状态（working/completed/failed/cancelled）、进度与消息。",
   "tasks_result": "获取后台任务的结果载荷（MCP 2.0 Tasks 协议）。可选择等待最多 waitMs 毫秒直至任务进入终态。",
   "tasks_cancel": "请求取消一个后台任务（MCP 2.0 Tasks 协议）。仅 working 状态的任务可被取消；若工具定义了取消处理器则会执行。",
-  "tasks_list": "列出服务器追踪的近期后台任务（MCP 2.0 Tasks 协议）。过期任务会按 TTL 自动清理。"
+  "tasks_list": "列出服务器追踪的近期后台任务（MCP 2.0 Tasks 协议）。过期任务会按 TTL 自动清理。",
+  "canvas_dump_shaders": "导出目标 canvas 上正在运行的着色器程序（顶点 + 片段源码、uniform）。在引擎支持时通过引擎内省（Three.js 的 renderer.info.programs、BABYLON.Effect.ShadersStore、Laya.Shader 注册表）以及 WEBGL_debug_shaders 扩展恢复源码（受驱动限制）。返回 programs[]，并在引擎/驱动拒绝暴露源码时附上诚实的 `reason`。理论依据：WGPULens arXiv 2606.26412 与 DarthShader arXiv 2409.01824。",
+  "canvas_memory_invariants": "断言 WebGL 上下文生命周期、引擎状态一致性以及纹理/程序泄漏等运行时不变量。报告 checks[]、violations[]（含严重级别与安全清理修复）以及 recommendations[] 建议块。诚实声明范围：仅覆盖 JS 可观测指标（DOM canvas 数量 vs 活动 WebGL 上下文数、renderer.info.memory 计数、contextLoss 事件）；完整的 GC 扫描/原生堆检查不在范围内。理论依据：JSidentify-V2 arXiv 2508.01655。"
 }
