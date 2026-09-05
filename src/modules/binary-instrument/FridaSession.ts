@@ -7,6 +7,14 @@ import { PrerequisiteError } from '@errors/PrerequisiteError';
 import { ToolError } from '@errors/ToolError';
 
 const FRIDA_MAX_BUFFER_BYTES = 5 * 1024 * 1024;
+/** Grace period between the SIGTERM and SIGKILL escalation on cancellation. */
+const FRIDA_KILL_ESCALATION_MS = 1_500;
+
+function abortError(message: string): Error {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
 
 export interface FridaScriptResult {
   output: string;
@@ -704,6 +712,16 @@ export class FridaSession {
     signal?: AbortSignal,
   ): Promise<CommandResult> {
     return new Promise((resolve, reject) => {
+      // The task may already be cancelled between the caller's check and
+      // this spawn (TaskManager awaits, availability probes) — never start
+      // work for an aborted task.
+      if (signal?.aborted) {
+        reject(abortError('Frida command aborted before spawn'));
+        return;
+      }
+
+      let escalationTimer: ReturnType<typeof setTimeout> | undefined;
+
       const child = execFile(
         file,
         args,
@@ -712,9 +730,16 @@ export class FridaSession {
           windowsHide: true,
           maxBuffer: FRIDA_MAX_BUFFER_BYTES,
           encoding: 'utf8',
+          // POSIX: lead a new process group so cancellation can signal the
+          // whole tree — in spawn mode the instrumented target is a
+          // grandchild of the frida CLI.
+          detached: process.platform !== 'win32',
         },
         (error, stdout, stderr) => {
           signal?.removeEventListener('abort', onAbort);
+          if (escalationTimer) {
+            clearTimeout(escalationTimer);
+          }
           if (error) {
             reject(error);
             return;
@@ -729,10 +754,44 @@ export class FridaSession {
 
       // Task cancellation must actually stop the CLI child — otherwise a
       // cancelled frida scan keeps burning CPU on the target for minutes.
+      // Kill the whole tree (Windows: taskkill /T; POSIX: process-group
+      // signal — the child was spawned detached) and escalate to SIGKILL
+      // so a frida CLI that swallows SIGTERM cannot outlive cancellation.
+      // All spawns here use argv arrays without a shell; PIDs come from
+      // our own child process, never from user input.
       function onAbort() {
-        child.kill();
+        if (child.pid === undefined) {
+          return;
+        }
+        if (process.platform === 'win32') {
+          execFile(
+            'taskkill',
+            ['/pid', String(child.pid), '/T', '/F'],
+            { windowsHide: true },
+            () => {},
+          );
+          return;
+        }
+        try {
+          process.kill(-child.pid, 'SIGTERM');
+        } catch {
+          child.kill('SIGTERM');
+        }
+        escalationTimer = setTimeout(() => {
+          try {
+            process.kill(-child.pid, 'SIGKILL');
+          } catch {
+            child.kill('SIGKILL');
+          }
+        }, FRIDA_KILL_ESCALATION_MS);
+        escalationTimer.unref();
       }
-      signal?.addEventListener('abort', onAbort, { once: true });
+
+      if (signal?.aborted) {
+        onAbort();
+      } else {
+        signal?.addEventListener('abort', onAbort, { once: true });
+      }
     });
   }
 }

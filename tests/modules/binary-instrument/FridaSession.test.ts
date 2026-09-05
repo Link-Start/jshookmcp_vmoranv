@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FridaSession } from '@modules/binary-instrument/FridaSession';
 import { probeCommand } from '@modules/external/ToolProbe';
 
@@ -236,5 +236,130 @@ describe('FridaSession', () => {
     await session.attach('com.example.app');
     await session.executeScript('test');
     expect(execFile.mock.calls[execFile.mock.calls.length - 1]?.[1]).toContain('-n');
+  });
+});
+
+describe('FridaSession task cancellation', () => {
+  let session: FridaSession;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    session = new FridaSession();
+    (probeCommand as any).mockResolvedValue({
+      available: true,
+      path: '/usr/bin/frida',
+      version: '16.0.0',
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('never spawns a child when the signal is already aborted', async () => {
+    const execFile = await import('node:child_process').then((m) => m.execFile as any);
+    const controller = new AbortController();
+    controller.abort();
+
+    await session.attach('1234');
+    const callsBefore = execFile.mock.calls.length;
+    const result = await session.executeScript('test', { signal: controller.signal });
+
+    expect(result.error).toContain('aborted before spawn');
+    expect(execFile.mock.calls.length).toBe(callsBefore);
+  });
+
+  it('signals the whole process group and escalates to SIGKILL on cancel (POSIX)', async () => {
+    if (process.platform === 'win32') return; // covered by the Windows test below
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true);
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    let storedCb: ((err: Error | null, stdout: string, stderr: string) => void) | undefined;
+    const childKill = vi.fn();
+    const execFile = await import('node:child_process').then((m) => m.execFile as any);
+    execFile
+      .mockImplementationOnce((_f: any, _a: any, _o: any, cb: any) => {
+        // attach's own probe spawn — complete immediately
+        cb(null, '__frida_attach_ok__', '');
+      })
+      .mockImplementationOnce((_f: any, _a: any, _o: any, cb: any) => {
+        storedCb = cb;
+        return { pid: 4242, kill: childKill };
+      });
+
+    await session.attach('1234');
+    const pending = session.executeScript('long scan', { signal: controller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(storedCb).toBeTruthy();
+
+    controller.abort();
+    expect(killSpy).toHaveBeenCalledWith(-4242, 'SIGTERM');
+
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(killSpy).toHaveBeenCalledWith(-4242, 'SIGKILL');
+
+    storedCb!(new Error('terminated'), '', '');
+    const result = await pending;
+    expect(result.error).toContain('terminated');
+  });
+
+  it('kills immediately when the signal aborts during spawn (race window)', async () => {
+    if (process.platform === 'win32') return;
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true);
+    const controller = new AbortController();
+    let storedCb: ((err: Error | null, stdout: string, stderr: string) => void) | undefined;
+    const execFile = await import('node:child_process').then((m) => m.execFile as any);
+    execFile
+      .mockImplementationOnce((_f: any, _a: any, _o: any, cb: any) => {
+        cb(null, '__frida_attach_ok__', '');
+      })
+      .mockImplementationOnce((_f: any, _a: any, _o: any, cb: any) => {
+        storedCb = cb;
+        controller.abort(); // lands between spawn and listener registration
+        return { pid: 4242, kill: vi.fn() };
+      });
+
+    await session.attach('1234');
+    const pending = session.executeScript('scan', { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(killSpy).toHaveBeenCalledWith(-4242, 'SIGTERM');
+
+    storedCb!(new Error('terminated'), '', '');
+    await pending;
+  });
+
+  it('uses taskkill tree kill on Windows', async () => {
+    const execFile = await import('node:child_process').then((m) => m.execFile as any);
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      const controller = new AbortController();
+      let storedCb: ((err: Error | null, stdout: string, stderr: string) => void) | undefined;
+      const childKill = vi.fn();
+      execFile
+        .mockImplementationOnce((_f: any, _a: any, _o: any, cb: any) => {
+          cb(null, '__frida_attach_ok__', '');
+        })
+        .mockImplementationOnce((_f: any, _a: any, _o: any, cb: any) => {
+          storedCb = cb;
+          return { pid: 4242, kill: childKill };
+        });
+
+      await session.attach('1234');
+      const pending = session.executeScript('scan', { signal: controller.signal });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      controller.abort();
+
+      const taskkillCall = execFile.mock.calls.find((c: any[]) => c[0] === 'taskkill');
+      expect(taskkillCall).toBeTruthy();
+      expect(taskkillCall![1]).toEqual(['/pid', '4242', '/T', '/F']);
+      expect(childKill).not.toHaveBeenCalled();
+
+      storedCb!(null, 'ok', '');
+      await pending;
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    }
   });
 });
