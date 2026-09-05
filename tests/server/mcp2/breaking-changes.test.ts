@@ -3,6 +3,7 @@ import {
   RESERVED_ENVELOPE_KEYS,
   LIFTED_RETRY_FIELDS,
   ERA_MISMATCH_ERROR_CODE,
+  ERA_MISMATCHED_METHODS,
   SERVER_INFO_META_KEY,
   isReservedEnvelopeKey,
   isLiftedRetryField,
@@ -173,23 +174,32 @@ describe('BC#5 — MessageExtraInfo.classification mismatch rejects as -32022', 
 });
 
 describe('BC#6 — era-mismatched outbound method throws MethodNotSupportedByProtocolVersion', () => {
-  it('outbound server/discover and subscriptions/listen are 2026-only', () => {
-    // Sending these toward a 2025 peer throws before reaching the
-    // transport. The constants live in the SDK; this test pins the
-    // expectation so any future code that programmatically sends them
-    // gets caught.
-    const outboundFrom2025 = ['server/discover', 'subscriptions/listen'];
-    expect(outboundFrom2025).toContain('server/discover');
-    expect(outboundFrom2025).toContain('subscriptions/listen');
+  it('2026-only methods are pinned in ERA_MISMATCHED_METHODS.outboundFrom2025', () => {
+    // Sending any of these toward a 2025 peer throws before reaching the
+    // transport. Pinned against the module export (not a local literal) so
+    // a vocabulary change fails here instead of silently drifting.
+    expect([...ERA_MISMATCHED_METHODS.outboundFrom2025].toSorted()).toEqual(
+      [
+        'server/discover',
+        'subscriptions/listen',
+        'tasks/cancel',
+        'tasks/get',
+        'tasks/list',
+        'tasks/result',
+      ].toSorted(),
+    );
   });
 
-  it('outbound tasks/* on 2026-alpha vocabulary throws on a 2026-pinned connection', () => {
-    // tasks/list and tasks/result are 2025 vocabulary; tasks/get,
-    // tasks/update, tasks/cancel are 2026 extension methods.
-    const legacyOnly = ['tasks/list', 'tasks/result'];
-    for (const m of legacyOnly) {
-      expect(typeof m).toBe('string');
+  it('tasks/* are 2026 extension methods — valid on a 2026 connection', () => {
+    // The Tasks extension is 2026-only: every tasks method mismatches when
+    // sent toward a 2025 peer, and none is era-mismatched toward a 2026
+    // peer. The real tasks domain (TaskStoreAdapter) registers
+    // get / list / result / cancel on the modern stack.
+    for (const m of ['tasks/list', 'tasks/get', 'tasks/result', 'tasks/cancel'] as const) {
+      expect(ERA_MISMATCHED_METHODS.outboundFrom2025).toContain(m);
+      expect(ERA_MISMATCHED_METHODS.outboundFrom2026).not.toContain(m);
     }
+    expect(ERA_MISMATCHED_METHODS.outboundFrom2026).toEqual([]);
   });
 });
 
@@ -350,11 +360,13 @@ describe('regression — error code HTTP-status mapping is spec-MUST', () => {
 });
 
 describe('regression — SEP-2243 Mcp-Name requirement includes tasks/* methods', () => {
-  it('all four tasks methods require Mcp-Name', () => {
+  it('all registered taskId-mirroring tasks methods require Mcp-Name', () => {
+    // No tasks/update in this project — the tasks domain registers
+    // get / list / result / cancel, and list takes a cursor not a taskId.
     expect(requiresMcpNameHeader('tasks/get')).toBe(true);
-    expect(requiresMcpNameHeader('tasks/update')).toBe(true);
     expect(requiresMcpNameHeader('tasks/cancel')).toBe(true);
     expect(requiresMcpNameHeader('tasks/result')).toBe(true);
+    expect(requiresMcpNameHeader('tasks/update')).toBe(false);
   });
 
   it('taskId is the mirrored value for all tasks/* methods', () => {

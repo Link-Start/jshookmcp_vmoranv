@@ -95,18 +95,27 @@ export function isLegalResultType(kind: unknown): kind is 'complete' | 'input_re
  * Method names that are era-mismatched when sent over the wrong protocol
  * version. `SdkError(MethodNotSupportedByProtocolVersion)` is thrown
  * before reaching the transport in either direction.
+ *
+ * `outboundFrom2025` lists 2026-only methods (the Tasks extension, the
+ * modern discover, subscriptions) — sending any of them toward a 2025
+ * peer is a mismatch. `outboundFrom2026` would list 2025-only methods
+ * that are retired on 2026-07-28; none is pinned here yet — the earlier
+ * claim that `tasks/list` / `tasks/result` were retired on 2026 was
+ * wrong for this project (the real tasks domain registers both), so the
+ * list is empty rather than carrying a stale spec note.
  */
 export const ERA_MISMATCHED_METHODS = Object.freeze({
-  /** Sent on 2025-era outbound (toward a 2025 peer). */
-  outboundFrom2025: ['server/discover', 'subscriptions/listen'] as const,
-  /** Sent on 2026-era outbound (toward a 2026 peer) but not 2025. */
-  outboundFrom2026: [
+  /** 2026-only methods — mismatch when sent toward a 2025 peer. */
+  outboundFrom2025: [
+    'server/discover',
+    'subscriptions/listen',
     'tasks/list',
+    'tasks/get',
     'tasks/result',
     'tasks/cancel',
-    'tasks/get',
-    'tasks/update',
   ] as const,
+  /** 2025-only methods — mismatch when sent toward a 2026 peer. */
+  outboundFrom2026: [] as const,
 });
 
 /** Era validation outcome for `MessageExtraInfo.classification` mismatches. */

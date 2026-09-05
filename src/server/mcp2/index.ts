@@ -1,10 +1,12 @@
 /**
  * MCP 2.0 (2026-07-28) — spec-delta helpers barrel.
  *
- * This module re-exports the small, focused helpers that the modern
- * (`/mcp/v2`) entry, the ElicitationBridge refactor, and the era-matrix
- * tests all share. Each submodule is the canonical source for one
- * delta from `research/spec-delta.md`.
+ * STATUS: spec-pinned constants and pure predicates, currently UNWIRED —
+ * nothing under `src/` imports this barrel yet; only the era-matrix tests
+ * do. They exist to pin this project's understanding of one delta per
+ * submodule before the modern (`/mcp/v2`) entry and the ElicitationBridge
+ * refactor consume them. Consumers should import from here (not restate
+ * the vocabulary) when those land.
  *
  *  - `cache-defaults.ts`     — SDK cache defaults + cacheable methods
  *  - `server-info-meta.ts`   — `serverInfo` in `_meta` (spec PR #3002)

@@ -39,6 +39,7 @@ import {
   RESERVED_ENVELOPE_KEYS,
   LIFTED_RETRY_FIELDS,
   ERA_MISMATCH_ERROR_CODE,
+  ERA_MISMATCHED_METHODS,
   isReservedEnvelopeKey,
   isLiftedRetryField,
   stripReservedEnvelopeKeys,
@@ -307,9 +308,12 @@ describe('spec-delta — clarification §6 (legacy shim host capabilities)', () 
 });
 
 describe('spec-delta — clarification E4 (SEP-2243 Mcp-Name + tasks push)', () => {
-  it('enumerates the four methods that mirror params.taskId', () => {
+  it('enumerates the methods that mirror params.taskId', () => {
+    // Aligned with the tasks the server actually registers
+    // (TaskStoreAdapter: get / list / result / cancel — no tasks/update);
+    // tasks/list takes a cursor, not a taskId.
     expect([...TASKS_TASKID_MIRROR_METHODS].toSorted()).toEqual(
-      ['tasks/cancel', 'tasks/get', 'tasks/result', 'tasks/update'].toSorted(),
+      ['tasks/cancel', 'tasks/get', 'tasks/result'].toSorted(),
     );
   });
 
@@ -321,7 +325,6 @@ describe('spec-delta — clarification E4 (SEP-2243 Mcp-Name + tasks push)', () 
         'tasks/cancel',
         'tasks/get',
         'tasks/result',
-        'tasks/update',
         'tools/call',
       ].toSorted(),
     );
@@ -332,7 +335,6 @@ describe('spec-delta — clarification E4 (SEP-2243 Mcp-Name + tasks push)', () 
     expect(requiresMcpNameHeader('resources/read')).toBe(true);
     expect(requiresMcpNameHeader('prompts/get')).toBe(true);
     expect(requiresMcpNameHeader('tasks/get')).toBe(true);
-    expect(requiresMcpNameHeader('tasks/update')).toBe(true);
     expect(requiresMcpNameHeader('tasks/cancel')).toBe(true);
     expect(requiresMcpNameHeader('initialize')).toBe(false);
     expect(requiresMcpNameHeader('tools/list')).toBe(false);
@@ -340,7 +342,6 @@ describe('spec-delta — clarification E4 (SEP-2243 Mcp-Name + tasks push)', () 
 
   it('mirrors taskId for tasks/* methods', () => {
     expect(mirrorParamToMcpName('tasks/get', { taskId: 'abc-123' })).toBe('abc-123');
-    expect(mirrorParamToMcpName('tasks/update', { taskId: 'xyz-789' })).toBe('xyz-789');
     expect(mirrorParamToMcpName('tasks/cancel', { taskId: 'q-001' })).toBe('q-001');
   });
 
@@ -567,20 +568,15 @@ describe('breaking change 3 — inputResponses / requestState lifted from top-le
 });
 
 describe('breaking change 4 — CallToolResult.content is required on 2026-07-28, optional on 2025', () => {
-  it('era-aware type layer documents the difference (see plan §A4)', () => {
-    // This is a wire-tightening breaking change. The behavior is encoded
-    // in the SDK's `projectCallToolResult` codec, not in our project.
-    // The test pins the documented expectation: the project must keep
-    // emitting `content` in every tool handler so it works on both eras.
-    //
-    // This is a doc-only delta for our project: the test asserts the
-    // expectation rather than the runtime behavior (which lives in the
-    // SDK's wire codec).
-    const legacyEraOptional = true;
-    const modernEraRequired = true;
-    expect(legacyEraOptional).toBe(true);
-    expect(modernEraRequired).toBe(true);
-  });
+  // Wire-tightening delta: the behavior lives in the SDK's
+  // `projectCallToolResult` codec, not in this project — there is no
+  // local constant to pin without re-asserting a local literal. The
+  // actionable part for this repo (every tool handler emits `content`)
+  // is enforced by the generated-catalog contract, so this delta stays
+  // documentation-only until the modern entry consumes it.
+  it.todo(
+    'every registered tool result carries content (catalog-level contract, needs the modern entry wired)',
+  );
 });
 
 describe('breaking change 5 — MessageExtraInfo.classification mismatch rejects as -32022', () => {
@@ -595,29 +591,32 @@ describe('breaking change 5 — MessageExtraInfo.classification mismatch rejects
 });
 
 describe('breaking change 6 — era-mismatched outbound method throws MethodNotSupportedByProtocolVersion', () => {
-  it('outboundFrom2025: server/discover and subscriptions/listen are 2026-only', () => {
+  it('outboundFrom2025 pins the 2026-only methods against the real export', () => {
     // These cannot be sent toward a 2025 peer; the SDK throws before
-    // reaching the transport.
-    expect(['server/discover', 'subscriptions/listen']).toContain('server/discover');
-    expect(['server/discover', 'subscriptions/listen']).toContain('subscriptions/listen');
+    // reaching the transport. Pinned against the ERA_MISMATCHED_METHODS
+    // export (not a local literal) so a vocabulary change fails here.
+    expect([...ERA_MISMATCHED_METHODS.outboundFrom2025].toSorted()).toEqual(
+      [
+        'server/discover',
+        'subscriptions/listen',
+        'tasks/cancel',
+        'tasks/get',
+        'tasks/list',
+        'tasks/result',
+      ].toSorted(),
+    );
   });
 
-  it('outboundFrom2026: tasks/* (2025 vocabulary) cannot be sent from a 2026 connection', () => {
-    // tasks/list is removed in 2026-07-28 (replaced by extensions/tasks),
-    // and tasks/result is replaced by tasks/get. The SDK rejects these
-    // outbound calls on a 2026-pinned connection.
-    const legacyTasksMethods = [
-      'tasks/list',
-      'tasks/result',
-      'tasks/cancel',
-      'tasks/get',
-      'tasks/update',
-    ];
-    for (const m of legacyTasksMethods) {
-      expect(typeof m).toBe('string');
+  it('outboundFrom2026 is empty: no 2025-only method is pinned as 2026-mismatched', () => {
+    // The Tasks methods are 2026 extensions and are VALID on a 2026
+    // connection (the real tasks domain registers them). The earlier
+    // alpha-era claim that tasks/list+result were retired on 2026 did not
+    // hold for this project — the 2026 side stays empty until a real
+    // retired method shows up.
+    expect(ERA_MISMATCHED_METHODS.outboundFrom2026).toEqual([]);
+    // Cross-module consistency: every taskId-mirroring method is 2026-only.
+    for (const m of TASKS_TASKID_MIRROR_METHODS) {
+      expect(ERA_MISMATCHED_METHODS.outboundFrom2025).toContain(m);
     }
-    // Sanity: tasks/cancel and tasks/get are 2026-extension methods, so
-    // they should be allowed on 2026; the alpha-only `tasks/list` and
-    // `tasks/result` are the ones the SDK rejects.
   });
 });

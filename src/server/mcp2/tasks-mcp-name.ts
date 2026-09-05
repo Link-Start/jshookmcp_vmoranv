@@ -7,8 +7,11 @@
  *
  * Plan delta (spec-delta.md §4.7): the `Mcp-Name` header is required for
  * any method that mirrors `params.name` / `params.uri`, AND additionally
- * for `tasks/get` / `tasks/update` / `tasks/cancel` — those mirror
+ * for `tasks/get` / `tasks/result` / `tasks/cancel` — those mirror
  * `params.taskId` per the Tasks extension's Streamable HTTP binding.
+ * Aligned with the tasks the server actually registers
+ * (`TaskStoreAdapter`: get / list / result / cancel — there is no
+ * `tasks/update` in this project).
  *
  * This module enumerates the exact set of methods that require
  * `Mcp-Name` and provides a small helper that the modern HTTP entry
@@ -18,10 +21,9 @@
  * are also captured here for documentation and test pinning.
  */
 
-/** The four methods that mirror a `params.taskId` on the wire. */
+/** The methods that mirror a `params.taskId` on the wire (`tasks/list` takes a cursor, not a taskId). */
 export const TASKS_TASKID_MIRROR_METHODS = Object.freeze([
   'tasks/get',
-  'tasks/update',
   'tasks/cancel',
   'tasks/result',
 ] as const);

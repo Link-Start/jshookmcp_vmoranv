@@ -38,10 +38,10 @@ export interface ServerInfoIdentity {
  * Read `serverInfo` from a `DiscoverResult`-shaped object the right way:
  * the `_meta` placement is the only correct path on 2026-07-28.
  *
- * Returns `undefined` when the response is missing the meta field — this
- * is the observable behavior a v2-alpha `result.serverInfo` read produces
- * today, and the test in `spec-deltas.test.ts` pins both the silent-undefined
- * body read AND the correct meta read.
+ * Falls back to the legacy `result.serverInfo` body field when `_meta` is
+ * missing (v2-alpha compatibility — the caller still gets the identity
+ * rather than a stale `undefined`); returns `undefined` only when both
+ * placements are absent. `spec-deltas.test.ts` pins both reads.
  */
 export function readServerInfoFromDiscover(discover: {
   serverInfo?: unknown;
