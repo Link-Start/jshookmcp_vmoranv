@@ -112,7 +112,7 @@ function buildMetadataBlock(summary, language) {
   return [
     README_SYNC_START,
     `- Package version: \`${summary.packageVersion}\``,
-    `- Built-in Tools: \`${summary.toolCount}\``,
+    `- Built-in tools: \`${summary.toolCount}\``,
     `- Domains: ${summary.domains.map((domain) => `\`${domain}\``).join(', ')}`,
     '- Note: this snapshot is generated from the runtime registry; do not edit the counts by hand.',
     README_SYNC_END,
@@ -130,7 +130,7 @@ function updateEnglishReadme(readme, summary) {
   const intro =
     'An MCP (Model Context Protocol) server with a runtime-registry-driven catalog of built-in tools for AI-assisted JavaScript analysis and security analysis. It combines browser automation, Chrome DevTools Protocol debugging, network monitoring, intelligent JavaScript hooks, LLM-powered code analysis, process and memory inspection, WASM tooling, source-map reconstruction, AST transforms, and composite workflows in a single server.';
   const snapshotSection = [
-    '## Registry Snapshot',
+    '## Registry snapshot',
     '',
     'The built-in surface below is generated from the runtime registry and checked in CI.',
     '',
@@ -142,14 +142,12 @@ function updateEnglishReadme(readme, summary) {
   let next = readme;
   // One-time legacy badge migration was removed: README badges (Node.js 22.12+)
   // no longer match the old `node->=20` pattern, so the replaces were dead no-ops.
+  // The `i` flags absorb the old title-case headers ("Registry Snapshot" /
+  // "Project Stats") so pre-restructure READMEs keep updating too.
+  next = replaceSection(next, /An MCP[\s\S]*?(?=\n## What makes jshook different\n)/, `${intro}\n`);
   next = replaceSection(
     next,
-    /An MCP[\s\S]*?(?=\n## Documentation \/ Quick Links\n)/,
-    `${intro}\n`,
-  );
-  next = replaceSection(
-    next,
-    /## (Tool Domains|Registry Snapshot)[\s\S]*?(?=\n## Project Stats\n)/,
+    /## (Tool Domains|Registry Snapshot)[\s\S]*?(?=\n---\n|\n## Project Stats\n)/i,
     `${snapshotSection}\n`,
   );
   return `${next.trimEnd()}\n`;
@@ -171,9 +169,9 @@ function updateChineseReadme(readme, summary) {
   let next = readme;
   // One-time legacy badge migration was removed: README badges (Node.js 22.12+)
   // no longer match the old `node->=20` pattern, so the replaces were dead no-ops.
-  next = replaceSection(next, /面向 AI[\s\S]*?(?=\n## 文档与快速导航\n)/, `${intro}\n`);
-  if (/## 注册表快照[\s\S]*?(?=\n## 项目统计\n)/.test(next)) {
-    next = next.replace(/## 注册表快照[\s\S]*?(?=\n## 项目统计\n)/, `${snapshotSection}\n`);
+  next = replaceSection(next, /面向 AI[\s\S]*?(?=\n## jshook 的不同之处\n)/, `${intro}\n`);
+  if (/## 注册表快照[\s\S]*?(?=\n---\n|\n## 项目统计\n)/.test(next)) {
+    next = next.replace(/## 注册表快照[\s\S]*?(?=\n---\n|\n## 项目统计\n)/, `${snapshotSection}\n`);
   } else {
     next = next.replace(/\n## 项目统计\n/, `\n${snapshotSection}\n\n## 项目统计\n`);
   }
