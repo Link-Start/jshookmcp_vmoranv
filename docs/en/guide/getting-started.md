@@ -4,7 +4,7 @@ A minimalist guide for successfully configuring `jshookmcp` for the first time.
 
 ## 1. Install Node.js
 
-Ensure **Node.js 22.12+** or **24.x** is installed on your system.
+Ensure **Node.js 22.22.2+** or **24.15+** is installed on your system.
 
 ## 2. Update MCP Client Configuration
 

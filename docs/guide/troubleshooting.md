@@ -16,12 +16,12 @@ This guide covers common issues and their solutions.
 
 ```bash
 # Use a supported Node 22 release
-nvm install 22.12.0
-nvm use 22.12.0
+nvm install 22.22.2
+nvm use 22.22.2
 
 # Or switch to Node 24
-nvm install 24.0.0
-nvm use 24.0.0
+nvm install 24.15.0
+nvm use 24.15.0
 ```
 
 **Verification**:
