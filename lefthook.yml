@@ -29,6 +29,11 @@ pre-commit:
       run: npx oxlint {staged_files}
 
 pre-push:
+  # Serial by necessity: coverage-gate and typecheck each allocate several GB
+  # at report/typecheck time; run in parallel (lefthook default) they OOM the
+  # v8 coverage remapper on memory-constrained Windows machines (exit -1 with
+  # no report). Serial adds ~2 min wall clock but makes the gate deterministic.
+  parallel: false
   commands:
     refresh-git-noise:
       run: corepack pnpm run git:refresh-noise
