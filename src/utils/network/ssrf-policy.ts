@@ -1,6 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import type { LookupAddress } from 'node:dns';
 import { BlockList, isIP } from 'node:net';
+import fastUri from 'fast-uri';
 import { readEnvBoolean } from '@src/config/environment';
 
 const RESTRICTED_IPV4_BLOCKLIST = new BlockList();
@@ -48,6 +49,47 @@ function getHostAddressFamily(host: string): 'ipv4' | 'ipv6' | null {
   if (family === 4) return 'ipv4';
   if (family === 6) return 'ipv6';
   return null;
+}
+
+function normalizeAuthorityHost(host: string | undefined): string {
+  return (host ?? '').replace(/^\[|\]$/g, '').toLowerCase();
+}
+
+/**
+ * Parse a URL with BOTH the WHATWG parser (what Node's fetch/undici will
+ * actually use) and an independent RFC 3986 parser (fast-uri), and fail
+ * closed whenever the two disagree about the authority. Hostile inputs make
+ * the two parsers disagree on precisely the shapes behind the fast-uri 4.1.x
+ * advisories — backslash authority introducers, percent-encoded hostnames,
+ * unbalanced IP-literal brackets, skipped IDN canonicalization — so an
+ * ambiguous URL never reaches DNS resolution.
+ *
+ * fast-uri must parse the RAW string, not the WHATWG-canonicalized form:
+ * canonicalization erases the disagreement (e.g. `http://foo\@evil.com/`
+ * re-parses identically once WHATWG has rewritten the backslash).
+ */
+export function parseUrlForNetworkUse(url: string): URL {
+  const parsed = new URL(url);
+  let components: ReturnType<typeof fastUri.parse>;
+  try {
+    components = fastUri.parse(url);
+  } catch {
+    throw new Error(`URL authority rejected by cross-parser check: "${url}"`);
+  }
+
+  const whatwgScheme = parsed.protocol.replace(/:$/, '').toLowerCase();
+  const rfc3986Scheme = (components.scheme ?? '').toLowerCase();
+  const whatwgHost = normalizeAuthorityHost(parsed.hostname);
+  const rfc3986Host = normalizeAuthorityHost(components.host);
+
+  if (whatwgScheme !== rfc3986Scheme || whatwgHost !== rfc3986Host) {
+    throw new Error(
+      `URL authority is parser-ambiguous (whatwg="${whatwgScheme}//${whatwgHost}", ` +
+        `rfc3986="${rfc3986Scheme}//${rfc3986Host}"): "${url}"`,
+    );
+  }
+
+  return parsed;
 }
 
 export interface NetworkAuthorizationInput {
@@ -195,7 +237,7 @@ export function isPrivateHost(host: string): boolean {
 
 export function isLoopbackHttpUrl(url: string): boolean {
   try {
-    const parsed = new URL(url);
+    const parsed = parseUrlForNetworkUse(url);
     return parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname);
   } catch {
     return false;
@@ -258,7 +300,7 @@ export function isNetworkAuthorizationExpired(
  * lookup can miss the private record and let the request through.
  */
 export async function resolveNetworkTargets(url: string): Promise<ResolvedNetworkTargets> {
-  const parsedUrl = new URL(url);
+  const parsedUrl = parseUrlForNetworkUse(url);
   const hostname = normalizeHost(parsedUrl.hostname);
   const isIpLiteral = getHostAddressFamily(hostname) !== null;
 
@@ -313,7 +355,7 @@ export async function isSsrfTarget(
   try {
     const policy = createNetworkAuthorizationPolicy(authorization);
     if (isNetworkAuthorizationExpired(policy)) return true;
-    const parsed = new URL(url);
+    const parsed = parseUrlForNetworkUse(url);
 
     // The env bypass is intentionally checked before DNS resolution: without
     // an authorization policy the operator has opted out of SSRF guarding

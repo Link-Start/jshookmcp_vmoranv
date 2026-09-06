@@ -10,6 +10,7 @@ import {
   isNetworkAuthorizationExpired,
   isPrivateHost,
   isSsrfTarget,
+  parseUrlForNetworkUse,
   resolveNetworkTarget,
 } from '@utils/network/ssrf-policy';
 import { TEST_HOSTS, TEST_URLS, TEST_HTTP_URLS, withPath } from '@tests/shared/test-urls';
@@ -114,6 +115,56 @@ describe('network ssrf-policy helpers', () => {
 
     it('returns false for invalid URL', async () => {
       expect(isLoopbackHttpUrl('not-a-url')).toBe(false);
+    });
+
+    it('does not trust loopback verdicts on parser-ambiguous URLs', async () => {
+      expect(isLoopbackHttpUrl('http://127.0.0.1\\@evil.com/')).toBe(false);
+    });
+  });
+
+  describe('parseUrlForNetworkUse', () => {
+    it('accepts canonical https URLs', () => {
+      expect(parseUrlForNetworkUse('https://example.com/path?q=1').hostname).toBe('example.com');
+    });
+
+    it('accepts uppercase hosts and schemes', () => {
+      expect(parseUrlForNetworkUse('HTTP://EXAMPLE.com/').hostname).toBe('example.com');
+    });
+
+    it('accepts default ports', () => {
+      expect(parseUrlForNetworkUse('http://example.com:80/').port).toBe('');
+    });
+
+    it('accepts userinfo without mistaking it for the host', () => {
+      expect(parseUrlForNetworkUse('http://user:pass@example.com/').hostname).toBe('example.com');
+    });
+
+    it('accepts bracketed IPv6 literals', () => {
+      expect(parseUrlForNetworkUse('http://[::1]:8080/').hostname).toBe('[::1]');
+    });
+
+    it('accepts IDN hosts via punycode agreement', () => {
+      expect(parseUrlForNetworkUse('http://münchen.de/').hostname).toBe('xn--mnchen-3ya.de');
+    });
+
+    it('accepts trailing-dot hosts', () => {
+      expect(parseUrlForNetworkUse('http://example.com./x').hostname).toBe('example.com.');
+    });
+
+    it('accepts IPv4 shorthand both parsers canonicalize', () => {
+      expect(parseUrlForNetworkUse('http://0x7f.1/').hostname).toBe('127.0.0.1');
+    });
+
+    it('rejects backslash authority introducers', () => {
+      expect(() => parseUrlForNetworkUse('http://foo\\@evil.com/')).toThrow('parser-ambiguous');
+    });
+
+    it('rejects opaque-path special URLs', () => {
+      expect(() => parseUrlForNetworkUse('http:foo')).toThrow('parser-ambiguous');
+    });
+
+    it('rejects unbalanced IP-literal brackets', () => {
+      expect(() => parseUrlForNetworkUse('http://[::1/unbalanced')).toThrow();
     });
   });
 
@@ -386,6 +437,10 @@ describe('network ssrf-policy helpers', () => {
 
     it('returns true for invalid URLs', async () => {
       await expect(isSsrfTarget('not-a-url')).resolves.toBe(true);
+    });
+
+    it('blocks parser-ambiguous authority URLs', async () => {
+      await expect(isSsrfTarget('http://foo\\@evil.com/')).resolves.toBe(true);
     });
 
     it('returns true for private IP without authorization', async () => {
