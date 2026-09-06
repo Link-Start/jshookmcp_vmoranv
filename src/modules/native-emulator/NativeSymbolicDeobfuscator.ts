@@ -8,6 +8,7 @@
  */
 
 import { withZ3 } from '@modules/z3/Z3Solver';
+import { NATIVE_DEOBF_Z3_TIMEOUT_MS } from '@src/constants';
 import type { Arm64TraceRecord } from './Arm64TraceRecorder';
 
 export interface SimplifiedBasicBlock {
@@ -123,6 +124,11 @@ export class NativeSymbolicDeobfuscator {
       const ctx = new api.Context('native-deobf') as any;
       const { Solver, Bool, And, Or, Not, BitVec } = ctx;
       const solver = new Solver();
+      // Solver-level timeout (ms): makes Z3 itself bail out on a hard query.
+      // Necessary in addition to the withZ3 promise timeout below because the
+      // native check() call is synchronous — a watchdog timer cannot fire
+      // until it returns.
+      solver.set('timeout', NATIVE_DEOBF_Z3_TIMEOUT_MS);
       const vars = new Map<string, unknown>();
 
       const term = (t: NativeTerm): unknown => {
@@ -167,7 +173,7 @@ export class NativeSymbolicDeobfuscator {
 
       solver.add(build(cond));
       return (await solver.check()) === 'sat';
-    });
+    }, NATIVE_DEOBF_Z3_TIMEOUT_MS);
     return result;
   }
 }

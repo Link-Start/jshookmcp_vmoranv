@@ -1,9 +1,8 @@
-import { writeFile } from 'node:fs/promises';
 import type { TraceEvent } from '@modules/native-emulator/CpuEngine';
 import { disassembleInstruction } from '@modules/native-emulator/disasm';
 import { signExtend7 } from '@modules/native-emulator/simd-utils';
 import { SYSCALL_NAMES } from '@modules/native-emulator/syscalls';
-import { resolveArtifactPath } from '@utils/artifacts';
+import { resolveArtifactPath, writeArtifactContent } from '@utils/artifacts';
 
 const VECTOR_RE = /^[vqdshb]\d{1,2}$/i;
 
@@ -372,11 +371,17 @@ export async function persistTraceArtifact(
   };
   if (error) payload.error = error;
   const body = `${JSON.stringify(payload, null, 2)}\n`;
-  await writeFile(artifact.absolutePath, body, 'utf8');
+  // Traces are a SENSITIVE_CATEGORIES entry: writeArtifactContent encrypts by
+  // default (OPSEC policy — AES-256-GCM, mode 0600) and hands back the one-off
+  // key in the response, so the artifact on disk alone cannot be read.
+  const { encryptionKeyHex } = await writeArtifactContent(artifact.absolutePath, body, {
+    category: 'traces',
+  });
   return {
     category: 'traces',
     path: artifact.displayPath,
     eventCount: trace.length,
     bytes: Buffer.byteLength(body, 'utf8'),
+    ...(encryptionKeyHex ? { encryption: 'aes-256-gcm', encryptionKeyHex } : {}),
   };
 }

@@ -62,6 +62,9 @@ export const DEFAULT_PAC_KEYS: PacKeys = {
   da: '84be85ce9804e94bec2802d4e0a488e9',
   db: '84be85ce9804e94bec2802d4e0a488e9',
 };
+
+/** Upper bound on retained AUT-mismatch diagnostics (RE signal, not a leak sink). */
+const PAC_MISMATCH_LOG_CAP = 32;
 /**
  * A jump/call through a register holding 0 (BR/BLR to address 0). Carried as a
  * distinct class so callers can tell a NULL indirect call apart from any other
@@ -254,12 +257,26 @@ export class CpuEngine implements ExecutionContext {
   private stopRequested = false;
   /** Pointer-authentication keys (ARMv8.3 PAC). IA/IB/DA/DB; uses DEFAULT_PAC_KEYS initially. */
   pacKeys: PacKeys = DEFAULT_PAC_KEYS;
+  /** Bounded AUT-mismatch log (PointerAuth decoder sink; for nemu_trace). */
+  private readonly pacMismatchLog: string[] = [];
 
   /** Replace the active PAC key set (e.g. inject keys dumped from a real device). */
 
   setPacKeys = (keys: PacKeys): void => {
     this.pacKeys = keys;
   };
+
+  /** Record an AUT mismatch from the PointerAuth decoders. Capped, never throws. */
+  recordPacMismatch = (entry: string): void => {
+    if (this.pacMismatchLog.length < PAC_MISMATCH_LOG_CAP) {
+      this.pacMismatchLog.push(entry);
+    }
+  };
+
+  /** Non-destructive snapshot of recorded AUT mismatches. */
+  pacDiagSnapshot(): string[] {
+    return [...this.pacMismatchLog];
+  }
 
   /** Self-contained — no external engine to probe. */
   isAvailable(): boolean {

@@ -13,8 +13,9 @@ import { join } from 'node:path';
 
 import { NativeEmulatorHandlers } from '@server/domains/native-emulator/handlers.impl';
 import { SessionManager } from '@modules/native-emulator/SessionManager';
-import { getGdbServer } from '@native/GdbRspServer';
+import { getGdbServer, getOrCreateGdbServer } from '@native/GdbRspServer';
 import { NEMU_CALL_MAX_STEPS, NEMU_SESSION_SWEEP_MS } from '@src/constants';
+import { decryptEnvelope, type EncryptedEnvelope } from '@utils/crypto/ephemeralCipher';
 
 const EM_AARCH64 = 183;
 const PT_LOAD = 1;
@@ -586,12 +587,39 @@ describe('NativeEmulatorHandlers — happy path', () => {
       }),
     );
     const artifact = res.traceArtifact as Record<string, unknown>;
-    const artifactJson = JSON.parse(await readFile(String(artifact.path), 'utf8')) as Record<
-      string,
-      unknown
-    >;
+    // Traces are a SENSITIVE_CATEGORIES entry: encrypted at rest (OPSEC
+    // default), with the one-off key only available in this response.
+    expect(artifact.encryption).toBe('aes-256-gcm');
+    expect(artifact.encryptionKeyHex).toEqual(expect.any(String));
+    const sealed = JSON.parse(await readFile(String(artifact.path), 'utf8')) as EncryptedEnvelope;
+    const plaintext = decryptEnvelope(
+      sealed,
+      Buffer.from(String(artifact.encryptionKeyHex), 'hex'),
+    ).toString('utf8');
+    const artifactJson = JSON.parse(plaintext) as Record<string, unknown>;
     expect(artifactJson.symbol).toBe('add_two');
     expect(artifactJson.trace).toEqual(expect.any(Array));
+  });
+
+  it('destroying a session drops its GDB RSP server registration', async () => {
+    handlers = new NativeEmulatorHandlers();
+    const sessionId = payload(await handlers.handleCreateSession({})).sessionId as string;
+    // Register without starting the TCP listener — stop() on a never-started
+    // server is a no-op, so registry teardown can be asserted directly.
+    getOrCreateGdbServer(sessionId, {
+      host: '127.0.0.1',
+      port: 0,
+      sessionId,
+      getSession: () => {
+        throw new Error('unused in test');
+      },
+    });
+    expect(getGdbServer(sessionId)).toBeDefined();
+    const res = payload(await handlers.handleDestroySession({ sessionId }));
+    expect(res.destroyed).toBe(true);
+    // ReleaseNotifyingSessionManager routes destroy/sweep/dispose through the
+    // handler cleanup, which stops the GDB server — no orphaned listener.
+    expect(getGdbServer(sessionId)).toBeUndefined();
   });
 
   it('destroys a session', async () => {

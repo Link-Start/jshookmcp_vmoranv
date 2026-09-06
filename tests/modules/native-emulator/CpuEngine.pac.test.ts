@@ -154,3 +154,107 @@ describe('PAC key management', () => {
     expect(e.pacKeys.ia).toBe(custom.ia);
   });
 });
+
+// ── PAC semantics hardening (review W1/W5/I1) ───────────────────────────────
+
+describe('PAC field insertion is observable', () => {
+  it('PACIA inserts a non-zero PAC field that differs from the bare pointer', () => {
+    const orig = 0x7f0000abc000n;
+    const pacia = buildPac3(1, 0b001 /*PACIA*/, 3, 2, 1);
+    const e = exec1(pacia, { x2: Number(orig), x3: 0x11223344 });
+    const signed = e.readGpr(1);
+    expect(signed & PAC_MASK).not.toBe(0n);
+    expect(signed).not.toBe(orig);
+    expect(stripPac(signed)).toBe(orig);
+  });
+
+  it('PACIASP inserts a non-zero PAC field on LR', () => {
+    const orig = 0x7f0000abc000n;
+    const e = exec1(0xd503233f, { x30: Number(orig) });
+    const signed = e.readGpr(30);
+    expect(signed & PAC_MASK).not.toBe(0n);
+    expect(stripPac(signed)).toBe(orig);
+  });
+});
+
+describe('PAC key divergence', () => {
+  it('A-key and B-key signing produce different PAC fields when keys differ', () => {
+    const orig = 0x7f0000abc000n;
+    const keys = {
+      ia: '11111111111111111111111111111111',
+      ib: '22222222222222222222222222222222',
+      da: '33333333333333333333333333333333',
+      db: '44444444444444444444444444444444',
+    };
+    const run = (insn: number): bigint => {
+      const e = new CpuEngine();
+      e.setPacKeys(keys);
+      e.mapMemory(BASE, 0x1000);
+      e.writeRegister('sp', BASE + 0x800);
+      e.writeRegister('x2', Number(orig));
+      e.writeRegister('x3', 0x11223344);
+      const buf = new Uint8Array(4);
+      new DataView(buf.buffer).setUint32(0, insn, true);
+      e.writeCode(BASE, buf);
+      e.start(BASE, BASE + 4);
+      return e.readGpr(1);
+    };
+    const pacia = buildPac3(1, 0b001 /*PACIA*/, 3, 2, 1);
+    const pacib = buildPac3(1, 0b011 /*PACIB*/, 3, 2, 1);
+    expect(run(pacia) & PAC_MASK).not.toBe(run(pacib) & PAC_MASK);
+  });
+});
+
+describe('PAC AUT mismatch diagnostics', () => {
+  it('records AUT mismatches in the bounded engine log', () => {
+    const orig = 0x7f0000abc000n;
+    const pacia = buildPac3(1, 0b001 /*PACIA*/, 3, 2, 1); // sign with modifier x3
+    const autia = buildPac3(1, 0b101 /*AUTIA*/, 4, 1, 0); // auth with modifier x4 → mismatch
+    const e = new CpuEngine();
+    e.mapMemory(BASE, 0x1000);
+    e.writeRegister('sp', BASE + 0x800);
+    e.writeRegister('x2', Number(orig));
+    e.writeRegister('x3', 0x11223344);
+    e.writeRegister('x4', 0x55667788);
+    const buf = new Uint8Array(8);
+    new DataView(buf.buffer).setUint32(0, pacia, true);
+    new DataView(buf.buffer).setUint32(4, autia, true);
+    e.writeCode(BASE, buf);
+    e.start(BASE, BASE + 8);
+    const log = e.pacDiagSnapshot();
+    expect(log.length).toBe(1);
+    expect(log[0]).toContain('AUT mismatch');
+    // Strip-anyway policy keeps control flow alive: x0 recovered the address.
+    expect(e.readGpr(0)).toBe(orig);
+  });
+
+  it('AUT with matching modifier records no mismatch', () => {
+    const orig = 0x7f0000abc000n;
+    const pacia = buildPac3(1, 0b001 /*PACIA*/, 3, 2, 1);
+    const autia = buildPac3(1, 0b101 /*AUTIA*/, 3, 1, 0); // same modifier x3
+    const e = new CpuEngine();
+    e.mapMemory(BASE, 0x1000);
+    e.writeRegister('sp', BASE + 0x800);
+    e.writeRegister('x2', Number(orig));
+    e.writeRegister('x3', 0x11223344);
+    const buf = new Uint8Array(8);
+    new DataView(buf.buffer).setUint32(0, pacia, true);
+    new DataView(buf.buffer).setUint32(4, autia, true);
+    e.writeCode(BASE, buf);
+    e.start(BASE, BASE + 8);
+    expect(e.pacDiagSnapshot()).toEqual([]);
+  });
+});
+
+describe('HINT-space CRm gate (review W1)', () => {
+  it('YIELD and WFI are no-ops on LR instead of LR signing/auth', () => {
+    const orig = 0x7f0000abc000n;
+    // YIELD = 0xD503203F (CRm=0, op2=1), WFI = 0xD503207F (CRm=0, op2=3) —
+    // both op2 values sit in the PAC op2 whitelist, so without the CRm gate
+    // they were mis-executed as PACIASP/PACIBSP on LR.
+    for (const hint of [0xd503203f, 0xd503207f]) {
+      const e = exec1(hint, { x30: Number(orig) });
+      expect(e.readGpr(30)).toBe(orig);
+    }
+  });
+});

@@ -634,7 +634,9 @@ export class GdbRspServer extends EventEmitter {
   }
 
   private handleDetach(): string {
-    // D — detach from the target.
+    // D — detach from the target. Unlike a real gdbserver (which exits on
+    // detach), the listener is kept running so another client can reconnect
+    // without a nemu_gdbserver start round-trip — intentional difference.
     return encodeRspPacket('OK');
   }
 

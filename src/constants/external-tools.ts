@@ -96,6 +96,15 @@ export const NEMU_CALL_MAX_STEPS = int('NEMU_CALL_MAX_STEPS', 1_000_000);
 export const NEMU_PROFILE_MAX_STEPS = int('NEMU_PROFILE_MAX_STEPS', 500_000);
 
 /**
+ * Wall-clock budget handed to Z3 for the native symbolic deobfuscator's SAT
+ * checks. Applied two ways: as the `withZ3` promise timeout and as the solver's
+ * own `timeout` param, so Z3 bails out early on a hard query — the check call
+ * is synchronous native code and would otherwise block the event loop for its
+ * entire runtime. Default: 15s.
+ */
+export const NATIVE_DEOBF_Z3_TIMEOUT_MS = int('NATIVE_DEOBF_Z3_TIMEOUT_MS', 15_000);
+
+/**
  * Hard cap on the on-disk size of a single `.so` file read by `nemu_load_library`
  * (and each dependency / the primary in `nemu_load_library_chain`). The
  * `loadLibraryChain` path also enforces this budget over the summed dependency

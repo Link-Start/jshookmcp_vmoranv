@@ -228,6 +228,8 @@ export function qarma5Encrypt(plaintext: bigint, tweak: bigint, keyHex: string):
 
 const PAC_LSB = 48n;
 const PAC_MASK = 0x00ff000000000000n;
+/** Cipher plaintext mask: the pointer's canonical 48 address bits only. */
+const POINTER_PLAINTEXT_MASK = 0x0000ffffffffffffn;
 const MASK64 = (1n << 64n) - 1n;
 
 function insertPac(pointer: bigint, pac: bigint): bigint {
@@ -243,13 +245,15 @@ function stripPac(pointer: bigint): bigint {
 /**
  * Compute the 8-bit PAC field for (key, modifier, pointer).
  * The modifier is duplicated 32→64 (ARM PAC convention) before being used as the
- * QARMA tweak. The full 64-bit cipher output is truncated to the PAC field width
- * (bits[55:48]); the lower 48 address bits are what reach the cipher as plaintext
- * (high byte cleared).
+ * QARMA tweak. The plaintext is the pointer's canonical 48 address bits (both
+ * the PAC field at bits[55:48] and the unused high byte at bits[63:56] are
+ * cleared), so signing is idempotent and independent of prior PAC-field or
+ * high-byte content. The full 64-bit cipher output is truncated to the PAC
+ * field width (bits[55:48]).
  */
 function computePacField(keyHex: string, modifier: bigint, pointer: bigint): bigint {
   const dup = ((modifier & 0xffffffffn) | ((modifier & 0xffffffffn) << 32n)) & MASK64;
-  const cipher = qarma5Encrypt(stripPac(pointer), dup, keyHex);
+  const cipher = qarma5Encrypt(pointer & POINTER_PLAINTEXT_MASK, dup, keyHex);
   // Truncate to 16 bits then mask to the 8-bit field we place at bits[55:48].
   return (cipher >> 48n) & 0xffn;
 }
@@ -260,15 +264,19 @@ function computePacField(keyHex: string, modifier: bigint, pointer: bigint): big
 interface CpuEnginePacContext extends ExecutionContext {
   pacKeys: PacKeys;
   setPacKeys?(keys: PacKeys): void;
+  /** Bounded sink for AUT mismatch diagnostics (implemented by CpuEngine). */
+  recordPacMismatch?(entry: string): void;
 }
 
 function keyHexFor(keys: PacKeys, isB: boolean): string {
   return isB ? keys.ib : keys.ia;
 }
 
-function diag(_ctx: CpuEnginePacContext, _msg: string): void {
+function diag(ctx: CpuEnginePacContext, msg: string): void {
   // AUT mismatch sink — informational in the reverse-engineering workflow, not
-  // fatal. A future patch can route this to jniDiagnostics() once wired.
+  // fatal (the strip-anyway policy keeps control flow alive). Routed to the
+  // engine's bounded PAC mismatch log, surfaced as nemu_trace pacMismatches.
+  ctx.recordPacMismatch?.(msg);
 }
 
 /**
@@ -300,7 +308,10 @@ export function execPointerAuth3Source(ctx: ExecutionContext, insn: number): boo
     const stored = extractPac(pointer);
     const expected = computePacField(keyHex, modifier, pointer);
     if (stored !== expected) {
-      diag(engine, `AUT mismatch stored=${stored.toString(16)} expected=${expected.toString(16)}`);
+      diag(
+        engine,
+        `AUT mismatch at pc=0x${ctx.pc.toString(16)} stored=${stored.toString(16)} expected=${expected.toString(16)}`,
+      );
     }
     // Verify-and-strip: real hardware faults on mismatch; here we strip to keep
     // control flow alive for the reverse engineer (the PAC round-trips in every
@@ -336,9 +347,12 @@ export function execHintPac(ctx: ExecutionContext, insn: number): boolean {
     return true;
   }
 
-  // PACIsp/AUTIsp: CRm {0011, 0101, 0111, 1001, 1011, 1101}; op2 encodes action+key.
-  //   Per ARM ARM C6.2: SP-signing family — op2 001/101 = I/A, 011/111 = B-variants.
-  // We map conservatively to the modifier=SP, key=A/B variants:
+  // PACIsp/AUTIsp (SP-signing family): fixed CRm=0011; op2 selects action+key
+  //   (001 PACIASP, 011 PACIBSP, 101 AUTIASP, 111 AUTIBSP — ARM ARM C6.2).
+  // Gate on CRm first: without it, other HINT-space encodings whose op2 lands
+  // in {1,3,5,7} — YIELD (CRm=0/op2=1), WFI (op2=3), SEVL (op2=5), PSB CSYNC —
+  // would be mis-executed as LR signing/auth operations instead of no-ops.
+  if (crm !== 0b0011) return false;
   const isB = op2 === 0b011 || op2 === 0b111;
   const isAut = op2 === 0b101 || op2 === 0b111;
   if (!(op2 === 0b001 || op2 === 0b011 || op2 === 0b101 || op2 === 0b111)) return false;

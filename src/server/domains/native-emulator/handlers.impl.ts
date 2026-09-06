@@ -1378,6 +1378,7 @@ export class NativeEmulatorHandlers {
         }
         // Snapshot JNI diag AFTER execution (non-destructive).
         const jniDiag = session.emulator.jniDiagSnapshot?.();
+        const pacDiag = session.emulator.pacDiagSnapshot?.();
         const abortError = aborted
           ? `Unsupported ARM64 opcode 0x${aborted.insn.toString(16).padStart(8, '0')} at pc=0x${aborted.pc.toString(16)} — trace aborted with partial capture`
           : undefined;
@@ -1410,6 +1411,7 @@ export class NativeEmulatorHandlers {
             truncated,
             ...(abortError ? { error: abortError } : {}),
             ...(jniDiag ? { jniCalls: jniDiag } : {}),
+            ...(pacDiag && pacDiag.length > 0 ? { pacMismatches: pacDiag } : {}),
           };
         }
         const traceInlineLimit =
@@ -1431,6 +1433,7 @@ export class NativeEmulatorHandlers {
           traceInlineLimit,
           ...(traceArtifact ? { traceArtifact } : {}),
           ...(jniDiag ? { jniCalls: jniDiag } : {}),
+          ...(pacDiag && pacDiag.length > 0 ? { pacMismatches: pacDiag } : {}),
           ...(abortError ? { error: abortError } : {}),
           trace: events.slice(0, traceInlineLimit),
         };
@@ -1448,8 +1451,9 @@ export class NativeEmulatorHandlers {
       if (!/^[0-9a-fA-F]{32}$/.test(key)) {
         throw new Error('PAC key must be a 32-hex-char string (128-bit)');
       }
-      const current = session.emulator.engine.pacKeys ?? { ia: '', ib: '', da: '', db: '' };
-      const updated: PacKeys = { ...current, [slot]: key };
+      // engine.pacKeys is always defined (DEFAULT_PAC_KEYS); no fallback — an
+      // empty-string key would crash the QARMA key parse at execution time.
+      const updated: PacKeys = { ...session.emulator.engine.pacKeys, [slot]: key };
       session.emulator.setPacKeys(updated);
       return { sessionId: session.id, slot, updated };
     });

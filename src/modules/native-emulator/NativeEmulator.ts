@@ -257,6 +257,11 @@ export class NativeEmulator {
     this.jni?.clearJniDiag?.();
   }
 
+  /** Non-destructive snapshot of recorded PAC AUT mismatches (for trace handlers). */
+  pacDiagSnapshot(): string[] {
+    return this.engine.pacDiagSnapshot();
+  }
+
   /** Ensure the TPIDR_EL0 TLS block is mapped and return its base address.
    *  Call this before writing data to TLS slots (e.g. frame-table pointer at
    *  +0x1768) via nemu_write_regions. */
