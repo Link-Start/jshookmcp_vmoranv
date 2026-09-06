@@ -593,17 +593,42 @@ export class SkiaSceneExtractor {
   }
 }
 
+/**
+ * Whitelist gate for canvasId before it is embedded into the evaluated WebGL
+ * probe script (CodeQL js/bad-code-sanitization): JSON.stringify alone is not
+ * a recognized sanitizer for code construction, so the selector must pass a
+ * charset/length allowlist first. A rejected canvasId falls back to the
+ * auto-detect path — the same outcome the embedded try/catch produced when
+ * querySelector threw on an unusable selector. The probe comment no longer
+ * embeds the value at all: a literal star-slash sequence in the value would
+ * otherwise terminate the slash-star comment early and inject code.
+ */
+const MAX_PROBE_SELECTOR_LENGTH = 200;
+const SAFE_PROBE_SELECTOR_RE = /^[\x20-\x7e\u00a0-\uffff]+$/;
+
+function safeProbeSelector(canvasId: string | undefined): string | undefined {
+  if (
+    canvasId !== undefined &&
+    canvasId.length <= MAX_PROBE_SELECTOR_LENGTH &&
+    SAFE_PROBE_SELECTOR_RE.test(canvasId)
+  ) {
+    return canvasId;
+  }
+  return undefined;
+}
+
 export async function detectSkiaRenderer(
   pageController?: unknown,
   canvasId?: string,
 ): Promise<LegacySkiaRendererInfo> {
   if (hasEvaluate(pageController)) {
+    const probeCanvasId = safeProbeSelector(canvasId);
     const webglResults = await pageController.evaluate<LegacyWebGlProbe[]>(
       `(() => {
-        /* UNMASKED_RENDERER_WEBGL probe ${canvasId ?? ''} */
+        /* UNMASKED_RENDERER_WEBGL probe (target selector embedded below when provided) */
         const target = ${
-          canvasId
-            ? `(function () { try { return document.querySelector(${JSON.stringify(canvasId)}); } catch (err) { return null; } })()`
+          probeCanvasId
+            ? `(function () { try { return document.querySelector(${JSON.stringify(probeCanvasId)}); } catch (err) { return null; } })()`
             : 'null'
         };
         const canvas = target && typeof target.getContext === 'function' ? target : document.createElement('canvas');
@@ -642,7 +667,7 @@ export async function extractSceneTree(
 ): Promise<LegacySkiaSceneTree> {
   if (hasEvaluate(pageController)) {
     const scene = await pageController.evaluate<LegacySceneProbe>(
-      `(() => { /* drawCommands canvasMeta ${canvasId ?? ''} */ return { canvas: {}, layers: [], drawCommands: [] }; ` +
+      `(() => { /* drawCommands canvasMeta (selector not embedded) */ return { canvas: {}, layers: [], drawCommands: [] }; ` +
         `})()`,
     );
     const normalized = normalizeLegacyScene(scene);

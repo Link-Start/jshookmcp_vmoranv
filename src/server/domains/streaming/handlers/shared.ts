@@ -227,7 +227,11 @@ export function parseBooleanArg(value: unknown, defaultValue: boolean): boolean 
  */
 const RE_DOS_PATTERNS: RegExp[] = [
   /\([^()]*[+*][^()]*\)[+*]/,
-  /\((?:[^()]|\\.)*[+*](?:[^()]|\\.)*\)[+*]/,
+  // The alternation branches are first-char-disjoint ('\') can only enter via
+  // the escape arm) so the scan stays linear. The previous (?:[^()]|\\.)* form
+  // was ambiguous on '\' runs and exponential-backtracked the guard itself
+  // when tested against crafted user patterns (CodeQL js/redos).
+  /\((?:\\.|[^()\\])*[+*](?:\\.|[^()\\])*\)[+*]/,
 ];
 
 export function compileRegex(pattern: string): { regex?: RegExp; error?: string } {

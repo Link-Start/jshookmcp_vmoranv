@@ -146,7 +146,20 @@ describe('WsHandlers', () => {
   });
 
   it('rejects catastrophic-backtracking urlFilter patterns before compiling', async () => {
+    // codeql[js/redos] ignore — intentional evil pattern testing rejection
     const compiled = compileRegex('(a+)+b');
+    expect(compiled.regex).toBeUndefined();
+    expect(compiled.error).toContain('catastrophic backtracking');
+  });
+
+  it('rejects escape-dense nested-quantifier patterns in linear time', () => {
+    // Regression for CodeQL js/redos on the guard itself: the old
+    // (?:[^()]|\\.)* alternation was ambiguous on '\' runs, so this input
+    // exponential-backtracked the detector before the pattern was ever
+    // rejected. The rewritten first-char-disjoint alternation scans linearly
+    // (if it ever regresses, this test times out instead of passing).
+    const crafted = '(' + '\\x'.repeat(20000) + '+)+';
+    const compiled = compileRegex(crafted);
     expect(compiled.regex).toBeUndefined();
     expect(compiled.error).toContain('catastrophic backtracking');
   });

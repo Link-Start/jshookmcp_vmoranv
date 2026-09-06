@@ -513,4 +513,52 @@ describe('SkiaSceneExtractor', () => {
       expect(result.rootLayer!.children[0]!.name).toBe('child');
     });
   });
+
+  describe('probe script canvasId handling (CodeQL js/bad-code-sanitization)', () => {
+    function firstScript(mockPC: PageController): string {
+      return vi.mocked(mockPC.evaluate).mock.calls[0]![0] as string;
+    }
+
+    const minimalWebgl = {
+      webgl: [
+        {
+          vendor: 'Google Inc.',
+          renderer: 'Google SwiftShader',
+          unmaskedVendor: 'Google Inc.',
+          unmaskedRenderer: 'Google SwiftShader',
+          hasSkiaBackend: true,
+        },
+      ],
+    };
+
+    it('embeds a benign canvasId as a JSON string literal', async () => {
+      const mockPC = createMockPageController(minimalWebgl);
+      await detectSkiaRenderer(mockPC, '#game-canvas');
+      const script = firstScript(mockPC);
+      expect(script).toContain('document.querySelector("#game-canvas")');
+      // The probe comment must stay static: a raw value containing '*/' would
+      // break out of the /* */ comment and inject code.
+      expect(script).toContain(
+        '/* UNMASKED_RENDERER_WEBGL probe (target selector embedded below when provided) */',
+      );
+    });
+
+    it('falls back to the auto-detect path for hostile canvasId values', async () => {
+      const oversized = createMockPageController(minimalWebgl);
+      await detectSkiaRenderer(oversized, 'a'.repeat(500));
+      expect(firstScript(oversized)).toContain('const target = null;');
+
+      const controlChars = createMockPageController(minimalWebgl);
+      await detectSkiaRenderer(controlChars, 'bad\nselector');
+      expect(firstScript(controlChars)).toContain('const target = null;');
+    });
+
+    it('extractSceneTree probe never embeds the raw canvasId', async () => {
+      const mockPC = createMockPageController({});
+      await extractSceneTree(mockPC, '*/ alert(1) /*');
+      const script = firstScript(mockPC);
+      expect(script).not.toContain('alert(1)');
+      expect(script).toContain('/* drawCommands canvasMeta (selector not embedded) */');
+    });
+  });
 });
