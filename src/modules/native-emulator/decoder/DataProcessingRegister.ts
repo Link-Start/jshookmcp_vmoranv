@@ -9,6 +9,8 @@
  * - Add/subtract with carry (ADC / ADCS / SBC / SBCS)
  * - Add/subtract extended register
  * - Data-processing (3 source): MADD / MSUB / SMULH / UMULH / SMADDL / SMSUBL / UMADDL / UMSUBL
+ * - Pointer Authentication register form (PACIA/PACIB/PACDA/PACDB/AUTIA/AUTIB/AUTDA/AUTDB)
+ * - PACGA (3-source, full 64-bit QARMA output)
  * - Data-processing (2 source): UDIV / SDIV / LSLV / LSRV / ASRV / RORV
  * - Conditional select (CSEL / CSINC / CSINV / CSNEG)
  * - Conditional compare (CCMP / CCMN, register and immediate)
@@ -18,7 +20,7 @@
 import type { ExecutionContext } from '../cpu/ExecutionContext';
 import { reverseBits, reverseBytes, countLeadingZeros } from '../utils/BitOperations';
 import { computeArmCrc32 } from '../crc32';
-import { execPointerAuth3Source } from './PointerAuth';
+import { execPointerAuth3Source, execPacga } from './PointerAuth';
 
 const MASK64 = (1n << 64n) - 1n;
 const MASK32 = (1n << 32n) - 1n;
@@ -210,10 +212,19 @@ export function execDataProcessingRegister(ctx: ExecutionContext, insn: number):
     return true;
   }
 
-  // Pointer Authentication (3 source): sf | 1101 0101 000 | op31 | Rm | o0 | Ra | Rn | Rd
-  //   Prefix 0xDAC00000 — PACIA/PACIB/AUTIA/AUTIB. Must be checked BEFORE the
-  //   generic 3-source MADD block (0b11011) so the narrower mask wins.
+  // Pointer Authentication (register form, ARMv8.3): sits in the Data
+  // Processing (1 source) window (bits[30:21] = 1x11010110) with opcode2
+  // bits[20:16] = 00001 fixed — base 0xDAC10000. Must run BEFORE the 1-source
+  // block below, or a real `pacia x3, x2` (0xDAC10043, opcode bits[15:10] =
+  // 000000) executes as RBIT — silent corruption.
   if (execPointerAuth3Source(ctx, insn)) return true;
+
+  // PACGA (3-source): base 0x9AC03000, bits[15:10] = 001100 fixed. It shares
+  // the (insn >>> 21) & 0xff == 0b11010110 window with the 2-source block
+  // below (bit30=0), so it must be checked BEFORE that block; the fixed
+  // opcode bits[15:10] = 001100 disambiguates (the 2-source opcodes handled
+  // there are UDIV/SDIV/LSLV/LSRV/ASRV/RORV — none is 001100).
+  if (execPacga(ctx, insn)) return true;
 
   // Data-processing (3 source): sf | 00 | 11011 | op31(3) | Rm | o0 | Ra | Rn | Rd
   //   MADD/MSUB (Rd = Ra ± Rn*Rm), SMULH/UMULH (high 64 bits of 64×64).

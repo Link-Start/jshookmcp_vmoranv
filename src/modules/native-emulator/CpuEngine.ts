@@ -61,6 +61,7 @@ export const DEFAULT_PAC_KEYS: PacKeys = {
   ib: '84be85ce9804e94bec2802d4e0a488e9',
   da: '84be85ce9804e94bec2802d4e0a488e9',
   db: '84be85ce9804e94bec2802d4e0a488e9',
+  ga: 'c0ffee00112233445566778899aabbcc',
 };
 
 /** Upper bound on retained AUT-mismatch diagnostics (RE signal, not a leak sink). */
@@ -255,7 +256,7 @@ export class CpuEngine implements ExecutionContext {
   private pendingSaveRegs: ReturnType<CpuEngine['snapshotCallerRegs']> | null = null;
   /** Set by exit/exit_group (or a host stub) to halt the run loop at once. */
   private stopRequested = false;
-  /** Pointer-authentication keys (ARMv8.3 PAC). IA/IB/DA/DB; uses DEFAULT_PAC_KEYS initially. */
+  /** Pointer-authentication keys (ARMv8.3 PAC). IA/IB/DA/DB/GA; uses DEFAULT_PAC_KEYS initially. */
   pacKeys: PacKeys = DEFAULT_PAC_KEYS;
   /** Bounded AUT-mismatch log (PointerAuth decoder sink; for nemu_trace). */
   private readonly pacMismatchLog: string[] = [];

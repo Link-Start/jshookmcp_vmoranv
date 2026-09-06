@@ -400,11 +400,11 @@ export const nativeEmulatorTools: Tool[] = [
   tool('nemu_set_pac_key', (t) =>
     t
       .desc(
-        'Configure the ARMv8.3 Pointer Authentication key set used by PACIA/PACIB/AUTIA/AUTIB instructions in this emulator session. Set a 128-bit key (32 hex chars) by key slot (ia/ib/da/db) to match keys dumped from a real device via Frida, so AUTIA can verify and strip real-hardware PAC signatures.',
+        'Configure the ARMv8.3 Pointer Authentication key set used by PACIA/PACIB/AUTIA/AUTIB/PACGA instructions in this emulator session. Set a 128-bit key (32 hex chars) by key slot (ia/ib/da/db/ga) to match keys dumped from a real device via Frida. Note: the emulator signs with an 8-bit PAC field and a 32→64 duplicated modifier, so AUT of pointers signed by real hardware verifies as a mismatch (stripped in-place, control flow preserved) — round-trips inside the emulator stay self-consistent.',
       )
       .string('sessionId', 'Session id to configure')
       .string('key', '128-bit key as a 32-hex-char string (w0[0..15]||k0[0..15])')
-      .enum('slot', ['ia', 'ib', 'da', 'db'], 'Key slot to update', { default: 'ia' })
+      .enum('slot', ['ia', 'ib', 'da', 'db', 'ga'], 'Key slot to update', { default: 'ia' })
       .required('sessionId', 'key'),
   ),
   tool('nemu_create_vtable', (t) =>

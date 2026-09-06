@@ -1447,7 +1447,7 @@ export class NativeEmulatorHandlers {
     return handleSafe(async () => {
       const session = this.requireSession(args);
       const key = argStringRequired(args, 'key');
-      const slot = argEnum(args, 'slot', new Set(['ia', 'ib', 'da', 'db']), 'ia');
+      const slot = argEnum(args, 'slot', new Set(['ia', 'ib', 'da', 'db', 'ga']), 'ia');
       if (!/^[0-9a-fA-F]{32}$/.test(key)) {
         throw new Error('PAC key must be a 32-hex-char string (128-bit)');
       }

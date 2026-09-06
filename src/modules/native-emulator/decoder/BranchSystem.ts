@@ -165,8 +165,10 @@ export function execBranchSystem(
     return true;
   }
 
-  // Pointer Authentication HINT forms (PACIASP/AUTIASP/PACIBSP/AUTIBSP/XPACLRI):
-  //   check before the blanket NOP handler so PAC sign/auth is observable.
+  // Pointer Authentication HINT forms (CRm=3: paciaz/paciasp/pacibz/pacibsp/
+  //   autiaz/autiasp/autibz/autibsp; CRm=1 even op2: the 1716 family; CRm=0
+  //   op2=7: xpaclri) — check before the blanket NOP handler so PAC sign/auth
+  //   is observable.
   if (execHintPac(ctx, insn)) return true;
 
   // BTI (Branch Target Identification): PAC landing pad, no-op in emulator.

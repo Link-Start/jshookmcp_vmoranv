@@ -1,16 +1,39 @@
 /**
  * PointerAuth — ARMv8.3-A Pointer Authentication (PAC) instruction family.
  *
- * Two entry encodings arrive here via the top-level dispatch:
+ * Three entry encodings arrive here:
  *
- * - 3-source register form (bits[28:25] = x101 → Data Processing -- Register):
- *     1101 0101 000 | op31[2:0] | Rm | o0 | Ra | Rn | Rd   (prefix 0xDAC00000)
- *     op31: 001 PACIA, 011 PACIB, 101 AUTIA, 111 AUTIB.
- *     o0 (bit15) = 1 selects the "-Z[A|B]" variant whose modifier is XZR.
+ * - PAC/AUT register form (via the Data Processing -- Register dispatch; the
+ *   encoding sits in the 1-source window, bits[30:21] = 1x11010110, with the
+ *   opcode2 field bits[20:16] fixed to 00001):
+ *     1101 1010 1100 0001 | op[2:0] | Rn | Rd   (base 0xDAC10000, mask 0xFFFFE000)
+ *     op bits[12:10]: 0 PACIA, 1 PACIB, 2 PACDA, 3 PACDB,
+ *                     4 AUTIA, 5 AUTIB, 6 AUTDA, 7 AUTDB.
+ *     Rn bits[9:5] = modifier register (31 = SP) — `PACIA <Xd>, <Xn|SP>`;
+ *     Rd bits[4:0] = the pointer, signed/authenticated in place (also dest).
+ *     Verified against capstone 5.0.7: 0xDAC10043 `pacia x3, x2`,
+ *     0xDAC11043 `autia x3, x2`, 0xDAC103E0 `pacia x0, sp`. bits[20:16] is a
+ *     fixed 00001, NOT a register field (words like 0xDAC30041 are unallocated).
+ *
+ * - PACGA (3-source form; its own base 0x9AC03000 / mask 0xFFE0FC00):
+ *     1 0011010 110 | Rm | 001100 | Rn | Rd
+ *     Rm bits[20:16] = modifier (31 = SP), Rn bits[9:5] = pointer, Rd = dest.
+ *     Writes the FULL 64-bit QARMA5 output (no 8-bit truncation).
  *
  * - HINT form (bits[28:25] = 101x → Branches, Exception Generating and System):
  *     1101 0101 0000 0011 0010 CRm op2 11111   (NOP-family prefix 0xD5032xxxF)
- *     PACIASP / AUTIASP operate on LR with SP as modifier for prologue/epilogue.
+ *     CRm=3, op2 0..7: paciaz/paciasp/pacibz/pacibsp/autiaz/autiasp/autibz/
+ *     autibsp — LR pointer, modifier XZR (even op2) or SP (odd op2).
+ *     CRm=1, even op2: pacia1716/pacib1716/autia1716/autib1716 — X17 pointer,
+ *     X16 modifier. CRm=0, op2=7: xpaclri.
+ *
+ * - XPACI/XPACD (register-strip variants, System class sharing the HINT page)
+ *   are INTENTIONALLY NOT IMPLEMENTED: the authoritative encoding cannot be
+ *   verified in this environment (capstone 5.0.7 does not model them, and the
+ *   one WebSearch candidate's XPACLRI row was refuted by capstone). Real
+ *   XPACI/XPACD words fall outside the 0xDAC1 register window and reach the
+ *   mapped-region NOP catch-all — safe degradation (no corruption, no strip).
+ *   Owner: main agent. Requires ARM ARM DDI 0487 C6.2 ground truth first.
  *
  * The PAC value is the QARMA5 cipher (ARM DDI 0487 C5.1.1) — a tweakable
  * 4-round-reflector Feistel over a 64-bit block (16 4-bit cells), keyed by a
@@ -27,13 +50,16 @@
 
 import type { ExecutionContext } from '../cpu/ExecutionContext';
 
-/** Per-engine PAC key set. IA/IB used by PACIA/PACIB/AUTIA/AUTIB; DA/DB reserved for GA. */
+/** Per-engine PAC key set. IA/IB for PACIA/PACIB/AUTIA/AUTIB, DA/DB for
+ *  PACDA/PACDB/AUTDA/AUTDB, GA for PACGA. */
 export interface PacKeys {
-  /** 128-bit IA key as a 32-hex-char string (w0[0..15] || k0[0..15]). */
+  /** 128-bit key as a 32-hex-char string (w0[0..15] || k0[0..15]). */
   ia: string;
   ib: string;
   da: string;
   db: string;
+  /** 128-bit GA key used by PACGA (generic address generate). */
+  ga: string;
 }
 
 // ── QARMA5 constants (S-box 0, M4,2, 64-bit block) ──────────────────────────
@@ -268,8 +294,12 @@ interface CpuEnginePacContext extends ExecutionContext {
   recordPacMismatch?(entry: string): void;
 }
 
-function keyHexFor(keys: PacKeys, isB: boolean): string {
-  return isB ? keys.ib : keys.ia;
+/** Key-slot select: 0 = IA, 1 = IB, 2 = DA, 3 = DB (register-form opcode bits[1:0]). */
+function keyHexFor(keys: PacKeys, select: number): string {
+  if (select === 1) return keys.ib;
+  if (select === 2) return keys.da;
+  if (select === 3) return keys.db;
+  return keys.ia;
 }
 
 function diag(ctx: CpuEnginePacContext, msg: string): void {
@@ -279,30 +309,48 @@ function diag(ctx: CpuEnginePacContext, msg: string): void {
   ctx.recordPacMismatch?.(msg);
 }
 
+/** Register-family mnemonics indexed by opcode bits[12:10] (diag labels match
+ *  disassembler output so trace lines and disasm rows cross-grep). */
+const PAC_REGISTER_MNEMONICS = [
+  'pacia',
+  'pacib',
+  'pacda',
+  'pacdb',
+  'autia',
+  'autib',
+  'autda',
+  'autdb',
+] as const;
+
 /**
- * Try to execute a 3-source PAC/AUT instruction. Returns true if handled.
- * Discriminator (caller-checked): (insn & 0xFFE00000) === 0xDAC00000.
- * op31: 001 PACIA, 011 PACIB, 101 AUTIA, 111 AUTIB.
+ * Try to execute a PAC/AUT register-form instruction. Returns true if handled.
+ *
+ * Real ARMv8.3 encoding (capstone 5.0.7 verified): the family sits in the Data
+ * Processing (1 source) window (bits[30:21] = 1x11010110) with the opcode2
+ * field bits[20:16] fixed to 00001, so it must be intercepted before the
+ * 1-source RBIT/REV/CLZ block — a real `pacia x3, x2` (0xDAC10043) has
+ * opcode bits[15:10] = 000000 and otherwise executes as RBIT (silent corruption).
+ *
+ *     guard: (insn & 0xFFFFE000) === 0xDAC10000
+ *     op bits[12:10]: 0 PACIA, 1 PACIB, 2 PACDA, 3 PACDB,
+ *                     4 AUTIA, 5 AUTIB, 6 AUTDA, 7 AUTDB
+ *     Rn bits[9:5] = modifier register (31 = SP) — `PACIA <Xd>, <Xn|SP>`
+ *     Rd bits[4:0] = pointer, signed/authenticated in place (also destination)
  */
 export function execPointerAuth3Source(ctx: ExecutionContext, insn: number): boolean {
-  // Match top byte 0xDA in the Data Processing Register group (bits[31:24]).
-  if ((insn & 0xff000000) >>> 0 !== 0xda000000) return false;
-  const op31 = (insn >>> 21) & 0b111;
-  const o0 = (insn >>> 15) & 1;
-  if (op31 !== 0b001 && op31 !== 0b011 && op31 !== 0b101 && op31 !== 0b111) return false;
-
-  const rm = (insn >>> 16) & 0b11111;
+  if ((insn & 0xffffe000) >>> 0 !== 0xdac10000) return false;
+  const opcode = (insn >>> 10) & 0b111;
   const rn = (insn >>> 5) & 0b11111;
   const rd = insn & 0b11111;
 
-  const isAut = (op31 & 0b100) !== 0;
-  const isB = (op31 & 0b010) !== 0;
+  // Key select = opcode bits[1:0] (0 IA, 1 IB, 2 DA, 3 DB); bit2 selects AUT.
+  const isAut = (opcode & 0b100) !== 0;
   const engine = ctx as CpuEnginePacContext;
-  const keyHex = keyHexFor(engine.pacKeys, isB);
+  const keyHex = keyHexFor(engine.pacKeys, opcode & 0b11);
 
-  // Modifier: Z variant (o0=1) → XZR (0); else Rm (XZR=0).
-  const modifier = o0 === 1 ? 0n : rm === 31 ? 0n : ctx.readGpr(rm);
-  const pointer = ctx.readGpr(rn);
+  // Modifier: Rn field, encoding 31 = SP. Pointer: Rd, signed in place.
+  const modifier = rn === 31 ? ctx.readGprSp(31) : ctx.readGpr(rn);
+  const pointer = ctx.readGpr(rd);
 
   if (isAut) {
     const stored = extractPac(pointer);
@@ -310,7 +358,7 @@ export function execPointerAuth3Source(ctx: ExecutionContext, insn: number): boo
     if (stored !== expected) {
       diag(
         engine,
-        `AUT mismatch at pc=0x${ctx.pc.toString(16)} stored=${stored.toString(16)} expected=${expected.toString(16)}`,
+        `${PAC_REGISTER_MNEMONICS[opcode]} mismatch at pc=0x${ctx.pc.toString(16)} stored=${stored.toString(16)} expected=${expected.toString(16)}`,
       );
     }
     // Verify-and-strip: real hardware faults on mismatch; here we strip to keep
@@ -325,11 +373,47 @@ export function execPointerAuth3Source(ctx: ExecutionContext, insn: number): boo
 }
 
 /**
- * HINT-form PAC instructions (PACIASP/AUTIASP/PACIBSP/AUTIBSP/XPACLRI).
- * Returns true if the instruction was a recognised HINT-space PAC opcode and was
- * executed; false otherwise (caller falls through to NOP/barrier handling).
+ * PACGA digest: the FULL 64-bit QARMA5 cipher output (no truncation to the
+ * 8-bit PAC field — PACGA writes the whole cipher to Rd). Plaintext/tweak use
+ * the same canonical masking as computePacField: the pointer's 48 address bits
+ * and the modifier duplicated 32→64.
+ */
+export function pacgaDigest(pointer: bigint, modifier: bigint, keyHex: string): bigint {
+  const dup = ((modifier & 0xffffffffn) | ((modifier & 0xffffffffn) << 32n)) & MASK64;
+  return qarma5Encrypt(pointer & POINTER_PLAINTEXT_MASK, dup, keyHex);
+}
+
+/**
+ * Try to execute PACGA (pointer authenticate generic address). Returns true if
+ * handled. Encoding (base 0x9AC03000, mask 0xFFE0FC00):
+ *     Rm bits[20:16] = modifier register (31 = SP)
+ *     Rn bits[9:5]   = pointer register
+ *     Rd bits[4:0]   = destination — receives the FULL 64-bit QARMA5 output.
+ */
+export function execPacga(ctx: ExecutionContext, insn: number): boolean {
+  if ((insn & 0xffe0fc00) >>> 0 !== 0x9ac03000) return false;
+  const rm = (insn >>> 16) & 0b11111;
+  const rn = (insn >>> 5) & 0b11111;
+  const rd = insn & 0b11111;
+  const modifier = rm === 31 ? ctx.readGprSp(31) : ctx.readGpr(rm);
+  const pointer = ctx.readGpr(rn);
+  ctx.writeGpr(rd, pacgaDigest(pointer, modifier, (ctx as CpuEnginePacContext).pacKeys.ga));
+  return true;
+}
+
+/**
+ * HINT-form PAC instructions. Returns true if the instruction was a recognised
+ * HINT-space PAC opcode and was executed; false otherwise (caller falls through
+ * to NOP/barrier handling).
  *
- * Operates on LR (x30) with SP as the modifier (prologue/epilogue signing).
+ * Real CRm/op2 map (capstone 5.0.7 verified):
+ *   CRm=3, op2 0..7: paciaz/paciasp/pacibz/pacibsp/autiaz/autiasp/autibz/autibsp
+ *     — pointer LR (x30, signed/authenticated in place); modifier XZR for even
+ *     op2, SP for odd op2; AUT when op2 >= 4; key B when op2 & 2.
+ *   CRm=1, even op2: pacia1716/pacib1716/autia1716/autib1716
+ *     — pointer X17 (signed/authenticated in place), modifier X16.
+ *   CRm=0, op2=7: xpaclri — strip LR without verification.
+ * All other CRm/op2 combinations return false (blanket NOP handles them).
  */
 export function execHintPac(ctx: ExecutionContext, insn: number): boolean {
   // HINT space prefix 0xD5032xxxF; mask aligns the CRm/op2 fields.
@@ -338,35 +422,58 @@ export function execHintPac(ctx: ExecutionContext, insn: number): boolean {
   const op2 = (insn >>> 5) & 0b111;
 
   const engine = ctx as CpuEnginePacContext;
-  const lr = ctx.readGpr(30);
-  const sp = ctx.readGprSp(31);
 
   // XPACLRI: 0xD50320FF (CRm=0, op2=7).
   if (crm === 0b0000 && op2 === 0b111) {
-    ctx.writeGpr(30, stripPac(lr));
+    ctx.writeGpr(30, stripPac(ctx.readGpr(30)));
     return true;
   }
 
-  // PACIsp/AUTIsp (SP-signing family): fixed CRm=0011; op2 selects action+key
-  //   (001 PACIASP, 011 PACIBSP, 101 AUTIASP, 111 AUTIBSP — ARM ARM C6.2).
   // Gate on CRm first: without it, other HINT-space encodings whose op2 lands
-  // in {1,3,5,7} — YIELD (CRm=0/op2=1), WFI (op2=3), SEVL (op2=5), PSB CSYNC —
-  // would be mis-executed as LR signing/auth operations instead of no-ops.
-  if (crm !== 0b0011) return false;
-  const isB = op2 === 0b011 || op2 === 0b111;
-  const isAut = op2 === 0b101 || op2 === 0b111;
-  if (!(op2 === 0b001 || op2 === 0b011 || op2 === 0b101 || op2 === 0b111)) return false;
+  // in the PAC range — YIELD (CRm=0/op2=1), WFI (op2=3), SEVL (op2=5), PSB
+  // CSYNC — would be mis-executed as LR signing/auth operations instead of
+  // no-ops. Only CRm=3 (zero/SP modifier family on LR) and CRm=1 (1716 family
+  // on X17) are PAC opcodes.
+  if (crm !== 0b0011 && crm !== 0b0001) return false;
 
-  const keyHex = keyHexFor(engine.pacKeys, isB);
-  const modifier = sp;
+  const isB = (op2 & 0b010) !== 0;
+  const isAut = (op2 & 0b100) !== 0;
+  const keyHex = keyHexFor(engine.pacKeys, isB ? 1 : 0);
+
+  if (crm === 0b0011) {
+    // LR family: modifier XZR (even op2 = "z" variants) or SP (odd op2 = "sp").
+    const modifier = (op2 & 0b001) !== 0 ? ctx.readGprSp(31) : 0n;
+    const lr = ctx.readGpr(30);
+    if (isAut) {
+      const stored = extractPac(lr);
+      const expected = computePacField(keyHex, modifier, lr);
+      if (stored !== expected) {
+        const mnemonic = `auti${isB ? 'b' : 'a'}${(op2 & 0b001) !== 0 ? 'sp' : 'z'}`;
+        diag(engine, `${mnemonic} mismatch at pc=0x${ctx.pc.toString(16)}`);
+      }
+      ctx.writeGpr(30, stripPac(lr));
+    } else {
+      const pac = computePacField(keyHex, modifier, lr);
+      ctx.writeGpr(30, insertPac(stripPac(lr), pac));
+    }
+    return true;
+  }
+
+  // CRm=1: 1716 family — pointer X17 signed/authenticated in place, modifier
+  // X16. Odd op2 is unallocated here and falls through to the blanket NOP.
+  if ((op2 & 0b001) !== 0) return false;
+  const pointer = ctx.readGpr(17);
+  const modifier = ctx.readGpr(16);
   if (isAut) {
-    const stored = extractPac(lr);
-    const expected = computePacField(keyHex, modifier, lr);
-    if (stored !== expected) diag(engine, `AUTIsp mismatch at pc=0x${ctx.pc.toString(16)}`);
-    ctx.writeGpr(30, stripPac(lr));
+    const stored = extractPac(pointer);
+    const expected = computePacField(keyHex, modifier, pointer);
+    if (stored !== expected) {
+      diag(engine, `auti${isB ? 'b' : 'a'}1716 mismatch at pc=0x${ctx.pc.toString(16)}`);
+    }
+    ctx.writeGpr(17, stripPac(pointer));
   } else {
-    const pac = computePacField(keyHex, modifier, lr);
-    ctx.writeGpr(30, insertPac(stripPac(lr), pac));
+    const pac = computePacField(keyHex, modifier, pointer);
+    ctx.writeGpr(17, insertPac(stripPac(pointer), pac));
   }
   return true;
 }
