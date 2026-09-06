@@ -21,7 +21,7 @@ export class Deobfuscator {
     const key = JSON.stringify({
       // Hash the FULL code plus its length: prefix-truncation (substring(0, 2000))
       // let samples sharing a long prefix collide and return each other's result.
-      codeHash: crypto.createHash('md5').update(options.code).digest('hex'),
+      codeHash: crypto.createHash('sha256').update(options.code).digest('hex'),
       codeLength: options.code.length,
       forceOutput: options.forceOutput,
       includeModuleCode: options.includeModuleCode,
@@ -33,7 +33,8 @@ export class Deobfuscator {
       unpack: options.unpack,
       unminify: options.unminify,
     });
-    return crypto.createHash('md5').update(key).digest('hex');
+    // Cache key only (not an integrity primitive) — sha256 for collision resistance.
+    return crypto.createHash('sha256').update(key).digest('hex');
   }
 
   async deobfuscate(options: DeobfuscateOptions, pool?: WebcrackPool): Promise<DeobfuscateResult> {

@@ -60,7 +60,8 @@ export class AdvancedDeobfuscator {
       unpack: options.unpack,
       unminify: options.unminify,
     });
-    return crypto.createHash('md5').update(key).digest('hex');
+    // Cache key only (not an integrity primitive) — sha256 for collision resistance.
+    return crypto.createHash('sha256').update(key).digest('hex');
   }
 
   async deobfuscate(

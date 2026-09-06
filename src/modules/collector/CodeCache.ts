@@ -49,7 +49,9 @@ export class CodeCache {
 
   protected generateKey(url: string, options?: Record<string, unknown>): string {
     const data = JSON.stringify({ url, options });
-    return crypto.createHash('md5').update(data).digest('hex');
+    // Cache key only (not an integrity primitive) — sha256 keeps the key
+    // collision-resistant without implying any security property.
+    return crypto.createHash('sha256').update(data).digest('hex');
   }
 
   private getCachePath(key: string): string {
@@ -120,7 +122,7 @@ export class CodeCache {
     options?: Record<string, unknown>,
   ): Promise<void> {
     const key = this.generateKey(url, options);
-    const hash = crypto.createHash('md5').update(JSON.stringify(result.files)).digest('hex');
+    const hash = crypto.createHash('sha256').update(JSON.stringify(result.files)).digest('hex');
 
     const entry: CacheEntry = {
       url,
