@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>JSHookMCP 文档站</title>
+    <link>https://vmoranv.github.io/jshookmcp/</link>
+    <description>JSHookMCP：面向 JavaScript 逆向、浏览器自动化、网络采集与扩展开发的 MCP server（npm: @jshookmcp/jshook，AGPL-3.0）。600+ 工具，36 个能力域，跨平台 native FFI。</description>
+    <language>zh-CN</language>
+    <item>
+      <title>v0.3.5 — 36 域 × 600+ 工具全量目录上线</title>
+      <link>https://vmoranv.github.io/jshookmcp/reference/</link>
+      <description>36 个能力域、600+ 工具的完整参考目录已上线，按域分章、中英双语。涵盖 browser、network、debugger、v8-inspector、native-emulator、workflow、extension-sdk 等域。</description>
+      <pubDate>Thu, 02 Oct 2026 00:00:00 +0000</pubDate>
+      <guid>https://vmoranv.github.io/jshookmcp/reference/</guid>
+    </item>
+    <item>
+      <title>Long Proof 工作流 harness 模板文档</title>
+      <link>https://vmoranv.github.io/jshookmcp/extensions/</link>
+      <description>扩展开发章节更新：Long Proof harness 模式与并行调用、subagent 侧车分析的模板仓实践，工具名已对齐实际注册名。</description>
+      <pubDate>Sun, 27 Sep 2026 00:00:00 +0000</pubDate>
+      <guid>https://vmoranv.github.io/jshookmcp/extensions/</guid>
+    </item>
+    <item>
+      <title>快速开始与工具选择指南</title>
+      <link>https://vmoranv.github.io/jshookmcp/guide/getting-started</link>
+      <description>从安装（npx 一行接入）、启动、抓第一批请求，到按任务选域、按域选工具的最短路径。MCP_TOOL_PROFILE 分层（search ⊂ workflow ⊂ full）说明。</description>
+      <pubDate>Sat, 05 Sep 2026 00:00:00 +0000</pubDate>
+      <guid>https://vmoranv.github.io/jshookmcp/guide/getting-started</guid>
+    </item>
+    <item>
+      <title>运维与诊断：doctor 命令与产物保留</title>
+      <link>https://vmoranv.github.io/jshookmcp/operations/doctor-and-artifacts</link>
+      <description>集中说明 jshook doctor 环境诊断、产物 retention 策略、安全默认值与跨平台限制（Windows/macOS/Linux FFI 差异）。</description>
+      <pubDate>Sun, 08 Mar 2026 00:00:00 +0000</pubDate>
+      <guid>https://vmoranv.github.io/jshookmcp/operations/doctor-and-artifacts</guid>
+    </item>
+    <item>
+      <title>项目起源：为什么用 MCP 做 JS 逆向</title>
+      <link>https://vmoranv.github.io/jshookmcp/contributing</link>
+      <description>为 AI agent 提供浏览器自动化、CDP 调试、网络监控、JS hook 与跨平台 native FFI 的 TypeScript MCP server，AGPL-3.0 许可，可通过 stdio 或 Streamable HTTP 接入任意 MCP 客户端。</description>
+      <pubDate>Sat, 26 Sep 2026 00:00:00 +0000</pubDate>
+      <guid>https://vmoranv.github.io/jshookmcp/contributing</guid>
+    </item>
+  </channel>
+</rss>
