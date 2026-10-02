@@ -1,0 +1,33 @@
+# JSHookMCP
+
+> JSHookMCP（npm 包名 @jshookmcp/jshook，AGPL-3.0）是一个 TypeScript 实现的 MCP server，为 AI agent 提供跨域工具集：浏览器自动化、CDP 调试、网络监控、JS hook、代码分析与反混淆、跨平台 native FFI（Win32/Darwin/Linux）内存/进程分析、工作流编排与插件扩展。站点当前提供 600+ 工具（36 个能力域）。
+
+## 项目入口
+
+- 仓库: https://github.com/vmoranv/jshookmcp
+- 安装: `npx -y @jshookmcp/jshook`
+- MCP 客户端配置: {"mcpServers": {"jshook": {"command": "npx", "args": ["-y", "@jshookmcp/jshook"]}}}
+- 文档站: https://vmoranv.github.io/jshookmcp/
+
+## 关键文档
+
+- [快速开始](https://vmoranv.github.io/jshookmcp/guide/getting-started): 安装、启动与首个请求抓取。
+- [最佳实践](https://vmoranv.github.io/jshookmcp/guide/best-practices): 工具选择与调用策略。
+- [配置（.env）](https://vmoranv.github.io/jshookmcp/guide/configuration): 环境变量与 profile 分层（search / workflow / full）。
+- [工具选择指南](https://vmoranv.github.io/jshookmcp/guide/tool-selection): 按任务选域、按域选工具的方法。
+- [扩展开发](https://vmoranv.github.io/jshookmcp/extensions/): 插件与工作流扩展 SDK。
+- [运维与诊断（doctor）](https://vmoranv.github.io/jshookmcp/operations/doctor-and-artifacts): 环境诊断、产物保留与安全默认值。
+- [工具参考（36 域 × 600+ 工具）](https://vmoranv.github.io/jshookmcp/reference/): 全量工具目录。
+- [贡献指南](https://vmoranv.github.io/jshookmcp/contributing): 构建、测试与提交流程。
+
+## 常见问题
+
+- **Q: 支持哪些 MCP 客户端？** A: 任何标准 MCP 客户端（Claude Desktop、Cursor、Claude Code 等），通过 stdio 或 Streamable HTTP 接入。
+- **Q: 36 个能力域是什么？** A: 按职责划分的工具集合（如 browser、network、debugger、v8-inspector、native-ffi 等），运行时按 profile 分层加载，其余域懒激活。
+- **Q: 平台支持？** A: Windows（Win32 API）、macOS（Mach trap）、Linux（POSIX syscall），基于 koffi 的跨平台 FFI。
+
+## 元数据
+
+- 许可证: AGPL-3.0-only
+- 维护者: vmoranv（GitHub: https://github.com/vmoranv）
+- 语言: 简体中文 / English（见 /en/）

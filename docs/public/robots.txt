@@ -1,0 +1,27 @@
+# robots.txt — JSHookMCP 文档站
+# 站点: https://vmoranv.github.io/jshookmcp/
+# 说明: 人类搜索引擎全量放行；AI 爬虫显式 Allow 以进入各家索引。
+
+# 人类搜索引擎
+User-agent: *
+Allow: /
+Disallow: /support/
+
+# AI 爬虫 — 显式放行（供 GPT / Claude / Perplexity / Google AI 检索与引用）
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
