@@ -1,0 +1,8 @@
+{
+  "name": "JSHookMCP",
+  "url": "https://vmoranv.github.io/",
+  "description": "JSHookMCP is a TypeScript MCP server (npm: @jshookmcp/jshook, AGPL-3.0) that gives AI agents 600+ tools across 36 capability domains: browser automation, CDP debugging, network capture and protocol analysis, JavaScript hooking and deobfuscation, cross-platform native FFI (Win32/Darwin/Linux), and declarative workflow orchestration. Run it with a single npx command.",
+  "language": ["zh-CN", "en"],
+  "repository": "https://github.com/vmoranv/jshookmcp",
+  "install": "npx -y @jshookmcp/jshook"
+}

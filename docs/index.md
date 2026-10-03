@@ -60,6 +60,13 @@ features:
 
 完整目录见 [工具参考](/reference/)，按域分章、中英双语。
 
+### 按任务快速定位
+
+- 抓包与协议分析 → [network](/reference/#network)
+- 页面操作与截图 → [browser](/reference/#browser)
+- 断点单步 → [debugger / v8-inspector](/reference/#debugger)
+- 插件与工作流扩展 → [extension-sdk](/reference/#extension-sdk)
+
 ## 运行平台
 
 基于 koffi 的跨平台 FFI 层支持三个操作系统：

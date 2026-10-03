@@ -1,0 +1,18 @@
+[
+  {
+    "question": "Which MCP clients are supported?",
+    "answer": "Any standard MCP client (Claude Desktop, Cursor, Claude Code, etc.), via stdio or Streamable HTTP. You only need to add one JSON snippet to your client config."
+  },
+  {
+    "question": "What are the 36 capability domains?",
+    "answer": "Domains group tools by responsibility: browser, network, debugger, v8-inspector, native-emulator, workflow, extension-sdk, and more. They load by profile (search / workflow / full); the rest activate lazily at runtime."
+  },
+  {
+    "question": "Which platforms does native FFI cover?",
+    "answer": "Windows (Win32 API), macOS (Mach trap), and Linux (POSIX syscall), all through a cross-platform koffi FFI layer."
+  },
+  {
+    "question": "How do I install JSHookMCP?",
+    "answer": "Run it with npx -y @jshookmcp/jshook, no local install required. Add the npx command under mcpServers in your MCP client configuration."
+  }
+]

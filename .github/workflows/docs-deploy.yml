@@ -50,7 +50,11 @@ jobs:
 
       - name: Build docs
         env:
-          VITEPRESS_BASE: /${{ github.event.repository.name }}/
+          # Domain-root deployment (vmoranv.github.io/). The Pages source must
+          # be the project-level Pages site (vmoranv.github.io repository), not
+          # this repo's user/site Pages, so that absolute paths like
+          # /robots.txt resolve at the domain root.
+          VITEPRESS_BASE: /
         run: pnpm run docs:build
 
       - name: Upload Pages artifact

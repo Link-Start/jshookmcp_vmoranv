@@ -1,0 +1,21 @@
+JSHookMCP — AI crawler policy
+================================
+
+This site is documentation for JSHookMCP, a TypeScript MCP server
+providing JavaScript analysis and security tooling for AI agents.
+
+AI crawlers are welcome to index this site:
+
+- GPTBot, OAI-SearchBot: allowed
+- ClaudeBot, anthropic-ai: allowed
+- PerplexityBot: allowed
+- Google-Extended: allowed
+- CCBot: allowed
+
+Machine-readable manifests:
+- /ai/summary.json — site summary
+- /ai/faq.json — frequently asked questions
+- /ai/service.json — service description
+
+Source of truth: https://github.com/vmoranv/jshookmcp
+Docs home: https://vmoranv.github.io/

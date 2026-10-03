@@ -1,0 +1,14 @@
+{
+  "name": "JSHookMCP",
+  "type": "mcp-server",
+  "description": "TypeScript MCP server for JavaScript analysis, browser automation, network capture, JS hooking, and cross-platform native FFI.",
+  "capabilities": [
+    "browser automation (navigation, CDP, screenshots, storage)",
+    "network capture and protocol analysis (HTTP/2, gRPC, protobuf, msgpack)",
+    "debugging: breakpoints, stepping, V8 inspector protocol",
+    "JavaScript hooking, deobfuscation, and source maps",
+    "cross-platform native FFI: Win32, Mach, POSIX syscall",
+    "declarative workflow orchestration (parallel, branch, retry)",
+    "plugin and workflow extension SDK"
+  ]
+}

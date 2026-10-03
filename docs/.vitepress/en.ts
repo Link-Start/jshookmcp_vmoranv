@@ -13,6 +13,7 @@ export const en = defineConfig({
       { text: 'Extensions', link: '/en/extensions/' },
       { text: 'Operations', link: '/en/operations/doctor-and-artifacts' },
       { text: 'Contributing', link: '/en/contributing' },
+      { text: 'About', link: '/en/about' },
     ],
     sidebar: {
       '/en/guide/': [

@@ -12,6 +12,7 @@ export const zh = defineConfig({
       { text: '扩展', link: '/extensions/' },
       { text: '运维', link: '/operations/doctor-and-artifacts' },
       { text: '贡献', link: '/contributing' },
+      { text: '关于', link: '/about' },
     ],
     sidebar: {
       '/guide/': [

@@ -14,8 +14,16 @@ export const shared = defineConfig({
     ['meta', { property: 'og:locale', content: 'zh_CN' }],
     ['meta', { property: 'og:title', content: 'JSHookMCP | JavaScript 逆向与自动化' }],
     ['meta', { property: 'og:site_name', content: 'JSHookMCP' }],
-    ['meta', { property: 'og:image', content: 'https://vmoranv.github.io/jshookmcp/favicon.png' }],
-    ['meta', { property: 'og:url', content: 'https://vmoranv.github.io/jshookmcp/' }],
+    [
+      'meta',
+      {
+        property: 'og:description',
+        content:
+          '面向 JavaScript 逆向、浏览器自动化、网络采集与扩展开发的 MCP server 文档站：600+ 工具，36 个能力域。',
+      },
+    ],
+    ['meta', { property: 'og:image', content: 'https://vmoranv.github.io/favicon.png' }],
+    ['meta', { property: 'og:url', content: 'https://vmoranv.github.io/' }],
     [
       'script',
       { type: 'application/ld+json' },
@@ -24,25 +32,39 @@ export const shared = defineConfig({
         '@graph': [
           {
             '@type': 'WebSite',
-            '@id': 'https://vmoranv.github.io/jshookmcp/#website',
-            url: 'https://vmoranv.github.io/jshookmcp/',
+            '@id': 'https://vmoranv.github.io/#website',
+            url: 'https://vmoranv.github.io/',
             name: 'JSHookMCP',
             description: '面向 JavaScript 逆向、浏览器自动化、网络采集与扩展开发的 MCP 文档站。',
             inLanguage: ['zh-CN', 'en'],
-            publisher: { '@id': 'https://vmoranv.github.io/jshookmcp/#org' },
+            publisher: { '@id': 'https://vmoranv.github.io/#org' },
+            dateModified: '2026-10-03',
             potentialAction: {
               '@type': 'SearchAction',
-              target: 'https://vmoranv.github.io/jshookmcp/?q={search_term_string}',
+              target: 'https://vmoranv.github.io/?q={search_term_string}',
               'query-input': 'required name=search_term_string',
             },
           },
           {
             '@type': 'Organization',
-            '@id': 'https://vmoranv.github.io/jshookmcp/#org',
+            '@id': 'https://vmoranv.github.io/#org',
             name: 'vmoranv',
-            url: 'https://vmoranv.github.io/jshookmcp/',
-            logo: 'https://vmoranv.github.io/jshookmcp/logo.svg',
+            url: 'https://vmoranv.github.io/',
+            logo: 'https://vmoranv.github.io/logo.svg',
             sameAs: ['https://github.com/vmoranv/jshookmcp', 'https://github.com/vmoranv'],
+            address: {
+              '@type': 'PostalAddress',
+              addressCountry: 'CN',
+            },
+            areaServed: {
+              '@type': 'Place',
+              name: 'Worldwide',
+            },
+            geo: {
+              '@type': 'GeoCoordinates',
+              latitude: 39.9,
+              longitude: 116.4,
+            },
             contactPoint: {
               '@type': 'ContactPoint',
               contactType: 'technical support',
@@ -50,8 +72,30 @@ export const shared = defineConfig({
             },
           },
           {
+            '@type': 'WebApplication',
+            '@id': 'https://vmoranv.github.io/#app',
+            name: 'JSHookMCP',
+            url: 'https://vmoranv.github.io/',
+            description:
+              'TypeScript MCP server：浏览器自动化、CDP 调试、网络抓包、JS hook 与反混淆、跨平台 native FFI、工作流编排。npm 包名 @jshookmcp/jshook，AGPL-3.0。',
+            applicationCategory: 'DeveloperApplication',
+            operatingSystem: 'Windows, macOS, Linux',
+            offers: {
+              '@type': 'Offer',
+              price: '0',
+              priceCurrency: 'USD',
+            },
+            author: {
+              '@type': 'Person',
+              '@id': 'https://vmoranv.github.io/#author',
+              name: 'vmoranv',
+              url: 'https://github.com/vmoranv',
+              jobTitle: 'Maintainer',
+            },
+          },
+          {
             '@type': 'FAQPage',
-            '@id': 'https://vmoranv.github.io/jshookmcp/#faq',
+            '@id': 'https://vmoranv.github.io/#faq',
             mainEntity: [
               {
                 '@type': 'Question',
