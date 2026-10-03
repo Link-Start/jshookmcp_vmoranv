@@ -28,6 +28,8 @@ features:
     details: 集中说明 doctor、产物 retention、安全默认值与跨平台限制。
 ---
 
+它为 AI agent 提供 **600+ 工具**、覆盖 **36 个能力域**，支持 **3 个操作系统**（Windows / macOS / Linux）。核心能力横跨浏览器自动化、CDP 协议调试、网络抓包与协议分析、JavaScript hook 与反混淆，以及基于 koffi 的跨平台 native FFI。运行时按 profile（search ⊂ workflow ⊂ full）分层加载，避免一次性把所有工具塞进上下文。
+
 ## ⚡ 极速接入
 
 只需将以下配置添加到你的 MCP 客户端（如 Claude Desktop 或 Cursor）即可完成接入：
@@ -45,7 +47,7 @@ features:
 
 ## 这是什么
 
-这是一个 TypeScript 实现的 MCP（Model Context Protocol）server，npm 包名 `@jshookmcp/jshook`，AGPL-3.0 许可，一行 `npx` 即可运行，无需本地安装。它为 AI agent 提供 600+ 工具，覆盖 36 个能力域，横跨浏览器自动化、CDP 协议调试、网络抓包与协议分析、JavaScript hook 与反混淆、跨平台 native FFI，以及声明式工作流编排。
+这是一个 TypeScript 实现的 MCP（Model Context Protocol）server，AGPL-3.0 许可，一行 `npx` 即可运行，无需本地安装。它为 AI agent 提供 600+ 工具、覆盖 36 个能力域，横跨浏览器自动化、CDP 协议调试、网络抓包与协议分析、JavaScript hook 与反混淆、跨平台 native FFI，以及声明式工作流编排。
 
 ## 能力域速览
 

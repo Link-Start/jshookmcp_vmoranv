@@ -94,6 +94,26 @@ export const shared = defineConfig({
             },
           },
           {
+            '@type': 'TechArticle',
+            '@id': 'https://vmoranv.github.io/jshookmcp/#article',
+            headline: 'JSHookMCP：面向 AI agent 的 JavaScript 逆向与自动化 MCP server',
+            description:
+              'JSHookMCP 是一个 TypeScript 实现的 MCP server，提供 600+ 工具、36 个能力域，覆盖浏览器自动化、CDP 调试、网络抓包、JS hook 与跨平台 native FFI。',
+            url: 'https://vmoranv.github.io/jshookmcp/',
+            image: 'https://vmoranv.github.io/jshookmcp/logo.svg',
+            author: {
+              '@type': 'Person',
+              name: 'vmoranv',
+              url: 'https://github.com/vmoranv',
+              jobTitle: 'Maintainer',
+            },
+            publisher: { '@id': 'https://vmoranv.github.io/jshookmcp/#org' },
+            datePublished: '2025-01-01',
+            dateModified: '2026-10-03',
+            keywords:
+              'JavaScript reverse engineering, MCP, browser automation, CDP, network capture, deobfuscation, native FFI',
+          },
+          {
             '@type': 'FAQPage',
             '@id': 'https://vmoranv.github.io/jshookmcp/#faq',
             mainEntity: [
