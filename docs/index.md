@@ -45,7 +45,7 @@ features:
 
 ## 这是什么
 
-JSHookMCP 是一个 TypeScript 实现的 MCP（Model Context Protocol）server，npm 包名 `@jshookmcp/jshook`，AGPL-3.0 许可，一行 `npx` 即可运行，无需本地安装。它为 AI agent 提供 600+ 工具，覆盖 36 个能力域，横跨浏览器自动化、CDP 协议调试、网络抓包与协议分析、JavaScript hook 与反混淆、跨平台 native FFI，以及声明式工作流编排。
+这是一个 TypeScript 实现的 MCP（Model Context Protocol）server，npm 包名 `@jshookmcp/jshook`，AGPL-3.0 许可，一行 `npx` 即可运行，无需本地安装。它为 AI agent 提供 600+ 工具，覆盖 36 个能力域，横跨浏览器自动化、CDP 协议调试、网络抓包与协议分析、JavaScript hook 与反混淆、跨平台 native FFI，以及声明式工作流编排。
 
 ## 能力域速览
 
