@@ -11,11 +11,17 @@ const SITE_ORIGIN = 'https://vmoranv.github.io/jshookmcp';
 //   dist/index.html            → https://vmoranv.github.io/jshookmcp/
 //   dist/en/index.html         → https://vmoranv.github.io/jshookmcp/en/
 //   dist/guide/getting-started.html → https://vmoranv.github.io/jshookmcp/guide/getting-started
-// index.html 归一到其所在目录（保留尾斜杠语义），普通页去掉 .html；404.html 跳过。
+// index.html 归一到其所在目录（保留尾斜杠语义），普通页去掉 .html；404.html 不加 canonical，改注 noindex。
 function injectCanonical(code: string, htmlFileName: string): string {
   if (code.includes('rel="canonical"')) return code;
   const sitePath = htmlFileName.replace(/\\/g, '/').split('/dist/').pop();
-  if (!sitePath || sitePath === '404.html') return code;
+  if (!sitePath) return code;
+  if (sitePath === '404.html') {
+    // 404 兜底页（GitHub Pages fallback）不应被索引
+    return code.includes('name="robots"')
+      ? code
+      : code.replace(/<head>/, '<head>\n  <meta name="robots" content="noindex">');
+  }
   // index.html → 所在目录（带尾斜杠，与 cleanUrls 的 /en/、/ 一致）；普通页去 .html
   const url = sitePath.endsWith('index.html')
     ? `${SITE_ORIGIN}/${sitePath.replace(/index\.html$/, '')}`
