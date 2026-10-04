@@ -68,12 +68,48 @@ export interface MemoryScanOptions {
 
 export type FridaSessionMode = 'attach' | 'spawn';
 
+/**
+ * Target device for frida CLI commands. Maps to the -U / -H / -D flags;
+ * local (no flag) is the default and preserves the pre-device behavior.
+ */
+export type FridaDevice =
+  | { type: 'local' }
+  | { type: 'usb' }
+  | { type: 'remote'; host: string }
+  | { type: 'id'; id: string };
+
+export interface FridaDeviceInfo {
+  id: string;
+  type: string;
+  name: string;
+}
+
+export interface FridaProcessInfo {
+  pid: number;
+  name: string;
+}
+
+/** Device flags must precede target flags on the frida CLI. */
+export function fridaDeviceArgs(device: FridaDevice): string[] {
+  switch (device.type) {
+    case 'local':
+      return [];
+    case 'usb':
+      return ['-U'];
+    case 'remote':
+      return ['-H', device.host];
+    case 'id':
+      return ['-D', device.id];
+  }
+}
+
 export interface FridaSessionInfo {
   id: string;
   target: string;
   pid: number | null;
   status: 'attached' | 'detached' | 'error';
   mode: FridaSessionMode;
+  device: FridaDevice;
   resumed?: boolean;
 }
 
@@ -93,13 +129,22 @@ export class FridaSession {
   private fridaProbe?: ProbeResult;
   private probePromise?: Promise<ProbeResult>;
 
-  async attach(target: string): Promise<string> {
+  async attach(
+    target: string,
+    device: FridaDevice = { type: 'local' },
+    timeoutMs?: number,
+  ): Promise<string> {
     const availability = await this.getAvailability();
     if (!availability.available) {
       throw new PrerequisiteError(availability.reason ?? 'Frida CLI is not available');
     }
 
-    const probe = await this.runFridaCommand(target, 'console.log("__frida_attach_ok__");');
+    const probe = await this.runFridaCommand(
+      target,
+      'console.log("__frida_attach_ok__");',
+      device,
+      timeoutMs,
+    );
     if (probe.error) {
       throw new ToolError('CONNECTION', probe.error);
     }
@@ -111,6 +156,7 @@ export class FridaSession {
       pid: this.resolvePid(target),
       status: 'attached',
       mode: 'attach',
+      device,
       attachedAt: new Date().toISOString(),
     };
 
@@ -119,7 +165,11 @@ export class FridaSession {
     return sessionId;
   }
 
-  async spawn(target: string): Promise<string> {
+  async spawn(
+    target: string,
+    device: FridaDevice = { type: 'local' },
+    timeoutMs?: number,
+  ): Promise<string> {
     const availability = await this.getAvailability();
     if (!availability.available) {
       throw new PrerequisiteError(availability.reason ?? 'Frida CLI is not available');
@@ -129,6 +179,8 @@ export class FridaSession {
       target,
       this.buildSpawnTargetArgs(target),
       'console.log("__frida_spawn_ok__");',
+      device,
+      timeoutMs,
     );
     if (probe.error) {
       throw new ToolError('CONNECTION', probe.error);
@@ -141,6 +193,7 @@ export class FridaSession {
       pid: null,
       status: 'attached',
       mode: 'spawn',
+      device,
       resumed: false,
       attachedAt: new Date().toISOString(),
     };
@@ -393,8 +446,119 @@ export class FridaSession {
       pid: session.pid,
       status: session.status,
       mode: session.mode,
+      device: session.device,
       resumed: session.resumed,
     }));
+  }
+
+  /**
+   * Enumerate frida-visible devices (local / USB / remote) via frida-ls-devices.
+   * Throws PrerequisiteError when the CLI is missing and ToolError when the
+   * listing fails, mirroring attach()/spawn() error semantics.
+   */
+  async listDevices(timeoutMs?: number): Promise<FridaDeviceInfo[]> {
+    const probe = await probeCommand('frida-ls-devices');
+    if (!probe.available) {
+      throw new PrerequisiteError(probe.reason ?? 'frida-ls-devices is not available');
+    }
+
+    const output = await this.execListCommand(probe.path ?? 'frida-ls-devices', [], timeoutMs);
+    return this.parseDeviceList(output);
+  }
+
+  /**
+   * Enumerate processes on a device via frida-ps. On Android the process name
+   * is the App Label (not the package name), so remote callers should attach
+   * by the returned PID.
+   */
+  async listProcesses(
+    device: FridaDevice = { type: 'local' },
+    timeoutMs?: number,
+  ): Promise<FridaProcessInfo[]> {
+    const probe = await probeCommand('frida-ps');
+    if (!probe.available) {
+      throw new PrerequisiteError(probe.reason ?? 'frida-ps is not available');
+    }
+
+    const output = await this.execListCommand(
+      probe.path ?? 'frida-ps',
+      this.buildDeviceArgs(device),
+      timeoutMs,
+    );
+    return this.parseProcessList(output);
+  }
+
+  /**
+   * Shared runner for the frida-ls-devices / frida-ps listing CLIs: returns
+   * trimmed stdout, converting spawn failures and stderr output into
+   * ToolError so callers surface actionable connection errors.
+   */
+  private async execListCommand(
+    command: string,
+    args: string[],
+    timeoutMs?: number,
+  ): Promise<string> {
+    try {
+      const result = await this.execFileUtf8(command, args, timeoutMs ?? FRIDA_TIMEOUT_MS);
+      const error = result.stderr.trim();
+      if (error) {
+        throw new ToolError('CONNECTION', error);
+      }
+
+      return result.stdout.trim();
+    } catch (error) {
+      if (error instanceof ToolError) {
+        throw error;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn('[binary-instrument] Frida listing command failed', { command, message });
+      throw new ToolError('CONNECTION', message);
+    }
+  }
+
+  private parseDeviceList(output: string): FridaDeviceInfo[] {
+    const devices: FridaDeviceInfo[] = [];
+    for (const rawLine of output.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      // Skip the "Id Type Name" header row (would otherwise match the regex).
+      if (!line || /^id\b/i.test(line)) {
+        continue;
+      }
+
+      const match = /^(\S+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
+      if (!match) {
+        continue;
+      }
+
+      const id = match[1] ?? '';
+      const type = match[2] ?? '';
+      const name = match[3] ?? '';
+      if (id && type && name) {
+        devices.push({ id, type, name });
+      }
+    }
+
+    return devices;
+  }
+
+  private parseProcessList(output: string): FridaProcessInfo[] {
+    const processes: FridaProcessInfo[] = [];
+    for (const rawLine of output.split(/\r?\n/)) {
+      // "  PID  Name" header and dashed separator rows never match.
+      const match = /^\s*(\d+)\s+(.+?)\s*$/.exec(rawLine);
+      if (!match) {
+        continue;
+      }
+
+      const pid = Number.parseInt(match[1] ?? '', 10);
+      const name = (match[2] ?? '').trim();
+      if (!Number.isNaN(pid) && name) {
+        processes.push({ pid, name });
+      }
+    }
+
+    return processes;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -470,8 +634,19 @@ export class FridaSession {
     return Number.isNaN(parsed) ? null : parsed;
   }
 
-  private async runFridaCommand(target: string, script: string): Promise<FridaScriptResult> {
-    return this.runFridaCommandWithArgs(target, this.buildTargetArgs(target), script);
+  private async runFridaCommand(
+    target: string,
+    script: string,
+    device: FridaDevice = { type: 'local' },
+    timeoutMs?: number,
+  ): Promise<FridaScriptResult> {
+    return this.runFridaCommandWithArgs(
+      target,
+      this.buildTargetArgs(target),
+      script,
+      device,
+      timeoutMs,
+    );
   }
 
   private async runFridaCommandForSession(
@@ -484,13 +659,21 @@ export class FridaSession {
       session.mode === 'spawn' && session.resumed !== true
         ? this.buildSpawnTargetArgs(session.target)
         : this.buildTargetArgs(session.target);
-    return this.runFridaCommandWithArgs(session.target, targetArgs, script, timeoutMs, signal);
+    return this.runFridaCommandWithArgs(
+      session.target,
+      targetArgs,
+      script,
+      session.device,
+      timeoutMs,
+      signal,
+    );
   }
 
   private async runFridaCommandWithArgs(
     target: string,
     targetArgs: string[],
     script: string,
+    device: FridaDevice = { type: 'local' },
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<FridaScriptResult> {
@@ -503,7 +686,15 @@ export class FridaSession {
     }
 
     const command = availability.path ?? 'frida';
-    const args = [...targetArgs, '--runtime=v8', '-q', '-e', script];
+    // Device flags (-U/-H/-D) must precede target flags (-n/-p/-f) on the frida CLI.
+    const args = [
+      ...this.buildDeviceArgs(device),
+      ...targetArgs,
+      '--runtime=v8',
+      '-q',
+      '-e',
+      script,
+    ];
 
     try {
       const result = await this.execFileUtf8(command, args, timeoutMs ?? FRIDA_TIMEOUT_MS, signal);
@@ -522,6 +713,11 @@ export class FridaSession {
 
   private buildSpawnTargetArgs(target: string): string[] {
     return ['-f', target];
+  }
+
+  /** Device flags must precede target flags on the frida CLI. */
+  private buildDeviceArgs(device: FridaDevice): string[] {
+    return fridaDeviceArgs(device);
   }
 
   private buildTargetArgs(target: string): string[] {
@@ -722,6 +918,20 @@ export class FridaSession {
 
       let escalationTimer: ReturnType<typeof setTimeout> | undefined;
 
+      // ExecFileOptions omits spawn-only members (`stdio`, `detached`) —
+      // execFile forwards spawn options at runtime, hence the variable spread
+      // below (a literal spread trips no-useless-spread).
+      // stdio: stdin '/dev/null' gives the frida REPL an immediate EOF so -e
+      // one-shot scripts exit deterministically; a piped stdin that never
+      // closes would hang Windows non-TTY runs until the timeout fires.
+      // POSIX: lead a new process group so cancellation can signal the
+      // whole tree — in spawn mode the instrumented target is a
+      // grandchild of the frida CLI.
+      const spawnExtras = {
+        stdio: ['ignore', 'pipe', 'pipe'] as const,
+        ...(process.platform !== 'win32' ? { detached: true as const } : {}),
+      };
+
       const child = execFile(
         file,
         args,
@@ -730,11 +940,7 @@ export class FridaSession {
           windowsHide: true,
           maxBuffer: FRIDA_MAX_BUFFER_BYTES,
           encoding: 'utf8',
-          // POSIX: lead a new process group so cancellation can signal the
-          // whole tree — in spawn mode the instrumented target is a
-          // grandchild of the frida CLI. ExecFileOptions omits `detached`;
-          // execFile forwards spawn options at runtime, hence the spread.
-          ...(process.platform !== 'win32' ? { detached: true as const } : {}),
+          ...spawnExtras,
         },
         (error, stdout, stderr) => {
           signal?.removeEventListener('abort', onAbort);

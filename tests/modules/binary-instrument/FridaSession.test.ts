@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FridaSession } from '@modules/binary-instrument/FridaSession';
 import { probeCommand } from '@modules/external/ToolProbe';
+import { PrerequisiteError } from '@errors/PrerequisiteError';
 
 vi.mock('node:child_process', () => ({
   execFile: vi.fn((_file, _args, _options, cb) => {
@@ -361,5 +362,137 @@ describe('FridaSession task cancellation', () => {
     } finally {
       Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
     }
+  });
+});
+
+describe('FridaSession device support', () => {
+  let session: FridaSession;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    session = new FridaSession();
+    (probeCommand as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      available: true,
+      path: '/usr/bin/frida',
+      version: '16.0.0',
+    });
+  });
+
+  const getExecFile = async (): Promise<any> =>
+    (await import('node:child_process')).execFile as any;
+
+  it('puts usb device flags before target args', async () => {
+    const execFile = await getExecFile();
+    await session.attach('HyperCeiler', { type: 'usb' });
+    const args = execFile.mock.calls.at(-1)?.[1] as string[];
+    expect(args.indexOf('-U')).toBeGreaterThanOrEqual(0);
+    expect(args.indexOf('-U')).toBeLessThan(args.indexOf('-n'));
+    expect(args).toEqual(expect.arrayContaining(['-n', 'HyperCeiler']));
+  });
+
+  it('puts remote host args before target args and records the device', async () => {
+    const execFile = await getExecFile();
+    const id = await session.attach('HyperCeiler', {
+      type: 'remote',
+      host: '192.168.1.11:27042',
+    });
+    const args = execFile.mock.calls.at(-1)?.[1] as string[];
+    expect(args.slice(0, 4)).toEqual(['-H', '192.168.1.11:27042', '-n', 'HyperCeiler']);
+    expect(session.listSessions()[0]).toMatchObject({
+      id,
+      device: { type: 'remote', host: '192.168.1.11:27042' },
+    });
+  });
+
+  it('spawns on a remote device with host args before -f', async () => {
+    const execFile = await getExecFile();
+    await session.spawn('com.example.app', { type: 'remote', host: '10.0.2.2:27042' });
+    const args = execFile.mock.calls.at(-1)?.[1] as string[];
+    expect(args.slice(0, 4)).toEqual(['-H', '10.0.2.2:27042', '-f', 'com.example.app']);
+  });
+
+  it('inherits the session device for downstream script execution', async () => {
+    const execFile = await getExecFile();
+    await session.attach('HyperCeiler', { type: 'remote', host: '192.168.1.11:27042' });
+    await session.executeScript('console.log(Process.id);');
+    const args = execFile.mock.calls.at(-1)?.[1] as string[];
+    expect(args.slice(0, 2)).toEqual(['-H', '192.168.1.11:27042']);
+  });
+
+  it('re-spawns a not-yet-resumed remote spawn session with device args', async () => {
+    const execFile = await getExecFile();
+    execFile.mockImplementation((_f: any, _a: any, _o: any, cb: any) => {
+      cb(null, '__frida_spawn_ok__', '');
+    });
+    await session.spawn('com.example.app', { type: 'remote', host: '192.168.1.11:27042' });
+    await session.executeScript('console.log(1);');
+    const args = execFile.mock.calls.at(-1)?.[1] as string[];
+    expect(args.slice(0, 4)).toEqual(['-H', '192.168.1.11:27042', '-f', 'com.example.app']);
+  });
+
+  it('attaches by explicit id device via -D', async () => {
+    const execFile = await getExecFile();
+    await session.attach('HyperCeiler', { type: 'id', id: 'emulator-5554' });
+    const args = execFile.mock.calls.at(-1)?.[1] as string[];
+    expect(args.slice(0, 4)).toEqual(['-D', 'emulator-5554', '-n', 'HyperCeiler']);
+  });
+
+  it('keeps the local default free of any device flags', async () => {
+    const execFile = await getExecFile();
+    await session.attach('HyperCeiler');
+    const args = execFile.mock.calls.at(-1)?.[1] as string[];
+    expect(args).not.toContain('-U');
+    expect(args).not.toContain('-H');
+    expect(args).not.toContain('-D');
+    expect(args.slice(0, 2)).toEqual(['-n', 'HyperCeiler']);
+    expect(session.listSessions()[0]?.device).toEqual({ type: 'local' });
+  });
+
+  it('lists devices from frida-ls-devices output', async () => {
+    const execFile = await getExecFile();
+    execFile.mockImplementation((_f: any, _a: any, _o: any, cb: any) => {
+      cb(
+        null,
+        [
+          '  Id     Type    Name',
+          '  local  local   Local System (local)',
+          '  usb    usb     Pixel 7',
+        ].join('\r\n'),
+        '',
+      );
+    });
+    const devices = await session.listDevices();
+    expect(devices).toEqual([
+      { id: 'local', type: 'local', name: 'Local System (local)' },
+      { id: 'usb', type: 'usb', name: 'Pixel 7' },
+    ]);
+  });
+
+  it('lists processes on a remote device with device args', async () => {
+    const execFile = await getExecFile();
+    execFile.mockImplementation((_f: any, _a: any, _o: any, cb: any) => {
+      cb(
+        null,
+        ['  PID  Name', '-----  ----', '  2695  HyperCeiler', '  31000  com.android.systemui'].join(
+          '\r\n',
+        ),
+        '',
+      );
+    });
+    const processes = await session.listProcesses({ type: 'remote', host: '192.168.1.11:27042' });
+    expect(processes).toEqual([
+      { pid: 2695, name: 'HyperCeiler' },
+      { pid: 31000, name: 'com.android.systemui' },
+    ]);
+    const args = execFile.mock.calls.at(-1)?.[1] as string[];
+    expect(args.slice(0, 2)).toEqual(['-H', '192.168.1.11:27042']);
+  });
+
+  it('throws PrerequisiteError when frida-ls-devices is unavailable', async () => {
+    (probeCommand as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue({
+      available: false,
+      reason: 'missing CLI',
+    });
+    await expect(session.listDevices()).rejects.toThrow(PrerequisiteError);
   });
 });

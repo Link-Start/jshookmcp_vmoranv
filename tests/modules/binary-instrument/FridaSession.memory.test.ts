@@ -115,4 +115,24 @@ describe('FridaSession memory scan/read', () => {
     expect(script).toContain('65536');
     expect(script).not.toContain('999999');
   });
+
+  it('memoryScan inherits the remote device args prefix from the session', async () => {
+    const execFile = await getExecFile();
+    execFile.mockImplementation((_file: any, args: any[], _opts: any, cb: any) => {
+      const script = args.at(-1);
+      cb(
+        null,
+        typeof script === 'string' && script.includes('Memory.scanSync')
+          ? '[]'
+          : '__frida_attach_ok__',
+        '',
+      );
+    });
+
+    await session.attach('HyperCeiler', { type: 'remote', host: '192.168.1.11:27042' });
+    const matches = await session.memoryScan('cafebabe', {});
+    expect(matches).toEqual([]);
+    const args = execFile.mock.calls.at(-1)?.[1] as string[];
+    expect(args.slice(0, 2)).toEqual(['-H', '192.168.1.11:27042']);
+  });
 });

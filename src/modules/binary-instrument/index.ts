@@ -1,7 +1,11 @@
 export {
   FridaSession,
+  fridaDeviceArgs,
+  type FridaDevice,
+  type FridaDeviceInfo,
   type FridaFunctionInfo,
   type FridaModuleInfo,
+  type FridaProcessInfo,
   type FridaScriptResult,
   type FridaSessionMode,
   type FridaSessionInfo,
