@@ -7,7 +7,38 @@
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import type { TrialParams } from './search-space';
-import type { TrialResult } from './worker';
+
+/**
+ * Reader-owned trial record shape, mirroring what optimize.ts actually
+ * serializes to trials.jsonl. The old `import type { TrialResult } from
+ * './worker'` pointed at a module that was inlined into optimize.ts (the
+ * type-only import was silently erased at runtime, so the stale reference
+ * never surfaced). `failedCases` stays optional: the tune writer does not
+ * serialize it (compare-static-model does, with the same row shape).
+ */
+interface TrialResult {
+  trialId: string;
+  phase: number;
+  dataset: string;
+  params: Record<string, number>;
+  metrics: {
+    mrrAt10: number;
+    ndcgAt10: number;
+    pAt1: number;
+    pAt3: number;
+    pAt5: number;
+    objectiveScore: number;
+  };
+  holdoutMetrics?: Record<string, number> | null;
+  holdoutCaseCount?: number | null;
+  elapsedMs?: number;
+  failedCases?: Array<{
+    query: string;
+    expectedTop: string[];
+    actualTop5: string[];
+    firstRelevantRank: number | null;
+  }>;
+}
 
 // ── CLI ──
 
@@ -165,7 +196,7 @@ function renderMarkdown(trials: TrialResult[], importance: ParameterImportance[]
   for (let i = 0; i < top10Lexical.length; i++) {
     const t = top10Lexical[i]!;
     lines.push(
-      `| ${i + 1} | ${t.trialId} | ${t.metrics.objectiveScore.toFixed(4)} | ${t.metrics.mrrAt10.toFixed(3)} | ${t.metrics.ndcgAt10.toFixed(3)} | ${t.metrics.pAt1.toFixed(3)} | ${t.metrics.pAt3.toFixed(3)} | ${t.failedCases.length} |`,
+      `| ${i + 1} | ${t.trialId} | ${t.metrics.objectiveScore.toFixed(4)} | ${t.metrics.mrrAt10.toFixed(3)} | ${t.metrics.ndcgAt10.toFixed(3)} | ${t.metrics.pAt1.toFixed(3)} | ${t.metrics.pAt3.toFixed(3)} | ${t.failedCases?.length ?? 0} |`,
     );
   }
 
@@ -192,7 +223,7 @@ function renderMarkdown(trials: TrialResult[], importance: ParameterImportance[]
   }
 
   // Failed cases from best lexical
-  if (bestLexical && bestLexical.failedCases.length > 0) {
+  if (bestLexical && (bestLexical.failedCases?.length ?? 0) > 0) {
     lines.push('', '## Failed Cases (Best Lexical)', '');
     lines.push('| Query | Expected | Actual Top-5 | Rank |');
     lines.push('|-------|----------|---------------|------|');
@@ -216,7 +247,12 @@ async function main(): Promise<void> {
   const trials = await loadTrials(inPath);
   console.log(`Loaded ${trials.length} trials`);
 
-  const importance = computeSpearmanImportance(trials.filter((t) => t.phase === 1));
+  // Importance over the randomized sampling phase (phase >= 2); phase 1 only
+  // carries the default-probe rows (2 records here), which is below the
+  // n>=5 significance floor and yields an empty table.
+  const importance = computeSpearmanImportance(
+    trials.filter((t) => t.dataset === 'search-quality' && t.phase >= 2),
+  );
   console.log(`Computed importance for ${importance.length} parameters`);
 
   const markdown = renderMarkdown(trials, importance);
