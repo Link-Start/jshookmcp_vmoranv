@@ -158,6 +158,8 @@ const CONFIG_DEFAULTS = {
       dexDumpTimeoutMs: 180_000,
       dexDumpMaxBufferBytes: 16 * 1024 * 1024,
       dexDumpFileLimit: 500,
+      remoteTimeoutMs: 30_000,
+      deviceProbeTimeoutMs: 15_000,
     },
     jadx: {
       decompileTimeoutMs: 1_800_000,
@@ -540,6 +542,10 @@ const ConfigSchema = z.object({
   ),
   FRIDA_DEX_DUMP_FILE_LIMIT: positiveEnvInt(
     CONFIG_DEFAULTS.reverseEngineering.frida.dexDumpFileLimit,
+  ),
+  FRIDA_REMOTE_TIMEOUT_MS: positiveEnvInt(CONFIG_DEFAULTS.reverseEngineering.frida.remoteTimeoutMs),
+  FRIDA_DEVICE_PROBE_TIMEOUT_MS: positiveEnvInt(
+    CONFIG_DEFAULTS.reverseEngineering.frida.deviceProbeTimeoutMs,
   ),
   JADX_DECOMPILE_TIMEOUT_MS: positiveEnvInt(
     CONFIG_DEFAULTS.reverseEngineering.jadx.decompileTimeoutMs,
@@ -929,6 +935,8 @@ function buildReverseEngineeringConfig(env: ParsedConfigEnvironment): ReverseEng
       dexDumpTimeoutMs: env.FRIDA_DEX_DUMP_TIMEOUT_MS,
       dexDumpMaxBufferBytes: env.FRIDA_DEX_DUMP_MAX_BUFFER_BYTES,
       dexDumpFileLimit: env.FRIDA_DEX_DUMP_FILE_LIMIT,
+      remoteTimeoutMs: env.FRIDA_REMOTE_TIMEOUT_MS,
+      deviceProbeTimeoutMs: env.FRIDA_DEVICE_PROBE_TIMEOUT_MS,
     },
     jadx: {
       decompileTimeoutMs: env.JADX_DECOMPILE_TIMEOUT_MS,

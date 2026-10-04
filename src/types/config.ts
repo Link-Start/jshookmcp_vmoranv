@@ -353,6 +353,10 @@ export interface FridaAnalysisConfig {
   dexDumpTimeoutMs: number;
   dexDumpMaxBufferBytes: number;
   dexDumpFileLimit: number;
+  /** Default CLI timeout (ms) for attach/spawn probes on non-local devices. Remote first-packet handshakes are slower than local. */
+  remoteTimeoutMs: number;
+  /** Default CLI timeout (ms) for frida-ls-devices / frida-ps discovery probes. */
+  deviceProbeTimeoutMs: number;
 }
 
 export interface AndroidRuntimeConfig {
