@@ -20,6 +20,11 @@
  *                      persisted at ~/.jshookmcp/state/search-quality.json
  *                      (records with usedTool+usedToolRank only). Fails fast
  *                      if no usable records have accumulated yet.
+ *   --regularization N (default 0.01) λ for the objective penalty
+ *                      Σ|param−default|/(max−min) — 0 disables.
+ *   --no-prune         disable freezing low-sensitivity params to shipped
+ *                      defaults after phase 1 (pruner).
+ *   --dry-run          run the full pipeline but do NOT write .env.
  */
 import { execFile } from 'node:child_process';
 import { mkdir, appendFile, readFile, writeFile } from 'node:fs/promises';
@@ -33,7 +38,9 @@ import {
   buildLocalRefinementGrid,
   normalizeParams,
   type TrialParams,
+  type TunableParamKey,
 } from './search-space';
+import { deriveFrozenParams, regularizedScore } from './pruner';
 import { isDuplicateRegion, loadHistory, DEFAULT_TOLERANCE_STEPS } from './regression-history';
 
 const scriptDir = pathResolve(fileURLToPath(import.meta.url), '..');
@@ -444,6 +451,12 @@ interface OptimizeOptions {
   phase2TopN: number;
   concurrency: number;
   dataset: 'fixture' | 'realtime';
+  /** λ for the default-drift penalty; 0 disables regularization. */
+  regularization: number;
+  /** Freeze low-sensitivity params to shipped defaults after phase 1. */
+  prune: boolean;
+  /** Run the pipeline without writing .env. */
+  dryRun: boolean;
 }
 
 function parseOptions(): OptimizeOptions {
@@ -452,6 +465,7 @@ function parseOptions(): OptimizeOptions {
     const idx = args.indexOf(flag);
     return idx >= 0 && idx + 1 < args.length ? args[idx + 1]! : fallback;
   };
+  const has = (flag: string): boolean => args.includes(flag);
   const datasetRaw = get('--dataset', 'fixture');
   const dataset =
     datasetRaw === 'fixture' ? 'fixture' : datasetRaw === 'realtime' ? 'realtime' : null;
@@ -466,6 +480,9 @@ function parseOptions(): OptimizeOptions {
     phase2TopN: parseInt(get('--phase2-top-n', '20'), 10),
     concurrency: parseInt(get('--concurrency', String(CPU_COUNT)), 10),
     dataset,
+    regularization: parseFloat(get('--regularization', '0.01')),
+    prune: !has('--no-prune'),
+    dryRun: has('--dry-run'),
   };
 }
 
@@ -609,6 +626,13 @@ async function orchestrate(): Promise<void> {
   // history that blankets the space degrades to plain sampling instead of
   // looping forever).
   const rejectionHistory = await loadHistory();
+  // Pruner state: params frozen to shipped defaults after phase 1 (empty
+  // during phase 1 itself, so freezing never biases its own sensitivity data).
+  let frozenParams: Partial<Record<TunableParamKey, number>> = {};
+  const applyFrozen = (params: TrialParams): TrialParams =>
+    Object.keys(frozenParams).length === 0
+      ? params
+      : normalizeParams({ ...params, ...frozenParams } as TrialParams);
   const sampleFresh = (phaseDefs: typeof phase1Defs, seed: number): TrialParams => {
     let params = sampleRandomParams(phaseDefs, seed);
     for (let attempt = 1; attempt <= 8; attempt++) {
@@ -616,10 +640,10 @@ async function orchestrate(): Promise<void> {
         tolerance: DEFAULT_TOLERANCE_STEPS,
         defs,
       });
-      if (!verdict.duplicate) return params;
+      if (!verdict.duplicate) return applyFrozen(params);
       params = sampleRandomParams(phaseDefs, seed + attempt * 1000003);
     }
-    return params;
+    return applyFrozen(params);
   };
   if (rejectionHistory.length > 0) {
     console.log(
@@ -640,9 +664,41 @@ async function orchestrate(): Promise<void> {
     });
   }
   const p1Results = await runTrials(p1Specs, options.concurrency, 'Phase 1 — Random', outFile);
-  const sortedP1 = [...p1Results].toSorted(
-    (a, b) => b.metrics.objectiveScore - a.metrics.objectiveScore,
-  );
+
+  // ── Pruner: freeze low-sensitivity params to shipped defaults ──
+  // Complements the RRSI gates from the other side: instead of rejecting an
+  // overfit winner, it stops spending trial budget on dimensions that
+  // provably do not move the objective and pins them to the defaults (which
+  // also minimizes the regularization penalty for the final .env params).
+  if (options.prune) {
+    const pruned = deriveFrozenParams(
+      p1Results.map((t) => ({ params: t.params, objectiveScore: t.metrics.objectiveScore })),
+    );
+    frozenParams = pruned.frozen;
+    if (pruned.rationale.length > 0) {
+      console.log(
+        `  [pruner] froze ${pruned.rationale.length} low-sensitivity param(s) to shipped defaults:`,
+      );
+      for (const entry of pruned.rationale) {
+        console.log(
+          `    ${entry.key} → ${entry.frozenTo} (spread ${entry.spread.toFixed(4)}, ${entry.buckets} buckets)`,
+        );
+      }
+    } else {
+      console.log('  [pruner] nothing froze (no param met the low-sensitivity threshold)');
+    }
+  }
+  const frozenKeySet = new Set(Object.keys(frozenParams) as TunableParamKey[]);
+
+  // Ranking uses the regularized score: objective − λ·(default drift). This
+  // discounts candidates that win by drifting many params far from the
+  // shipped defaults — the continuous counterpart of the binary holdout gate.
+  const rankScore = (t: { params: Record<string, number>; metrics: { objectiveScore: number } }) =>
+    regularizedScore(
+      { params: t.params, objectiveScore: t.metrics.objectiveScore },
+      options.regularization,
+    );
+  const sortedP1 = [...p1Results].toSorted((a, b) => rankScore(b) - rankScore(a));
   const bestP1 = sortedP1[0];
   if (bestP1) {
     console.log(
@@ -655,7 +711,9 @@ async function orchestrate(): Promise<void> {
   const p2Specs: TrialSpec[] = [];
   let p2idx = 0;
   for (const base of topN) {
-    const grid = buildLocalRefinementGrid(base.params as TrialParams, phase1Defs);
+    // Frozen params keep their pinned value — the grid never proposes ±step
+    // variants for a dimension the pruner retired.
+    const grid = buildLocalRefinementGrid(base.params as TrialParams, phase1Defs, frozenKeySet);
     for (const params of grid) {
       p2Specs.push({
         trialId: `p2-${String(p2idx).padStart(4, '0')}`,
@@ -668,9 +726,7 @@ async function orchestrate(): Promise<void> {
     }
   }
   const p2Results = await runTrials(p2Specs, options.concurrency, 'Phase 2 — Refinement', outFile);
-  const allLexical = [...p1Results, ...p2Results].toSorted(
-    (a, b) => b.metrics.objectiveScore - a.metrics.objectiveScore,
-  );
+  const allLexical = [...p1Results, ...p2Results].toSorted((a, b) => rankScore(b) - rankScore(a));
   let bestLexical = allLexical[0];
   if (bestLexical) {
     console.log(
@@ -815,9 +871,7 @@ async function orchestrate(): Promise<void> {
     });
   }
   const p3Results = await runTrials(p3Specs, options.concurrency, 'Phase 3 — Profile', outFile);
-  const bestProfile = [...p3Results].toSorted(
-    (a, b) => b.metrics.objectiveScore - a.metrics.objectiveScore,
-  )[0];
+  const bestProfile = [...p3Results].toSorted((a, b) => rankScore(b) - rankScore(a))[0];
 
   // Phase 4: Rerank-specific tuning — uses rerank-state dataset with varied
   // runtime states to directly optimize rerank multipliers.
@@ -839,9 +893,7 @@ async function orchestrate(): Promise<void> {
     });
   }
   const p4Results = await runTrials(p4Specs, options.concurrency, 'Phase 4 — Rerank', outFile);
-  const bestRerank = [...p4Results].toSorted(
-    (a, b) => b.metrics.objectiveScore - a.metrics.objectiveScore,
-  )[0];
+  const bestRerank = [...p4Results].toSorted((a, b) => rankScore(b) - rankScore(a))[0];
 
   // ── Summary ──
   const totalTrials = p1Results.length + p2Results.length + p3Results.length + p4Results.length;
@@ -882,8 +934,17 @@ async function orchestrate(): Promise<void> {
   };
   if (bestProfile) Object.assign(mergedParams, bestProfile.params);
   if (bestRerank) Object.assign(mergedParams, bestRerank.params);
+  // Frozen params win over everything: they were pinned to the shipped
+  // defaults because no evidence supports drifting them.
+  Object.assign(mergedParams, frozenParams);
   const envPath = pathResolve(ROOT, '.env');
-  await applyToEnv(envPath, mergedParams, bestLexical?.metrics.objectiveScore ?? 0);
+  if (options.dryRun) {
+    console.log(
+      `[dry-run] skipping .env apply (score=${bestLexical?.metrics.objectiveScore.toFixed(4) ?? 'n/a'})`,
+    );
+  } else {
+    await applyToEnv(envPath, mergedParams, bestLexical?.metrics.objectiveScore ?? 0);
+  }
 }
 
 async function applyToEnv(

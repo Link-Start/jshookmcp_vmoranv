@@ -2,10 +2,6 @@
  * Search tuning parameter space: whitelist, ranges, sampling, and env mapping.
  */
 /* eslint-disable no-underscore-dangle */
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = resolve(fileURLToPath(import.meta.url), '..');
 
 // ── parameter whitelist ──
 
@@ -55,6 +51,56 @@ export const SEARCH_TUNE_PARAM_KEYS = [
 
 export type TunableParamKey = (typeof SEARCH_TUNE_PARAM_KEYS)[number];
 
+/**
+ * Shipped defaults for every tunable key, mirroring src/constants/search.ts.
+ * The pruner's regularization measures drift from these values, so the table
+ * must stay in sync — tests/scripts/search-tune/pruner.test.ts fails on any
+ * drift between this table and the constants module.
+ *
+ * Note: constants are env-overridable; this table records the DEFAULTS (the
+ * second argument of each float()/int() call), not current env values.
+ */
+export const SEARCH_TUNE_DEFAULTS: Readonly<Record<TunableParamKey, number>> = {
+  SEARCH_TRIGRAM_WEIGHT: 0.02,
+  SEARCH_TRIGRAM_THRESHOLD: 0.47,
+  SEARCH_RRF_BM25_BLEND: 0.39,
+  SEARCH_RRF_K: 18,
+  SEARCH_RRF_RESCALE_FACTOR: 2100,
+  SEARCH_PREFIX_MATCH_MULTIPLIER: 0.84,
+  SEARCH_COVERAGE_PRECISION_FACTOR: 0.94,
+  SEARCH_DOMAIN_HUB_THRESHOLD: 5,
+  SEARCH_DOMAIN_HUB_BOOST_MULTIPLIER: 1.04,
+  SEARCH_BM25_K1: 1,
+  SEARCH_BM25_B: 0.75,
+  SEARCH_EXACT_NAME_MATCH_MULTIPLIER: 3.2,
+  SEARCH_AFFINITY_BOOST_FACTOR: 0.38,
+  SEARCH_AFFINITY_BASE_WEIGHT: 0.5,
+  SEARCH_AFFINITY_TOP_N: 9,
+  SEARCH_PARAM_TOKEN_WEIGHT: 1.1,
+  SEARCH_SYNONYM_EXPANSION_LIMIT: 2,
+  SEARCH_VECTOR_BM25_SKIP_THRESHOLD: 8,
+  SEARCH_VECTOR_COSINE_WEIGHT: 0.53,
+  SEARCH_VECTOR_LEARN_UP: 0.13,
+  SEARCH_VECTOR_LEARN_DOWN: 0.02,
+  SEARCH_VECTOR_LEARN_TOP_N: 3,
+  SEARCH_RECENCY_MAX_BOOST: 0.1,
+  SEARCH_WORKFLOW_DOMAIN_BOOST_MULTIPLIER: 2.4,
+  SEARCH_SCENE_KEYWORD_WEIGHT: 0.8,
+  SEARCH_TIER_PENALTY: 0.35,
+  SEARCH_TIER_PENALTY_SEARCH: 0.4,
+  SEARCH_TIER_PENALTY_WORKFLOW: 0.6,
+  SEARCH_TIER_PENALTY_FULL: 0.6,
+  RERANK_MAINTENANCE_PENALTY: 0.43,
+  RERANK_STATELESS_INTERACTIVE_PENALTY: 0.65,
+  RERANK_STATELESS_CORE_PENALTY: 0.15,
+  RERANK_STATELESS_COMPUTE_BOOST: 2.2,
+  RERANK_STATELESS_SPECIFIC_TOOL_BOOST: 2.25,
+  RERANK_BROWSER_LAUNCH_BOOST: 1.35,
+  RERANK_BROWSER_ATTACH_BOOST: 1.55,
+  RERANK_NETWORK_MONITOR_BOOST: 1.6,
+  RERANK_NETWORK_GET_REQUESTS_BOOST: 1.55,
+};
+
 export interface TunableParamDef {
   readonly key: TunableParamKey;
   readonly type: 'int' | 'float';
@@ -68,7 +114,7 @@ export type TrialParams = Readonly<Partial<Record<TunableParamKey, number>>>;
 
 // ── parameter definitions ──
 
-const PARAM_DEFS: readonly TunableParamDef[] = [
+export const PARAM_DEFS: readonly TunableParamDef[] = [
   // Phase 1: lexical + vector + boost signals (all 24 scoring params)
   { key: 'SEARCH_TRIGRAM_WEIGHT', type: 'float', min: 0.01, max: 0.3, step: 0.01, phase: 1 },
   { key: 'SEARCH_TRIGRAM_THRESHOLD', type: 'float', min: 0.15, max: 0.55, step: 0.01, phase: 1 },
@@ -206,13 +252,17 @@ export function sampleRandomParams(defs: readonly TunableParamDef[], seed: numbe
 
 /**
  * Build local refinement grid: vary one parameter at a time by ±step.
+ * Keys in `skipKeys` (pruner-frozen params) keep their base value — no
+ * ±step variants are generated for retired dimensions.
  */
 export function buildLocalRefinementGrid(
   base: TrialParams,
   defs: readonly TunableParamDef[],
+  skipKeys?: ReadonlySet<string>,
 ): readonly TrialParams[] {
   const grid: TrialParams[] = [];
   for (const def of defs) {
+    if (skipKeys?.has(def.key)) continue;
     const baseVal = base[def.key];
     if (baseVal === undefined) continue;
     for (const delta of [-def.step, def.step]) {
