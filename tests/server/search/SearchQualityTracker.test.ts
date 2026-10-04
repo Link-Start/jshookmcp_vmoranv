@@ -457,4 +457,111 @@ describe('SearchQualityTracker', () => {
       expect(tracker.getEnhancementSuggestions('ok', 3, 0.5)).toBeNull();
     });
   });
+
+  describe('vector-eligibility instrumentation', () => {
+    it('records bm25TopScore and vectorParticipated when provided', () => {
+      tracker.recordSearch('weak query', ['a'], [0.4], 5, {
+        bm25TopScore: 3.2,
+        vectorParticipated: true,
+      });
+      const record = tracker.getRecentRecords()[0]!;
+      expect(record.bm25TopScore).toBe(3.2);
+      expect(record.vectorParticipated).toBe(true);
+    });
+
+    it('omits the fields when not provided (quick-path records)', () => {
+      tracker.recordSearch('exact name', ['page_navigate'], [0.9], 2, {
+        vectorParticipated: false,
+      });
+      const record = tracker.getRecentRecords()[0]!;
+      expect(record.bm25TopScore).toBeUndefined();
+      expect(record.vectorParticipated).toBe(false);
+    });
+
+    it('computes weak ratio over full-path records below the skip threshold', () => {
+      tracker.recordSearch('q1', ['a'], [0.9], 5, { bm25TopScore: 3 });
+      tracker.recordSearch('q2', ['b'], [0.9], 5, { bm25TopScore: 9 });
+      tracker.recordSearch('q3', ['c'], [0.9], 5, { bm25TopScore: 7.5 });
+      // Quick-path record excluded from the denominator.
+      tracker.recordSearch('q4', ['d'], [0.9], 5, { vectorParticipated: false });
+
+      const metrics = tracker.computeMetrics();
+      expect(metrics.bm25WeakQueries).toBe(2);
+      expect(metrics.bm25ConfidentQueries).toBe(1);
+      expect(metrics.bm25WeakRatio).toBeCloseTo(2 / 3, 10);
+      expect(metrics.totalQueries).toBe(4);
+    });
+
+    it('computes vector participation rate over full-path records', () => {
+      tracker.recordSearch('q1', ['a'], [0.9], 5, { bm25TopScore: 3, vectorParticipated: true });
+      tracker.recordSearch('q2', ['b'], [0.9], 5, { bm25TopScore: 3, vectorParticipated: true });
+      tracker.recordSearch('q3', ['c'], [0.9], 5, { bm25TopScore: 9, vectorParticipated: false });
+
+      const metrics = tracker.computeMetrics();
+      expect(metrics.vectorParticipatedRate).toBeCloseTo(2 / 3, 10);
+    });
+
+    it('returns zero ratios when no full-path samples exist', () => {
+      tracker.recordSearch('q1', ['a'], [0.9], 5, { vectorParticipated: false });
+      const metrics = tracker.computeMetrics();
+      expect(metrics.bm25WeakRatio).toBe(0);
+      expect(metrics.vectorParticipatedRate).toBe(0);
+    });
+
+    it('restores the additive fields from a snapshot', () => {
+      tracker.recordSearch('q1', ['a'], [0.9], 5, {
+        bm25TopScore: 3,
+        vectorParticipated: true,
+      });
+      const snapshot = tracker.exportSnapshot();
+
+      const restored = new SearchQualityTracker();
+      restored.restoreSnapshot(snapshot);
+      const record = restored.getRecentRecords()[0]!;
+      expect(record.bm25TopScore).toBe(3);
+      expect(record.vectorParticipated).toBe(true);
+      expect(restored.computeMetrics().bm25WeakQueries).toBe(1);
+    });
+
+    it('restores pre-instrumentation snapshots without the new fields', () => {
+      const snapshot = {
+        lastRecordId: 'sq-1-1',
+        records: [
+          {
+            id: 'sq-1-1',
+            query: 'old query',
+            timestamp: 1,
+            returnedTools: ['a'],
+            returnedScores: [0.9],
+            latencyMs: 5,
+          },
+        ],
+      };
+      const restored = new SearchQualityTracker();
+      restored.restoreSnapshot(snapshot);
+      const record = restored.getRecentRecords()[0]!;
+      expect(record.bm25TopScore).toBeUndefined();
+      expect(restored.computeMetrics().bm25WeakRatio).toBe(0);
+    });
+
+    it('rejects snapshots with malformed additive fields', () => {
+      const snapshot = {
+        lastRecordId: null,
+        records: [
+          {
+            id: 'sq-1-1',
+            query: 'q',
+            timestamp: 1,
+            returnedTools: ['a'],
+            returnedScores: [0.9],
+            latencyMs: 5,
+            bm25TopScore: 'not-a-number',
+          },
+        ],
+      };
+      const restored = new SearchQualityTracker();
+      restored.restoreSnapshot(snapshot);
+      expect(restored.getRecentRecords()).toHaveLength(0);
+    });
+  });
 });

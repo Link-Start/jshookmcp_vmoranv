@@ -522,6 +522,10 @@ export class ToolSearchEngine {
         quickResults.map((r) => r.name),
         quickResults.map((r) => r.score),
         performance.now() - quickStartMs,
+        // Quick-path queries bypass the ranking pipeline by construction:
+        // exact/prefix matches are always confident, so no raw BM25 score is
+        // captured and the vector signal never participates.
+        { vectorParticipated: false },
       );
       this.queryCache.set(cacheKey, {
         results: quickResults,
@@ -561,7 +565,11 @@ export class ToolSearchEngine {
 
     // ── RRF multi-signal fusion (replaces multiplicative TF-IDF boost) ──
     // Combine BM25 (already in scores), TF-IDF cosine, trigram, and vector signals
-    await this.applyRRFFusion(queryTokens, query, scores);
+    const { topBm25Score, vectorParticipated } = await this.applyRRFFusion(
+      queryTokens,
+      query,
+      scores,
+    );
 
     // ── Query category adaptive domain weights (§4.1.3 task-type encoding) ──
     const categoryDomainBoosts = this.bm25Scorer.detectQueryCategoryBoosts(query);
@@ -622,6 +630,7 @@ export class ToolSearchEngine {
       results.map((r) => r.name),
       results.map((r) => r.score),
       latencyMs,
+      { bm25TopScore: topBm25Score, vectorParticipated },
     );
 
     return results;
@@ -866,7 +875,7 @@ export class ToolSearchEngine {
     _queryTokens: string[],
     query: string,
     scores: Float64Array,
-  ): Promise<void> {
+  ): Promise<{ topBm25Score: number; vectorParticipated: boolean }> {
     const k = SEARCH_RRF_K;
     const trigramWeight = SEARCH_TRIGRAM_WEIGHT;
 
@@ -884,9 +893,13 @@ export class ToolSearchEngine {
     // engine disabled, or embeddings unavailable) — distinct from an empty
     // map, which means it participated but matched nothing.
     let vectorScores: Map<number, number> | null;
+    // Raw top BM25 score — returned to the caller so the quality tracker can
+    // measure the vector-eligible share of real traffic (a query is eligible
+    // when this stays below the skip threshold).
+    const topBm25Idx =
+      bm25Ranked.size > 0 ? [...bm25Ranked.entries()].find(([, r]) => r === 0)?.[0] : undefined;
+    const topBm25Score = topBm25Idx !== undefined ? scores[topBm25Idx]! : 0;
     if (SEARCH_VECTOR_BM25_SKIP_THRESHOLD > 0 && bm25Ranked.size > 0) {
-      const topBm25Idx = [...bm25Ranked.entries()].find(([, r]) => r === 0)?.[0];
-      const topBm25Score = topBm25Idx !== undefined ? scores[topBm25Idx]! : 0;
       vectorScores =
         topBm25Score >= SEARCH_VECTOR_BM25_SKIP_THRESHOLD
           ? null
@@ -937,6 +950,8 @@ export class ToolSearchEngine {
       fusedRrfScores[i] = rrfScore;
     }
     blendRrfIntoScores(scores, fusedRrfScores);
+
+    return { topBm25Score, vectorParticipated: vectorScores !== null };
   }
 
   // ── Dense vector search methods (Phase 8) ──
