@@ -6,10 +6,11 @@ import { handleElectronCheckFuses } from '@server/domains/platform/handlers/elec
 
 /** Build a minimal mock Electron .exe with the fuse sentinel embedded. */
 function buildMockElectronExe(fuseBytes: number[]): Buffer {
-  const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZIA', 'ascii');
+  const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX', 'ascii');
   const prefix = Buffer.alloc(256, 0x90); // NOP sled padding
-  const fuses = Buffer.from(fuseBytes);
-  return Buffer.concat([prefix, sentinel, fuses]);
+  // v2 wire: version(1) + length(1) precede the state bytes.
+  const wire = Buffer.from([1, fuseBytes.length, ...fuseBytes]);
+  return Buffer.concat([prefix, sentinel, wire]);
 }
 
 describe('electron_check_fuses', () => {

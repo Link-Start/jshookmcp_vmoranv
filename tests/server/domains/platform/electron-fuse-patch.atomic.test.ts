@@ -24,7 +24,7 @@ vi.mock('@server/domains/platform/handlers/platform-utils', () => ({
 }));
 
 function buildMockElectronExe(): Buffer {
-  const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZIA', 'ascii');
+  const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX', 'ascii');
   const prefix = Buffer.alloc(256, 0x90); // NOP sled padding
   return Buffer.concat([
     prefix,

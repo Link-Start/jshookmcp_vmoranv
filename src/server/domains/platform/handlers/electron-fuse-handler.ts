@@ -12,7 +12,9 @@ import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 /**
  * The Electron fuse sentinel string embedded in Electron binaries.
  */
-const FUSE_SENTINEL = 'dL7pKGdnNz796PbbjQWNKmHXBZIA';
+const FUSE_SENTINEL = 'dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX';
+/** @electron/fuses v2 wire: sentinel + version(1) + length(1) + state bytes. */
+const FUSE_WIRE_HEADER = 2;
 
 /** Fuse names in the order they appear after the sentinel. */
 const FUSE_NAMES = [
@@ -48,7 +50,8 @@ const DEBUG_PATCH_PROFILE: Partial<Record<FuseName, 'ENABLE' | 'DISABLE'>> = {
 };
 
 function parseFuses(buffer: Buffer, sentinelIndex: number): Record<string, string> {
-  const fuseDataStart = sentinelIndex + Buffer.from(FUSE_SENTINEL, 'ascii').length;
+  const fuseDataStart =
+    sentinelIndex + Buffer.from(FUSE_SENTINEL, 'ascii').length + FUSE_WIRE_HEADER;
   const fuses: Record<string, string> = {};
   for (let i = 0; i < FUSE_NAMES.length; i++) {
     const fuseName = FUSE_NAMES[i];
@@ -158,7 +161,7 @@ export async function handleElectronPatchFuses(
 
     // Read current state
     const fusesBefore = parseFuses(buffer, sentinelIndex);
-    const fuseDataStart = sentinelIndex + sentinelBuffer.length;
+    const fuseDataStart = sentinelIndex + sentinelBuffer.length + FUSE_WIRE_HEADER;
     const changes: Array<{ fuse: string; before: string; after: string }> = [];
 
     // Apply patches

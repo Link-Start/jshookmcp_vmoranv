@@ -9,10 +9,11 @@ import {
 
 /** Build a minimal mock Electron .exe with the fuse sentinel embedded. */
 function buildMockElectronExe(fuseBytes: number[]): Buffer {
-  const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZIA', 'ascii');
+  const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX', 'ascii');
   const prefix = Buffer.alloc(256, 0x90); // NOP sled padding
-  const fuses = Buffer.from(fuseBytes);
-  return Buffer.concat([prefix, sentinel, fuses]);
+  // v2 wire: version(1) + length(1) precede the state bytes.
+  const wire = Buffer.from([1, fuseBytes.length, ...fuseBytes]);
+  return Buffer.concat([prefix, sentinel, wire]);
 }
 
 type JsonPayload = Record<string, unknown>;
@@ -48,9 +49,9 @@ describe('electron_patch_fuses', () => {
 
     // Verify the binary was actually patched
     const patched = await readFile(exePath);
-    const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZIA', 'ascii');
+    const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX', 'ascii');
     const idx = patched.indexOf(sentinel);
-    const fuseStart = idx + sentinel.length;
+    const fuseStart = idx + sentinel.length + 2;
 
     // RunAsNode (idx 0) should now be ENABLE (0x31)
     expect(patched[fuseStart]).toBe(0x31);
@@ -71,9 +72,9 @@ describe('electron_patch_fuses', () => {
 
     const backup = await readFile(`${exePath}.bak`);
     // Backup should have the original DISABLE values
-    const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZIA', 'ascii');
+    const sentinel = Buffer.from('dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX', 'ascii');
     const idx = backup.indexOf(sentinel);
-    expect(backup[idx + sentinel.length]).toBe(0x30); // original DISABLE
+    expect(backup[idx + sentinel.length + 2]).toBe(0x30); // original DISABLE (state bytes follow the 2-byte v2 header)
   });
 
   it('should skip backup when createBackup=false', async () => {
