@@ -136,8 +136,10 @@ describe('SM4 — GB/T 32907 known-answer tests', () => {
       kInit.push((dvK.getUint32(i * 4, false) ^ (FK[i] ?? 0)) >>> 0);
     }
 
+    // Real ISA convention: Vn (typically == Vd) holds the FULL K window
+    // [K0,K1,K2,K3]; the instruction slides the window itself.
     const vd = v128le(kInit[0]!, kInit[1]!, kInit[2]!, kInit[3]!);
-    const vn = v128le(kInit[1]!, kInit[2]!, kInit[3]!, 0);
+    const vn = v128le(kInit[0]!, kInit[1]!, kInit[2]!, kInit[3]!);
     const vm = v128le(CK[0]!, CK[1]!, CK[2]!, CK[3]!);
     const rkLanes = lanesOfLe(sm4ekey(vd, vn, vm));
 
@@ -164,9 +166,9 @@ describe('SM4 — ARM ISA semantics (lane-wise)', () => {
   });
 
   it('SM4EKEY: sequential lanes — lane j+1 depends on lane j', () => {
-    // If Vn = Vd (both contain same K[0..3]), Vm = CK[0..3],
-    // then lane 0 uses K[0]^K[1]^K[2] (not matching the true formula).
-    // With Vn shifted, lane 0 uses the correct K[1]^K[2]^K[3].
+    // GB/T 32907 key expansion is sequential: K[i] = K[i-4] ⊕ T'(K[i-3] ⊕
+    // K[i-2] ⊕ K[i-1] ⊕ CK[i]). With the full K window in Vn, output lane j+1
+    // must consume output lane j (only lane 3 can be computed without them).
     const dvK = new DataView(SM4_KEY.buffer);
     const FK = [0xa3b1bac6, 0x56aa3350, 0x677d9197, 0xb27022dc];
     const CK = [0x00070e15, 0x1c232a31, 0x383f464d, 0x545b6269];
@@ -177,11 +179,32 @@ describe('SM4 — ARM ISA semantics (lane-wise)', () => {
     }
 
     const vd = v128le(kInit[0]!, kInit[1]!, kInit[2]!, kInit[3]!);
-    const vn = v128le(kInit[1]!, kInit[2]!, kInit[3]!, 0);
+    const vn = v128le(kInit[0]!, kInit[1]!, kInit[2]!, kInit[3]!);
     const vm = v128le(CK[0]!, CK[1]!, CK[2]!, CK[3]!);
     const lanes = lanesOfLe(sm4ekey(vd, vn, vm));
 
     // Output should match the expected round keys
+    for (let i = 0; i < 4; i++) {
+      expect(lanes[i]! >>> 0).toBe(SM4_FIRST4_RK[i]);
+    }
+  });
+
+  it('SM4EKEY takes the K window from Vn — Vd is not read', () => {
+    // ARM semantics: Vn supplies [K[i-4..i-1]] and Vd is write-only, so a Vd
+    // holding garbage must not change the derived round keys.
+    const dvK = new DataView(SM4_KEY.buffer);
+    const FK = [0xa3b1bac6, 0x56aa3350, 0x677d9197, 0xb27022dc];
+    const CK = [0x00070e15, 0x1c232a31, 0x383f464d, 0x545b6269];
+    const kInit: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      kInit.push((dvK.getUint32(i * 4, false) ^ (FK[i] ?? 0)) >>> 0);
+    }
+
+    const vd = v128le(0xdeadbeef, 0xcafebabe, 0, 0xffffffff);
+    const vn = v128le(kInit[0]!, kInit[1]!, kInit[2]!, kInit[3]!);
+    const vm = v128le(CK[0]!, CK[1]!, CK[2]!, CK[3]!);
+    const lanes = lanesOfLe(sm4ekey(vd, vn, vm));
+
     for (let i = 0; i < 4; i++) {
       expect(lanes[i]! >>> 0).toBe(SM4_FIRST4_RK[i]);
     }
@@ -332,7 +355,7 @@ describe('SM4 — instruction dispatch through CpuEngine', () => {
     }
 
     const vd = v128le(kInit[0]!, kInit[1]!, kInit[2]!, kInit[3]!);
-    const vn = v128le(kInit[1]!, kInit[2]!, kInit[3]!, 0);
+    const vn = v128le(kInit[0]!, kInit[1]!, kInit[2]!, kInit[3]!);
     const vm = v128le(CK[0]!, CK[1]!, CK[2]!, CK[3]!);
 
     const engine = runInsn(sm4ekeyI(0, 1, 2), [

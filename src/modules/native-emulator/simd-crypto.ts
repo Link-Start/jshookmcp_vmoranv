@@ -486,23 +486,24 @@ export function sm4e(vd: Uint8Array, vn: Uint8Array): Uint8Array<ArrayBuffer> {
 /**
  * SM4EKEY Vd.4S, Vn.4S, Vm.4S — 4 key-expansion rounds (sequential).
  *
- * Vd.4S = same as Vn — [K[i-4], K[i-3], K[i-2], K[i-1]] (BE stored LE in V reg)
+ * Vn.4S = [K[i-4], K[i-3], K[i-2], K[i-1]] (BE stored LE in V reg) — the
+ * sliding-window input; Vd is write-only per ARM semantics.
  * Vm.4S = [CK[i], CK[i+1], CK[i+2], CK[i+3]] (BE stored LE in V reg)
  * Returns [K[i], K[i+1], K[i+2], K[i+3]] (BE stored LE in V reg).
  *
- * Processed sequentially: lane j+1 consumes lane j's result for the rotation:
- * K[n] = K[n-4] ⊕ L'(τ(K[n-3] ⊕ K[n-2] ⊕ K[n-1] ⊕ CK[n-4]))
- * Vn lanes provide K[i-3], K[i-2], K[i-1] for the inner XOR.
+ * Processed sequentially, each round sliding the window forward so lane j+1
+ * consumes lane j's result (GB/T 32907 key expansion, see KAT in tests):
+ * K[n] = K[n-4] ⊕ L'(τ(K[n-3] ⊕ K[n-2] ⊕ K[n-1] ⊕ CK[n]))
  */
 export function sm4ekey(vd: Uint8Array, vn: Uint8Array, vm: Uint8Array): Uint8Array<ArrayBuffer> {
-  const [km4, km3, km2, km1] = lanes32(vd);
-  const [vn0, vn1, vn2] = lanes32(vn);
+  void vd; // write-only destination; parameter kept for signature stability
+  const [n0, n1, n2, n3] = lanes32(vn);
   const [ck0, ck1, ck2, ck3] = lanes32(vm);
 
-  const k0 = (km4 ^ sm4LPrime(sm4Tau((vn0 ^ vn1 ^ vn2 ^ ck0) >>> 0))) >>> 0;
-  const k1 = (km3 ^ sm4LPrime(sm4Tau((vn1 ^ vn2 ^ k0 ^ ck1) >>> 0))) >>> 0;
-  const k2 = (km2 ^ sm4LPrime(sm4Tau((vn2 ^ k0 ^ k1 ^ ck2) >>> 0))) >>> 0;
-  const k3 = (km1 ^ sm4LPrime(sm4Tau((k0 ^ k1 ^ k2 ^ ck3) >>> 0))) >>> 0;
+  const k0 = (n0 ^ sm4LPrime(sm4Tau((n1 ^ n2 ^ n3 ^ ck0) >>> 0))) >>> 0;
+  const k1 = (n1 ^ sm4LPrime(sm4Tau((k0 ^ n2 ^ n3 ^ ck1) >>> 0))) >>> 0;
+  const k2 = (n2 ^ sm4LPrime(sm4Tau((k0 ^ k1 ^ n3 ^ ck2) >>> 0))) >>> 0;
+  const k3 = (n3 ^ sm4LPrime(sm4Tau((k0 ^ k1 ^ k2 ^ ck3) >>> 0))) >>> 0;
 
   return packLanes(k0, k1, k2, k3);
 }
