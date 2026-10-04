@@ -20,21 +20,23 @@ Binary instrumentation domain providing binary analysis, runtime instrumentation
 - binary-instrument + memory
 - binary-instrument + process
 
-## Full tool list (44)
+## Full tool list (46)
 
 | Tool | Description |
 | --- | --- |
 | `binary_instrument_capabilities` | Report binary instrumentation backend availability. |
-| `frida_attach` | Attach Frida to a local target and open a session. |
-| `frida_spawn` | Spawn a target through Frida for early instrumentation before normal execution. |
+| `frida_attach` | Attach Frida to a target and open a session. Defaults to the local device; pass device+host for USB/remote devices. On Android the frida process name is the App Label (not the package name) — use frida_list_processes and attach by pid to avoid name mismatches. |
+| `frida_spawn` | Spawn a target through Frida for early instrumentation before normal execution. Until frida_resume succeeds, every tool call on a spawn session re-spawns the target (restarts the app on remote Android). |
 | `frida_enumerate_modules` | List loaded modules in an attached Frida session. |
 | `ghidra_analyze` | Analyze a binary and return metadata. |
 | `generate_hooks` | Generate a Frida interceptor script for a list of symbols. |
 | `unidbg_emulate` | Emulate a native function with Unidbg when available. |
-| `frida_run_script` | Execute a Frida JavaScript snippet inside an attached Frida session. Pass async:true to run in a background task (MCP 2.0 Tasks) and poll with tasks_get/tasks_result — useful for long-running or persistent instrumentation scripts that would otherwise hit the CLI timeout. |
+| `frida_run_script` | Execute a Frida JavaScript snippet inside an attached Frida session. Each call spawns a fresh frida CLI, so hooks do NOT survive the call — for persistent hooks that must stay alive while you interact with the target, pass async:true to run in a background task (MCP 2.0 Tasks) and poll with tasks_get/tasks_result until the workflow is done. |
 | `frida_resume` | Resume a target previously spawned for early Frida instrumentation. |
 | `frida_detach` | Detach from a Frida session and clean up resources. |
 | `frida_list_sessions` | List all active Frida attach sessions with target info. |
+| `frida_list_devices` | List frida-visible devices (local, USB, remote) via frida-ls-devices. Use the returned id with frida_attach device=id, or connect directly with device=remote + host. |
+| `frida_list_processes` | List processes on a Frida device via frida-ps (defaults to the local device; pass device+host for USB/remote). On Android the process name is the App Label, not the package name — attach by the returned pid. |
 | `frida_dex_dump` | Run frida-dexdump as a high-level Android DEX dump helper by package/process name or PID. |
 | `android_runtime_dump_session` | Create or inspect a managed Android runtime dump session from Frida/ADB dump artifacts, DEX files, and /proc/PID/maps snapshots. |
 | `frida_generate_script` | Generate a Frida interceptor or hook script from built-in templates. |

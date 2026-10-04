@@ -20,7 +20,7 @@
 - binary-instrument + memory
 - binary-instrument + process
 
-## 工具清单（44）
+## 工具清单（46）
 
 | 工具 | 说明 |
 | --- | --- |
@@ -35,6 +35,8 @@
 | `frida_resume` | 恢复先前由 frida_spawn 暂停的目标进程。典型流程是先 spawn、安装早期 hook，再用该工具释放进程继续运行。 |
 | `frida_detach` | 从 Frida 会话分离并清理资源。 |
 | `frida_list_sessions` | 列出所有活跃的 Frida 会话。 |
+| `frida_list_devices` | 待补充中文：List frida-visible devices (local, USB, remote) via frida-ls-devices. Use the returned id with frida_attach device=id, or connect directly with device=remote + host. |
+| `frida_list_processes` | 待补充中文：List processes on a Frida device via frida-ps (defaults to the local device; pass device+host for USB/remote). On Android the process name is the App Label, not the package name — attach by the returned pid. |
 | `frida_dex_dump` | 以包名/进程名或 PID 运行 frida-dexdump，作为高层 Android DEX dump 助手。 |
 | `android_runtime_dump_session` | 创建或检查托管的 Android 运行时 dump 会话，基于 Frida/ADB dump 产物、DEX 文件与 /proc/PID/maps 快照。 |
 | `frida_generate_script` | 从模板（trace、intercept、replace、log）生成 Frida 拦截脚本。 |
