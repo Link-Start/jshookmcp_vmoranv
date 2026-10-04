@@ -273,7 +273,10 @@ export function analyzeHttpResponse(
     if (!(name in headers)) {
       headers[name] = value;
     } else if (name.toLowerCase() === 'set-cookie') {
-      headers[name] = `${headers[name]}, ${value}`;
+      // RFC 6265: a Set-Cookie value may itself contain commas, so multiple
+      // Set-Cookie headers must NOT be comma-joined — newline-join them so
+      // consumers can split per cookie without corrupting values.
+      headers[name] = `${headers[name]}\n${value}`;
     } else {
       headers[name] = `${headers[name]}, ${value}`;
     }

@@ -357,13 +357,24 @@ describe('network http-raw analyzeHttpResponse', () => {
     expect(parsed!.headers['X-Foo']).toBe('a, b');
   });
 
-  it('coalesces set-cookie headers', async () => {
+  it('newline-joins set-cookie headers (RFC 6265: commas are legal in cookie values)', async () => {
     const raw = Buffer.from(
       'HTTP/1.1 200 OK\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\n\r\n',
       'utf8',
     );
     const parsed = analyzeHttpResponse(raw);
-    expect(parsed!.headers['Set-Cookie']).toBe('a=1, b=2');
+    expect(parsed!.headers['Set-Cookie']).toBe('a=1\nb=2');
+  });
+
+  it('preserves commas inside a single set-cookie value', async () => {
+    const raw = Buffer.from(
+      'HTTP/1.1 200 OK\r\nSet-Cookie: a="1,2"\r\nSet-Cookie: b=3\r\n\r\n',
+      'utf8',
+    );
+    const parsed = analyzeHttpResponse(raw);
+    // Comma-joining would have corrupted the first value; newline-joining
+    // keeps '1,2' intact and the two cookies separable.
+    expect(parsed!.headers['Set-Cookie']).toBe('a="1,2"\nb=3');
   });
 
   it('skips header lines with no colon separator', async () => {

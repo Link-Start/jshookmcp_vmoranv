@@ -61,11 +61,16 @@ function headersToHar(
 }
 
 function parseCookies(cookieHeader: string): Array<{ name: string; value: string }> {
-  return cookieHeader.split(';').map((part) => {
-    const eq = part.indexOf('=');
-    if (eq === -1) return { name: part.trim(), value: '' };
-    return { name: part.slice(0, eq).trim(), value: part.slice(eq + 1).trim() };
-  });
+  // http-raw joins multiple Set-Cookie headers with \n (RFC 6265: commas are
+  // legal inside cookie values, so comma-joining destroys boundaries). Split
+  // on \n first, then parse each cookie's attributes.
+  return cookieHeader.split('\n').flatMap((line) =>
+    line.split(';').map((part) => {
+      const eq = part.indexOf('=');
+      if (eq === -1) return { name: part.trim(), value: '' };
+      return { name: part.slice(0, eq).trim(), value: part.slice(eq + 1).trim() };
+    }),
+  );
 }
 
 function queryStringFromUrl(url: string): Array<{ name: string; value: string }> {
