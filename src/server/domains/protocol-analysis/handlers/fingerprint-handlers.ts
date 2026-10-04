@@ -78,9 +78,11 @@ export class ProtocolAnalysisFingerprintHandlers extends ProtocolAnalysisPacketH
             headerBytes = 4;
           } else if (payloadLen === 127) {
             if (wsByteCount < 10) return false;
-            const hi32 = (readU16(clean, 2) << 16) | readU16(clean, 4);
-            const lo32 = (readU16(clean, 6) << 16) | readU16(clean, 8);
-            payloadLen = hi32 > 0 ? 0xffffffff : lo32;
+            // Signed 32-bit reads make hi32 negative when the sign bit is
+            // set; compare unsigned and reject >4GiB frames outright.
+            const hi32 = ((readU16(clean, 2) << 16) | readU16(clean, 4)) >>> 0;
+            if (hi32 > 0) return false;
+            payloadLen = (readU16(clean, 6) << 16) | readU16(clean, 8);
             headerBytes = 10;
           }
 

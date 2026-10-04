@@ -177,6 +177,17 @@ describe('ProtocolAnalysisHandlers — handleProtoFingerprint behavioral tests',
       }
     });
 
+    it('rejects 127 frame with >4GiB 64-bit length (signed hi32 overflow)', async () => {
+      // 64-bit length 0xFFFFFFFF00000005: hi32 = 0xFFFFFFFF (sign bit set).
+      // Signed 32-bit reads produce -1, so the old code fell back to lo32 (5)
+      // and false-positive matched this 20-byte frame.
+      const ws = '81ffffffffff00000005aaaaaaaabbbbbbbbcccc';
+      const res = await handlers.handleProtoFingerprint({ hexPayloads: [ws] });
+      const json = parseContent(res);
+      const fp = json.fingerprints[0];
+      expect(fp.protocolMatches.some((m: any) => m.protocol === 'WebSocket')).toBe(false);
+    });
+
     it('detects frame with RSV1=1 (permessage-deflate)', async () => {
       const ws = 'c10448656c6c';
       const res = await handlers.handleProtoFingerprint({ hexPayloads: [ws] });
