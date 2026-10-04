@@ -75,20 +75,20 @@ describe('memoryUtils', () => {
     ]);
   });
 
-  it('startMonitor', () => {
-    memoryUtils.startMonitor(1234, '0x1', 4, 1000, noopCb);
-    expect(mockManagerInstances[0].startMemoryMonitor).toHaveBeenCalledWith(
-      1234,
-      '0x1',
-      4,
-      1000,
-      noopCb,
-    );
-  });
+  it('startMonitor and stopMonitor share a single MemoryManager instance', async () => {
+    // The monitor registry is scoped to a MemoryManager instance — start/stop
+    // must go through the same instance or stopMonitor can never find (and
+    // stop) a monitor started by startMonitor.
+    const utils = await import('../../../src/modules/process/memoryUtils');
+    const before = mockManagerInstances.length;
 
-  it('stopMonitor', () => {
-    memoryUtils.stopMonitor('monitor-1');
-    expect(mockManagerInstances[0].stopMemoryMonitor).toHaveBeenCalledWith('monitor-1');
+    utils.startMonitor(1234, '0x1', 4, 1000, noopCb);
+    utils.stopMonitor('monitor-1');
+
+    expect(mockManagerInstances.length).toBe(before + 1);
+    const shared = mockManagerInstances[mockManagerInstances.length - 1]!;
+    expect(shared.startMemoryMonitor).toHaveBeenCalledWith(1234, '0x1', 4, 1000, noopCb);
+    expect(shared.stopMemoryMonitor).toHaveBeenCalledWith('monitor-1');
   });
 
   it('injectDll', async () => {

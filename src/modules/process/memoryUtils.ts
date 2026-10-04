@@ -51,6 +51,11 @@ export async function batchWrite(
 
 // Monitoring (returns monitor ID). Defaults (size=4, intervalMs=1000) are
 // owned by MemoryMonitorManager — pass through so they cannot drift.
+// The monitor registry is scoped to a MemoryManager instance, so start/stop
+// must share one lazily-created instance or stopMonitor() can never find
+// (and stop) a monitor started by startMonitor().
+let sharedMonitorManager: MemoryManager | null = null;
+
 export function startMonitor(
   pid: number,
   address: string,
@@ -58,13 +63,13 @@ export function startMonitor(
   intervalMs?: number,
   onChange?: (oldValue: string, newValue: string) => void,
 ) {
-  const manager = new MemoryManager();
-  return manager.startMemoryMonitor(pid, address, size, intervalMs, onChange);
+  sharedMonitorManager ??= new MemoryManager();
+  return sharedMonitorManager.startMemoryMonitor(pid, address, size, intervalMs, onChange);
 }
 
 export function stopMonitor(monitorId: string) {
-  const manager = new MemoryManager();
-  return manager.stopMemoryMonitor(monitorId);
+  sharedMonitorManager ??= new MemoryManager();
+  return sharedMonitorManager.stopMemoryMonitor(monitorId);
 }
 
 // Injection
