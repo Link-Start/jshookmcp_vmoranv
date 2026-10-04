@@ -27,6 +27,8 @@ const registrations = defineMethodRegistrations<H, (typeof binaryInstrumentTools
     { tool: 'frida_resume', method: 'handleFridaResume' },
     { tool: 'frida_detach', method: 'handleFridaDetach' },
     { tool: 'frida_list_sessions', method: 'handleFridaListSessions' },
+    { tool: 'frida_list_devices', method: 'handleFridaListDevices' },
+    { tool: 'frida_list_processes', method: 'handleFridaListProcesses' },
     { tool: 'frida_dex_dump', method: 'handleFridaDexDump' },
     { tool: 'android_runtime_dump_session', method: 'handleAndroidRuntimeDumpSession' },
     { tool: 'frida_generate_script', method: 'handleFridaGenerateScript' },
@@ -148,6 +150,8 @@ const manifest = {
       'android_runtime_dump_session',
       'binary_strings_extract',
       'apk_native_libs_list',
+      'frida_list_devices',
+      'frida_list_processes',
       'frida_attach',
       'frida_spawn',
       'frida_attach_interceptor',
@@ -176,6 +180,18 @@ const manifest = {
       {
         condition: 'A Frida session must be active',
         fix: 'Call frida_attach before running a script',
+      },
+    ],
+    frida_list_devices: [
+      {
+        condition: 'frida-ls-devices CLI must be installed (part of frida-tools)',
+        fix: 'Install frida-tools (pip install frida-tools) and ensure frida-ls-devices is on PATH.',
+      },
+    ],
+    frida_list_processes: [
+      {
+        condition: 'frida-ps CLI must be installed (part of frida-tools)',
+        fix: 'Install frida-tools (pip install frida-tools) and ensure frida-ps is on PATH.',
       },
     ],
     frida_resume: [

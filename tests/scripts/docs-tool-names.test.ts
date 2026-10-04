@@ -58,14 +58,6 @@ const BACKTICK_SNAKE_CASE_PATTERN = /`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)`/g;
  */
 const NON_TOOL_TOKENS: ReadonlyMap<string, string> = new Map<string, string>([
   [
-    'frida_list_devices',
-    'planned tool in the frida-remote-device-support design proposal (docs/analysis), not yet implemented',
-  ],
-  [
-    'frida_list_processes',
-    'planned tool in the frida-remote-device-support design proposal (docs/analysis), not yet implemented',
-  ],
-  [
     'anti_bot_diagnoser',
     'workflow id — installed via install_extension("workflow:<id>"), not a tool',
   ],

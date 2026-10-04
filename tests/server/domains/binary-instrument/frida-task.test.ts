@@ -2,9 +2,19 @@ import { describe, expect, it, vi } from 'vitest';
 import { R } from '@server/domains/shared/ResponseBuilder';
 import { FridaHandlers } from '@server/domains/binary-instrument/handlers/frida-handlers';
 import type { BinaryInstrumentState } from '@server/domains/binary-instrument/handlers/shared';
+import { FridaSession as RealFridaSession } from '@modules/binary-instrument';
 import type { FridaSession } from '@modules/binary-instrument';
+import { probeCommand } from '@modules/external/ToolProbe';
 import { TaskManager } from '@server/tasks/TaskManager';
 import type { MCPServerContext } from '@server/MCPServer.context';
+
+vi.mock('@modules/external/ToolProbe', () => ({
+  probeCommand: vi.fn(),
+}));
+
+vi.mock('node:child_process', () => ({
+  execFile: vi.fn(),
+}));
 
 function parse(res: unknown): Record<string, unknown> {
   return R.parse<Record<string, unknown>>(res as Parameters<typeof R.parse>[0]);
@@ -194,5 +204,57 @@ describe('FridaHandlers — task mode (MCP 2.0 Tasks retrofit)', () => {
     expect(res.available).toBe(false);
     expect(res.taskId).toBeUndefined();
     expect(tm.listTasks()).toHaveLength(0);
+  });
+});
+
+describe('FridaHandlers — remote device task mode', () => {
+  it('frida_run_script async task inherits the session device args', async () => {
+    vi.clearAllMocks();
+    vi.mocked(probeCommand).mockResolvedValue({
+      available: true,
+      path: 'frida',
+      version: '17.12.0',
+      reason: undefined,
+    } as Awaited<ReturnType<typeof probeCommand>>);
+    const { execFile } = await import('node:child_process');
+    vi.mocked(execFile).mockImplementation(((
+      _file: string,
+      _args: readonly string[] | null | undefined,
+      _opts: unknown,
+      cb?: ((error: Error | null, stdout: string, stderr: string) => void) | null,
+    ) => {
+      cb?.(null, 'script_output', '');
+      return {} as never;
+    }) as unknown as typeof execFile);
+
+    const tm = new TaskManager();
+    const session = new RealFridaSession();
+    const handlers = new FridaHandlers(makeState(tm, session));
+
+    const sessionId = await session.attach('HyperCeiler', {
+      type: 'remote',
+      host: '192.168.1.11:27042',
+    });
+    const res = parse(
+      await handlers.handleFridaRunScript({
+        sessionId,
+        script: 'console.log(Process.id)',
+        async: true,
+      } as Record<string, unknown>),
+    );
+
+    expect(res.success).toBe(true);
+    expect(res.async).toBe(true);
+    // The real-session executor chain spans several microtask hops
+    // (availability probe → execFile promise); drain before asserting.
+    let payload = tm.getTaskPayload<{ output: string }>(res.taskId as string);
+    for (let i = 0; i < 50 && payload?.status === 'working'; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+      payload = tm.getTaskPayload<{ output: string }>(res.taskId as string);
+    }
+    expect(payload?.status).toBe('completed');
+    expect(payload?.result?.output).toBe('script_output');
+    const args = (vi.mocked(execFile).mock.calls.at(-1)?.[1] ?? []) as string[];
+    expect(args.slice(0, 2)).toEqual(['-H', '192.168.1.11:27042']);
   });
 });

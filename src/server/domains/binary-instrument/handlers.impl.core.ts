@@ -99,6 +99,14 @@ export class BinaryInstrumentHandlers {
   handleFridaResume(args: Record<string, unknown>) {
     return this.fridaSession.handleFridaResume(args);
   }
+
+  handleFridaListDevices(args: Record<string, unknown>) {
+    return this.fridaSession.handleFridaListDevices(args);
+  }
+
+  handleFridaListProcesses(args: Record<string, unknown>) {
+    return this.fridaSession.handleFridaListProcesses(args);
+  }
   handleFridaDetach(args: Record<string, unknown>) {
     return this.fridaSession.handleFridaDetach(args);
   }

@@ -254,6 +254,8 @@ export const GENERATED_TOOL_DOMAIN_MAP: Readonly<Record<string, string>> = {
   frida_enumerate_modules: 'binary-instrument',
   frida_find_symbols: 'binary-instrument',
   frida_generate_script: 'binary-instrument',
+  frida_list_devices: 'binary-instrument',
+  frida_list_processes: 'binary-instrument',
   frida_list_sessions: 'binary-instrument',
   frida_memory_read: 'binary-instrument',
   frida_memory_scan: 'binary-instrument',

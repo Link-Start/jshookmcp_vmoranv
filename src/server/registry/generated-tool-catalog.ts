@@ -9182,16 +9182,30 @@ export const GENERATED_TOOL_CATALOG = [
   {
     tool: {
       name: 'frida_attach',
-      description: 'Attach Frida to a local target and open a session.',
+      description:
+        'Attach Frida to a target and open a session. Defaults to the local device; pass device+host for USB/remote devices. On Android the frida process name is the App Label (not the package name) — use frida_list_processes and attach by pid to avoid name mismatches.',
       inputSchema: {
         type: 'object',
         properties: {
           target: {
             type: 'string',
-            description: 'Process name, PID, or binary path to attach to',
+            description: 'Process name, PID, or binary path to attach to (omit when pid is given)',
+          },
+          device: {
+            type: 'string',
+            enum: ['local', 'usb', 'remote', 'id'],
+            description: 'Frida device: local (default) / usb (-U) / remote (-H host) / id (-D id)',
+          },
+          host: {
+            type: 'string',
+            description: 'Device host:port when device=remote, e.g. 192.168.1.11:27042',
+          },
+          pid: {
+            type: 'number',
+            description:
+              'Attach by process id — bypasses App Label name mismatches on Android devices',
           },
         },
-        required: ['target'],
       },
       annotations: {
         readOnlyHint: false,
@@ -9302,9 +9316,19 @@ export const GENERATED_TOOL_CATALOG = [
             type: 'string',
             description: 'Required output directory for dumped DEX files.',
           },
+          device: {
+            type: 'string',
+            enum: ['local', 'usb', 'remote', 'id'],
+            description:
+              'Device to dump from: local (no flag) / usb (-U) / remote (-H host) / id (-D id). Overrides the usb boolean when provided.',
+          },
+          host: {
+            type: 'string',
+            description: 'Device host:port when device=remote, e.g. 192.168.1.11:27042',
+          },
           usb: {
             type: 'boolean',
-            description: 'Use USB device mode (-U).',
+            description: 'Use USB device mode (-U). Ignored when device is provided.',
             default: true,
           },
           timeoutMs: {
@@ -9458,6 +9482,52 @@ export const GENERATED_TOOL_CATALOG = [
   },
   {
     tool: {
+      name: 'frida_list_devices',
+      description:
+        'List frida-visible devices (local, USB, remote) via frida-ls-devices. Use the returned id with frida_attach device=id, or connect directly with device=remote + host.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    domain: 'binary-instrument',
+  },
+  {
+    tool: {
+      name: 'frida_list_processes',
+      description:
+        'List processes on a Frida device via frida-ps (defaults to the local device; pass device+host for USB/remote). On Android the process name is the App Label, not the package name — attach by the returned pid.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          device: {
+            type: 'string',
+            enum: ['local', 'usb', 'remote', 'id'],
+            description: 'Frida device: local (default) / usb (-U) / remote (-H host) / id (-D id)',
+          },
+          host: {
+            type: 'string',
+            description: 'Device host:port when device=remote, e.g. 192.168.1.11:27042',
+          },
+        },
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    domain: 'binary-instrument',
+  },
+  {
+    tool: {
       name: 'frida_list_sessions',
       description: 'List all active Frida attach sessions with target info.',
       inputSchema: {
@@ -9588,7 +9658,7 @@ export const GENERATED_TOOL_CATALOG = [
     tool: {
       name: 'frida_run_script',
       description:
-        'Execute a Frida JavaScript snippet inside an attached Frida session. Pass async:true to run in a background task (MCP 2.0 Tasks) and poll with tasks_get/tasks_result — useful for long-running or persistent instrumentation scripts that would otherwise hit the CLI timeout.',
+        'Execute a Frida JavaScript snippet inside an attached Frida session. Each call spawns a fresh frida CLI, so hooks do NOT survive the call — for persistent hooks that must stay alive while you interact with the target, pass async:true to run in a background task (MCP 2.0 Tasks) and poll with tasks_get/tasks_result until the workflow is done.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -9627,13 +9697,22 @@ export const GENERATED_TOOL_CATALOG = [
     tool: {
       name: 'frida_spawn',
       description:
-        'Spawn a target through Frida for early instrumentation before normal execution.',
+        'Spawn a target through Frida for early instrumentation before normal execution. Until frida_resume succeeds, every tool call on a spawn session re-spawns the target (restarts the app on remote Android).',
       inputSchema: {
         type: 'object',
         properties: {
           target: {
             type: 'string',
             description: 'Package name or binary path to spawn with Frida -f',
+          },
+          device: {
+            type: 'string',
+            enum: ['local', 'usb', 'remote', 'id'],
+            description: 'Frida device: local (default) / usb (-U) / remote (-H host) / id (-D id)',
+          },
+          host: {
+            type: 'string',
+            description: 'Device host:port when device=remote, e.g. 192.168.1.11:27042',
           },
         },
         required: ['target'],

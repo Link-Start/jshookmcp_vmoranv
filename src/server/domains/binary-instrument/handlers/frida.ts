@@ -5,6 +5,7 @@
 import { execFile } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { ToolError } from '@errors/ToolError';
+import { fridaDeviceArgs, type FridaDevice } from '@modules/binary-instrument';
 import { getReverseEngineeringConfig } from '@utils/reverseEngineeringConfig';
 import { probeCommand } from '@modules/external/ToolProbe';
 import {
@@ -12,6 +13,7 @@ import {
   readOptionalString,
   readOptionalNumber,
   readOptionalBoolean,
+  resolveFridaDevice,
   jsonResponse,
 } from './shared';
 
@@ -36,8 +38,15 @@ export class FridaHandlers {
       });
     }
     await mkdir(outputDir, { recursive: true });
-    const dexArgs: string[] = [];
-    if (usb) dexArgs.push('-U');
+    // Device precedence: an explicit device arg wins; otherwise fall back to
+    // the legacy usb boolean (default true → -U) for backward compatibility.
+    const resolvedDevice = resolveFridaDevice(args);
+    if (resolvedDevice && 'error' in resolvedDevice) {
+      throw new ToolError('VALIDATION', resolvedDevice.error);
+    }
+    const device: FridaDevice = resolvedDevice ?? (usb ? { type: 'usb' } : { type: 'local' });
+
+    const dexArgs: string[] = [...fridaDeviceArgs(device)];
     if (pid) dexArgs.push('-p', String(pid));
     else if (target) dexArgs.push('-n', target);
     dexArgs.push('-o', outputDir);
@@ -84,6 +93,7 @@ export class FridaHandlers {
       success,
       target,
       pid,
+      device,
       outputDir,
       dumpedFiles,
       count: dumpedFiles.length,

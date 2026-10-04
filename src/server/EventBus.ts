@@ -274,8 +274,18 @@ export interface ServerEventMap {
     timestamp: string;
   };
   'skia:scene_captured': { canvasId: string; nodeCount: number; timestamp: string };
-  'frida:attached': { target: string; sessionId: string; timestamp: string };
-  'frida:spawned': { target: string; sessionId: string; timestamp: string };
+  'frida:attached': {
+    target: string;
+    sessionId: string;
+    device?: { type: 'local' | 'usb' | 'remote' | 'id'; host?: string; id?: string };
+    timestamp: string;
+  };
+  'frida:spawned': {
+    target: string;
+    sessionId: string;
+    device?: { type: 'local' | 'usb' | 'remote' | 'id'; host?: string; id?: string };
+    timestamp: string;
+  };
   'adb:device_connected': { serial: string; model: string; timestamp: string };
   'mojo:message_captured': { messageCount: number; timestamp: string };
   'syscall:trace_started': { backend: string; pid?: number; simulate?: boolean; timestamp: string };

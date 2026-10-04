@@ -3,12 +3,16 @@
  * enumerateModules, enumerateFunctions, findSymbols.
  */
 
-import { FridaSession } from '@modules/binary-instrument';
+import { FridaSession, type FridaDevice } from '@modules/binary-instrument';
+import { PrerequisiteError } from '@errors/PrerequisiteError';
+import { getReverseEngineeringConfig } from '@utils/reverseEngineeringConfig';
 import type { BinaryInstrumentState } from './shared';
 import {
   readRequiredString,
   readOptionalString,
+  readOptionalNumber,
   readOptionalBoolean,
+  resolveFridaDevice,
   jsonResponse,
   textResponse,
   getLegacyPluginStatus,
@@ -53,13 +57,27 @@ export class FridaHandlers {
   }
 
   async handleFridaAttach(args: Record<string, unknown>): Promise<unknown> {
-    const legacyPid = readOptionalString(args, 'pid');
     const explicitTarget = readOptionalString(args, 'target');
-    if (!explicitTarget && legacyPid) {
-      return invokeLegacyPlugin(this.state.context, 'plugin_frida_bridge', 'frida_attach', args);
+    const pid = readOptionalNumber(args, 'pid');
+    if (!explicitTarget && pid === undefined) {
+      return textResponse('Either target or pid is required for frida_attach');
     }
 
-    const target = readRequiredString(args, 'target');
+    // pid wins over target: on remote Android the frida process name is the
+    // App Label (not the package name), so attaching by pid avoids mismatches.
+    const target = pid !== undefined ? String(pid) : (explicitTarget as string);
+
+    const resolvedDevice = resolveFridaDevice(args);
+    if (resolvedDevice && 'error' in resolvedDevice) {
+      return jsonResponse({
+        success: false,
+        available: true,
+        reason: resolvedDevice.error,
+        target,
+      });
+    }
+    const device: FridaDevice = resolvedDevice ?? { type: 'local' };
+
     const frida = this.getFridaSession();
     const availability = await frida.getAvailability();
 
@@ -74,9 +92,13 @@ export class FridaHandlers {
       });
     }
 
+    // Remote first-packet handshakes are slower than local injection.
+    const probeTimeoutMs =
+      device.type === 'local' ? undefined : getReverseEngineeringConfig().frida.remoteTimeoutMs;
+
     let sessionId: string;
     try {
-      sessionId = await frida.attach(target);
+      sessionId = await frida.attach(target, device, probeTimeoutMs);
     } catch (error) {
       return jsonResponse({
         success: false,
@@ -84,6 +106,7 @@ export class FridaHandlers {
         capability: 'frida_attach',
         fix: 'Run the server elevated or choose a target process that allows Frida injection.',
         target,
+        device,
         reason: error instanceof Error ? error.message : String(error),
         sessions: frida.listSessions(),
       });
@@ -92,12 +115,14 @@ export class FridaHandlers {
     void this.state.context?.eventBus.emit('frida:attached', {
       target,
       sessionId,
+      device,
       timestamp: new Date().toISOString(),
     });
     return jsonResponse({
       success: true,
       available: true,
       target,
+      device,
       sessionId,
       sessions: frida.listSessions(),
     });
@@ -105,6 +130,17 @@ export class FridaHandlers {
 
   async handleFridaSpawn(args: Record<string, unknown>): Promise<unknown> {
     const target = readRequiredString(args, 'target');
+    const resolvedDevice = resolveFridaDevice(args);
+    if (resolvedDevice && 'error' in resolvedDevice) {
+      return jsonResponse({
+        success: false,
+        available: true,
+        reason: resolvedDevice.error,
+        target,
+      });
+    }
+    const device: FridaDevice = resolvedDevice ?? { type: 'local' };
+
     const frida = this.getFridaSession();
     const availability = await frida.getAvailability();
 
@@ -119,9 +155,13 @@ export class FridaHandlers {
       });
     }
 
+    // Remote first-packet handshakes are slower than local spawn probes.
+    const probeTimeoutMs =
+      device.type === 'local' ? undefined : getReverseEngineeringConfig().frida.remoteTimeoutMs;
+
     let sessionId: string;
     try {
-      sessionId = await frida.spawn(target);
+      sessionId = await frida.spawn(target, device, probeTimeoutMs);
     } catch (error) {
       return jsonResponse({
         success: false,
@@ -129,6 +169,7 @@ export class FridaHandlers {
         capability: 'frida_spawn',
         fix: 'Confirm the package or executable exists and that Frida has spawn privileges.',
         target,
+        device,
         reason: error instanceof Error ? error.message : String(error),
         sessions: frida.listSessions(),
       });
@@ -137,12 +178,14 @@ export class FridaHandlers {
     void this.state.context?.eventBus.emit('frida:spawned', {
       target,
       sessionId,
+      device,
       timestamp: new Date().toISOString(),
     });
     return jsonResponse({
       success: true,
       available: true,
       target,
+      device,
       sessionId,
       mode: 'spawn',
       resumed: false,
@@ -363,6 +406,59 @@ export class FridaHandlers {
       'frida_list_sessions',
       _args,
     );
+  }
+
+  async handleFridaListDevices(_args: Record<string, unknown>): Promise<unknown> {
+    const frida = this.getFridaSession();
+    const { deviceProbeTimeoutMs } = getReverseEngineeringConfig().frida;
+
+    try {
+      const devices = await frida.listDevices(deviceProbeTimeoutMs);
+      return jsonResponse({ success: true, available: true, devices, count: devices.length });
+    } catch (error) {
+      return this.listingFailure(error, 'frida-ls-devices');
+    }
+  }
+
+  async handleFridaListProcesses(args: Record<string, unknown>): Promise<unknown> {
+    const resolvedDevice = resolveFridaDevice(args);
+    if (resolvedDevice && 'error' in resolvedDevice) {
+      return jsonResponse({ success: false, available: true, reason: resolvedDevice.error });
+    }
+    const device: FridaDevice = resolvedDevice ?? { type: 'local' };
+
+    const frida = this.getFridaSession();
+    const { deviceProbeTimeoutMs } = getReverseEngineeringConfig().frida;
+
+    try {
+      const processes = await frida.listProcesses(device, deviceProbeTimeoutMs);
+      return jsonResponse({
+        success: true,
+        available: true,
+        device,
+        processes,
+        count: processes.length,
+      });
+    } catch (error) {
+      return this.listingFailure(error, 'frida-ps');
+    }
+  }
+
+  /**
+   * Uniform failure envelope for the listing tools: PrerequisiteError (CLI
+   * missing) gets an install fix hint; ToolError (connection/runtime) is
+   * reported as available with the underlying reason.
+   */
+  private listingFailure(error: unknown, capability: string): unknown {
+    return jsonResponse({
+      success: false,
+      available: !(error instanceof PrerequisiteError),
+      capability,
+      ...(error instanceof PrerequisiteError
+        ? { fix: 'Install frida-tools (pip install frida-tools) and ensure the CLI is on PATH.' }
+        : {}),
+      reason: error instanceof Error ? error.message : String(error),
+    });
   }
 
   async handleFridaGenerateScript(args: Record<string, unknown>): Promise<unknown> {

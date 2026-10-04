@@ -19,15 +19,34 @@ export const binaryInstrumentTools: Tool[] = [
   ),
   tool('frida_attach', (t) =>
     t
-      .desc('Attach Frida to a local target and open a session.')
-      .string('target', 'Process name, PID, or binary path to attach to')
-      .required('target'),
+      .desc(
+        'Attach Frida to a target and open a session. Defaults to the local device; pass device+host for USB/remote devices. On Android the frida process name is the App Label (not the package name) — use frida_list_processes and attach by pid to avoid name mismatches.',
+      )
+      .string('target', 'Process name, PID, or binary path to attach to (omit when pid is given)')
+      .enum(
+        'device',
+        ['local', 'usb', 'remote', 'id'],
+        'Frida device: local (default) / usb (-U) / remote (-H host) / id (-D id)',
+      )
+      .string('host', 'Device host:port when device=remote, e.g. 192.168.1.11:27042')
+      .number(
+        'pid',
+        'Attach by process id — bypasses App Label name mismatches on Android devices',
+      ),
   ),
   tool('frida_spawn', (t) =>
     t
-      .desc('Spawn a target through Frida for early instrumentation before normal execution.')
+      .desc(
+        'Spawn a target through Frida for early instrumentation before normal execution. Until frida_resume succeeds, every tool call on a spawn session re-spawns the target (restarts the app on remote Android).',
+      )
       .string('target', 'Package name or binary path to spawn with Frida -f')
-      .required('target'),
+      .required('target')
+      .enum(
+        'device',
+        ['local', 'usb', 'remote', 'id'],
+        'Frida device: local (default) / usb (-U) / remote (-H host) / id (-D id)',
+      )
+      .string('host', 'Device host:port when device=remote, e.g. 192.168.1.11:27042'),
   ),
   tool('frida_enumerate_modules', (t) =>
     t
@@ -71,9 +90,7 @@ export const binaryInstrumentTools: Tool[] = [
   tool('frida_run_script', (t) =>
     t
       .desc(
-        'Execute a Frida JavaScript snippet inside an attached Frida session. Pass async:true to run in a ' +
-          'background task (MCP 2.0 Tasks) and poll with tasks_get/tasks_result — useful for long-running or ' +
-          'persistent instrumentation scripts that would otherwise hit the CLI timeout.',
+        'Execute a Frida JavaScript snippet inside an attached Frida session. Each call spawns a fresh frida CLI, so hooks do NOT survive the call — for persistent hooks that must stay alive while you interact with the target, pass async:true to run in a background task (MCP 2.0 Tasks) and poll with tasks_get/tasks_result until the workflow is done.',
       )
       .string('sessionId', 'Session id returned by frida_attach')
       .string('script', 'Frida JavaScript to execute')
@@ -103,6 +120,26 @@ export const binaryInstrumentTools: Tool[] = [
   tool('frida_list_sessions', (t) =>
     t.desc('List all active Frida attach sessions with target info.').query(),
   ),
+  tool('frida_list_devices', (t) =>
+    t
+      .desc(
+        'List frida-visible devices (local, USB, remote) via frida-ls-devices. Use the returned id with frida_attach device=id, or connect directly with device=remote + host.',
+      )
+      .query(),
+  ),
+  tool('frida_list_processes', (t) =>
+    t
+      .desc(
+        'List processes on a Frida device via frida-ps (defaults to the local device; pass device+host for USB/remote). On Android the process name is the App Label, not the package name — attach by the returned pid.',
+      )
+      .enum(
+        'device',
+        ['local', 'usb', 'remote', 'id'],
+        'Frida device: local (default) / usb (-U) / remote (-H host) / id (-D id)',
+      )
+      .string('host', 'Device host:port when device=remote, e.g. 192.168.1.11:27042')
+      .query(),
+  ),
   tool('frida_dex_dump', (t) =>
     t
       .desc(
@@ -111,7 +148,15 @@ export const binaryInstrumentTools: Tool[] = [
       .string('target', 'Package/process name for -n, for example com.example.app.')
       .number('pid', 'Optional process id for -p. Overrides target when provided.')
       .string('outputDir', 'Required output directory for dumped DEX files.')
-      .boolean('usb', 'Use USB device mode (-U).', { default: true })
+      .enum(
+        'device',
+        ['local', 'usb', 'remote', 'id'],
+        'Device to dump from: local (no flag) / usb (-U) / remote (-H host) / id (-D id). Overrides the usb boolean when provided.',
+      )
+      .string('host', 'Device host:port when device=remote, e.g. 192.168.1.11:27042')
+      .boolean('usb', 'Use USB device mode (-U). Ignored when device is provided.', {
+        default: true,
+      })
       .number('timeoutMs', 'Optional timeout in milliseconds.', {
         default: fridaConfig.dexDumpTimeoutMs,
       })

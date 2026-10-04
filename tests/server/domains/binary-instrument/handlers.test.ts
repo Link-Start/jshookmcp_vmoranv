@@ -51,6 +51,7 @@ describe('BinaryInstrumentHandlers', () => {
     return {
       extensionPluginsById: new Map(),
       extensionPluginRuntimeById: new Map(),
+      eventBus: { emit: vi.fn() },
     } as unknown as MCPServerContext;
   }
 
@@ -191,12 +192,234 @@ describe('BinaryInstrumentHandlers', () => {
       ).toBe(true);
     });
 
-    it('handleFridaAttach returns error when plugin not installed', async () => {
-      const handlers = createHandlers();
-      const result = await handlers.handleFridaAttach({ pid: '1234' });
+    it('handleFridaAttach pid-only attaches natively via -p when the CLI is available', async () => {
+      vi.mocked(probeCommand).mockResolvedValueOnce({
+        available: true,
+        path: 'frida',
+        version: '16.0.0',
+        reason: undefined,
+      } as Awaited<ReturnType<typeof probeCommand>>);
+      vi.mocked(childProcess.execFile).mockImplementation(((
+        _file: string,
+        _args: readonly string[] | null | undefined,
+        _opts: unknown,
+        cb?: ((error: Error | null, stdout: string, stderr: string) => void) | null,
+      ) => {
+        cb?.(null, '__frida_attach_ok__', '');
+        return {} as never;
+      }) as unknown as typeof childProcess.execFile);
 
-      const text = (result as { content: Array<{ text: string }> }).content[0]?.text ?? '';
-      expect(text).toContain('not installed');
+      const handlers = createHandlers();
+      const result = await handlers.handleFridaAttach({ pid: 2695 });
+      const body = JSON.parse(
+        (result as { content: Array<{ text: string }> }).content[0]?.text ?? '{}',
+      );
+
+      expect(body.success).toBe(true);
+      expect(body.target).toBe('2695');
+      expect(body.device).toEqual({ type: 'local' });
+      const args = (vi.mocked(childProcess.execFile).mock.calls.at(-1)?.[1] ?? []) as string[];
+      expect(args.slice(0, 2)).toEqual(['-p', '2695']);
+    });
+
+    it('handleFridaAttach reports an unavailable CLI honestly for pid-only attach', async () => {
+      const handlers = createHandlers();
+      const result = await handlers.handleFridaAttach({ pid: 1234 });
+
+      const body = JSON.parse(
+        (result as { content: Array<{ text: string }> }).content[0]?.text ?? '{}',
+      );
+      expect(body.success).toBe(false);
+      expect(body.available).toBe(false);
+      expect(body.reason).toContain('tool not found');
+    });
+
+    it('handleFridaAttach with a remote device passes -H before the target and reports the device', async () => {
+      vi.mocked(probeCommand).mockResolvedValueOnce({
+        available: true,
+        path: 'frida',
+        version: '17.12.0',
+        reason: undefined,
+      } as Awaited<ReturnType<typeof probeCommand>>);
+      vi.mocked(childProcess.execFile).mockImplementation(((
+        _file: string,
+        _args: readonly string[] | null | undefined,
+        _opts: unknown,
+        cb?: ((error: Error | null, stdout: string, stderr: string) => void) | null,
+      ) => {
+        cb?.(null, '__frida_attach_ok__', '');
+        return {} as never;
+      }) as unknown as typeof childProcess.execFile);
+
+      const handlers = createHandlers();
+      const result = await handlers.handleFridaAttach({
+        target: 'HyperCeiler',
+        device: 'remote',
+        host: '192.168.1.11:27042',
+      });
+      const body = JSON.parse(
+        (result as { content: Array<{ text: string }> }).content[0]?.text ?? '{}',
+      );
+
+      expect(body.success).toBe(true);
+      expect(body.device).toEqual({ type: 'remote', host: '192.168.1.11:27042' });
+      const args = (vi.mocked(childProcess.execFile).mock.calls.at(-1)?.[1] ?? []) as string[];
+      expect(args.slice(0, 4)).toEqual(['-H', '192.168.1.11:27042', '-n', 'HyperCeiler']);
+    });
+
+    it('handleFridaAttach validates target/pid presence and remote host', async () => {
+      const handlers = createHandlers();
+
+      const neither = await handlers.handleFridaAttach({ device: 'remote', host: 'h:1' });
+      const neitherText = (neither as { content: Array<{ text: string }> }).content[0]?.text ?? '';
+      expect(neitherText).toContain('Either target or pid is required');
+
+      const noHost = await handlers.handleFridaAttach({ target: 'x', device: 'remote' });
+      const noHostBody = JSON.parse(
+        (noHost as { content: Array<{ text: string }> }).content[0]?.text ?? '{}',
+      );
+      expect(noHostBody.success).toBe(false);
+      expect(noHostBody.reason).toContain('host is required');
+    });
+
+    it('handleFridaListDevices parses frida-ls-devices output', async () => {
+      vi.mocked(probeCommand).mockResolvedValueOnce({
+        available: true,
+        path: 'frida-ls-devices',
+        version: '17.12.0',
+        reason: undefined,
+      } as Awaited<ReturnType<typeof probeCommand>>);
+      vi.mocked(childProcess.execFile).mockImplementation(((
+        _file: string,
+        _args: readonly string[] | null | undefined,
+        _opts: unknown,
+        cb?: ((error: Error | null, stdout: string, stderr: string) => void) | null,
+      ) => {
+        cb?.(
+          null,
+          [
+            '  Id     Type    Name',
+            '  local  local   Local System (local)',
+            '  usb    usb     Pixel 7',
+          ].join('\r\n'),
+          '',
+        );
+        return {} as never;
+      }) as unknown as typeof childProcess.execFile);
+
+      const handlers = createHandlers();
+      const result = await handlers.handleFridaListDevices({});
+      const body = JSON.parse(
+        (result as { content: Array<{ text: string }> }).content[0]?.text ?? '{}',
+      );
+
+      expect(body.success).toBe(true);
+      expect(body.devices).toEqual([
+        { id: 'local', type: 'local', name: 'Local System (local)' },
+        { id: 'usb', type: 'usb', name: 'Pixel 7' },
+      ]);
+      expect(body.count).toBe(2);
+    });
+
+    it('handleFridaListDevices reports an install fix when the CLI is missing', async () => {
+      const handlers = createHandlers();
+      const result = await handlers.handleFridaListDevices({});
+      const body = JSON.parse(
+        (result as { content: Array<{ text: string }> }).content[0]?.text ?? '{}',
+      );
+
+      expect(body.success).toBe(false);
+      expect(body.available).toBe(false);
+      expect(body.capability).toBe('frida-ls-devices');
+      expect(body.fix).toContain('frida-tools');
+    });
+
+    it('handleFridaListProcesses passes device args and parses frida-ps rows', async () => {
+      vi.mocked(probeCommand).mockResolvedValueOnce({
+        available: true,
+        path: 'frida-ps',
+        version: '17.12.0',
+        reason: undefined,
+      } as Awaited<ReturnType<typeof probeCommand>>);
+      vi.mocked(childProcess.execFile).mockImplementation(((
+        _file: string,
+        _args: readonly string[] | null | undefined,
+        _opts: unknown,
+        cb?: ((error: Error | null, stdout: string, stderr: string) => void) | null,
+      ) => {
+        cb?.(
+          null,
+          ['  PID  Name', '-----  ----', '  2695  HyperCeiler', '  31000  systemui'].join('\r\n'),
+          '',
+        );
+        return {} as never;
+      }) as unknown as typeof childProcess.execFile);
+
+      const handlers = createHandlers();
+      const result = await handlers.handleFridaListProcesses({
+        device: 'remote',
+        host: '192.168.1.11:27042',
+      });
+      const body = JSON.parse(
+        (result as { content: Array<{ text: string }> }).content[0]?.text ?? '{}',
+      );
+
+      expect(body.success).toBe(true);
+      expect(body.processes).toEqual([
+        { pid: 2695, name: 'HyperCeiler' },
+        { pid: 31000, name: 'systemui' },
+      ]);
+      const args = (vi.mocked(childProcess.execFile).mock.calls.at(-1)?.[1] ?? []) as string[];
+      expect(args.slice(0, 2)).toEqual(['-H', '192.168.1.11:27042']);
+    });
+
+    it('handleFridaDexDump device matrix: default keeps -U, device wins, usb:false is local', async () => {
+      vi.mocked(probeCommand).mockResolvedValue({
+        available: true,
+        path: 'frida-dexdump',
+        version: '1.0.0',
+        reason: undefined,
+      } as Awaited<ReturnType<typeof probeCommand>>);
+      vi.mocked(childProcess.execFile).mockImplementation(((
+        _file: string,
+        _args: readonly string[] | null | undefined,
+        _opts: unknown,
+        cb?: ((error: Error | null, stdout: string, stderr: string) => void) | null,
+      ) => {
+        cb?.(null, 'no artifacts', '');
+        return {} as never;
+      }) as unknown as typeof childProcess.execFile);
+
+      const handlers = createHandlers();
+      const lastArgs = async (): Promise<string[]> =>
+        (vi.mocked(childProcess.execFile).mock.calls.at(-1)?.[1] ?? []) as string[];
+
+      // Default (usb boolean omitted → true): back-compat -U.
+      await handlers.handleFridaDexDump({
+        outputDir: join(tmpdir(), `jshook-dx-a-${Date.now()}`),
+        target: 'com.example.app',
+      });
+      expect((await lastArgs())[0]).toBe('-U');
+
+      // Explicit device wins over the legacy usb boolean.
+      await handlers.handleFridaDexDump({
+        outputDir: join(tmpdir(), `jshook-dx-b-${Date.now()}`),
+        pid: 2695,
+        device: 'remote',
+        host: '192.168.1.11:27042',
+        usb: true,
+      });
+      expect((await lastArgs()).slice(0, 4)).toEqual(['-H', '192.168.1.11:27042', '-p', '2695']);
+      expect(await lastArgs()).not.toContain('-U');
+
+      // usb:false without a device → local, no device flag at all.
+      await handlers.handleFridaDexDump({
+        outputDir: join(tmpdir(), `jshook-dx-c-${Date.now()}`),
+        pid: 2695,
+        usb: false,
+      });
+      expect((await lastArgs())[0]).not.toBe('-U');
+      expect((await lastArgs())[0]).toBe('-p');
     });
 
     it('handleFridaRunScript returns error when sessionId missing', async () => {

@@ -11,6 +11,7 @@ import {
   HookGenerator,
   UnidbgRunner,
   invokePlugin,
+  type FridaDevice,
   type GhidraAnalysisOutput,
   type HookGeneratorOptions,
   type HookParameter,
@@ -53,6 +54,46 @@ export function textResponse(text: string): { content: Array<{ type: string; tex
 
 export function jsonResponse(body: unknown): { content: Array<{ type: string; text: string }> } {
   return textResponse(JSON.stringify(body));
+}
+
+/**
+ * Resolve the device enum (+ host/id) tool args into a FridaDevice.
+ *
+ * - `undefined` — no device arg was passed; callers apply their own legacy
+ *   default (frida_attach/spawn default to local, frida_dex_dump to the usb
+ *   boolean for backward compatibility).
+ * - `{ error }` — device=remote without host, device=id without id, or an
+ *   unknown enum value.
+ */
+export function resolveFridaDevice(
+  args: Record<string, unknown>,
+): FridaDevice | { error: string } | undefined {
+  const device = readOptionalString(args, 'device');
+  if (device === undefined) {
+    return undefined;
+  }
+
+  switch (device) {
+    case 'local':
+    case 'usb':
+      return { type: device };
+    case 'remote': {
+      const host = readOptionalString(args, 'host');
+      if (!host) {
+        return { error: 'host is required when device=remote (e.g. 192.168.1.11:27042)' };
+      }
+      return { type: 'remote', host };
+    }
+    case 'id': {
+      const id = readOptionalString(args, 'id');
+      if (!id) {
+        return { error: 'id is required when device=id (see frida_list_devices)' };
+      }
+      return { type: 'id', id };
+    }
+    default:
+      return { error: `Invalid device: "${device}". Expected one of: local, usb, remote, id` };
+  }
 }
 
 export function readRequiredString(args: Record<string, unknown>, key: string): string {
