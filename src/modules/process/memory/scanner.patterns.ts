@@ -68,11 +68,19 @@ export function buildPatternBytesAndMask(
       break;
     }
     case 'int64': {
-      const int64Val = BigInt.asIntN(64, BigInt(pattern));
-      const buf64 = Buffer.allocUnsafe(8);
-      buf64.writeBigInt64LE(int64Val, 0);
-      patternBytes = Array.from(buf64);
-      mask = [1, 1, 1, 1, 1, 1, 1, 1];
+      // Lenient contract parity with int32/float/double: malformed tokens are
+      // skipped; strict mode throws a specific message (macOS scanner contract).
+      try {
+        const int64Val = BigInt.asIntN(64, BigInt(pattern));
+        const buf64 = Buffer.allocUnsafe(8);
+        buf64.writeBigInt64LE(int64Val, 0);
+        patternBytes = Array.from(buf64);
+        mask = [1, 1, 1, 1, 1, 1, 1, 1];
+      } catch {
+        if (strict) {
+          throw new Error('Invalid int64 value');
+        }
+      }
       break;
     }
     case 'float': {

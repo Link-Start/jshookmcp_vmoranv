@@ -75,6 +75,31 @@ describe('scanner.patterns', () => {
       expect(() => buildPatternBytesAndMask('notanumber', 'double')).toThrow('Invalid pattern');
     });
 
+    it('skips malformed int64 in lenient mode instead of crashing', () => {
+      // BigInt('abc') throws SyntaxError — lenient contract (documented in the
+      // module header) says malformed numeric tokens are skipped, matching
+      // int32/float/double NaN handling.
+      const result = buildPatternBytesAndMask('abc', 'int64', { throwOnEmpty: false });
+      expect(result.patternBytes).toEqual([]);
+      expect(result.mask).toEqual([]);
+    });
+
+    it('skips non-integer int64 ("12.5") in lenient mode', () => {
+      const result = buildPatternBytesAndMask('12.5', 'int64', { throwOnEmpty: false });
+      expect(result.patternBytes).toEqual([]);
+      expect(result.mask).toEqual([]);
+    });
+
+    it('throws Invalid pattern for malformed int64 with default options (scanner path)', () => {
+      expect(() => buildPatternBytesAndMask('abc', 'int64')).toThrow('Invalid pattern');
+    });
+
+    it('throws Invalid int64 value in strict mode', () => {
+      expect(() => buildPatternBytesAndMask('abc', 'int64', { strict: true })).toThrow(
+        'Invalid int64 value',
+      );
+    });
+
     // ── shared-core options (used by BaseMemoryManager / macOS scanner) ──
 
     it('returns empty arrays with throwOnEmpty:false (BaseMemoryManager contract)', () => {

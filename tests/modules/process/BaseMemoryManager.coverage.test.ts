@@ -16,7 +16,7 @@ import type {
  * - hex pattern with '?' single-char wildcard
  * - hex pattern with empty/whitespace input
  * - int32 pattern with NaN (skips byte)
- * - int64 pattern when BigInt throws on invalid input
+ * - int64 pattern with malformed integer string (skips bytes, lenient contract)
  * - float pattern with NaN (skips bytes)
  * - double pattern with NaN (skips bytes)
  */
@@ -139,9 +139,12 @@ describe('BaseMemoryManager.convertPatternToBytes - coverage expansion', () => {
   // ── int64 error branch ─────────────────────────────────────────────────────
 
   describe('int64 pattern error handling', () => {
-    it('propagates BigInt error when int64 pattern is not a valid integer string', () => {
-      // BigInt('abc') throws a SyntaxError which propagates from convertPatternToBytes
-      expect(() => mgr.convert('abc', 'int64')).toThrow(SyntaxError);
+    it('skips bytes when int64 pattern is not a valid integer string', () => {
+      // Lenient contract (scanner.patterns): malformed numeric tokens are
+      // skipped — parity with int32/float/double NaN handling.
+      const result = mgr.convert('abc', 'int64');
+      expect(result.bytes).toEqual([]);
+      expect(result.mask).toEqual([]);
     });
   });
 
