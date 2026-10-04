@@ -39,6 +39,39 @@ vi.mock('@modules/process/memory/injection-validator', () => ({
 
 import { injectDll, injectShellcode } from '@modules/process/memory/injector';
 
+/**
+ * Simulate PowerShell double-quoted-string parsing (backtick is the only
+ * escape char; `"` terminates; a raw `$` triggers expansion). Proves the
+ * escaped dllPath cannot break out of the string literal.
+ */
+function decodePsStringLiteral(
+  script: string,
+  marker: string,
+): {
+  value: string;
+  restAfterQuote: string;
+  unescapedDollar: boolean;
+} {
+  const markerIdx = script.indexOf(marker);
+  if (markerIdx === -1) throw new Error(`marker not found: ${marker}`);
+  const open = script.indexOf('"', markerIdx + marker.length);
+  let value = '';
+  let unescapedDollar = false;
+  for (let i = open + 1; i < script.length; i++) {
+    const ch = script[i]!;
+    if (ch === '`') {
+      value += script[i + 1] ?? '';
+      i++;
+    } else if (ch === '"') {
+      return { value, restAfterQuote: script.slice(i + 1, i + 2), unescapedDollar };
+    } else {
+      if (ch === '$') unescapedDollar = true;
+      value += ch;
+    }
+  }
+  return { value, restAfterQuote: '', unescapedDollar };
+}
+
 describe('memory/injector', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -162,5 +195,31 @@ describe('memory/injector', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('execution failed');
+  });
+
+  describe('win32 dllPath escaping (PowerShell injection)', () => {
+    it.each([
+      // plain quote: backtick-doubling runs AFTER quote-escaping, doubling the
+      // inserted escape backtick and leaving the quote unescaped → breakout
+      'x"y',
+      // backtick directly before the escaped quote → breakout
+      'a`"b',
+      // benign path must round-trip byte-exact (no backslash doubling)
+      'C:\\dlls\\hook.dll',
+    ])('round-trips %j safely inside the PS string literal', async (dllPath) => {
+      state.executePowerShellScript.mockResolvedValue({
+        stdout: '{"success":true,"remoteThreadId":7}',
+        stderr: '',
+      });
+
+      const result = await injectDll('win32', 9, dllPath);
+      expect(result.success).toBe(true);
+
+      const script = state.executePowerShellScript.mock.calls[0]![0] as string;
+      const decoded = decodePsStringLiteral(script, '[DllInjector]::Inject(');
+      expect(decoded.value).toBe(dllPath);
+      expect(decoded.restAfterQuote).toBe(')');
+      expect(decoded.unescapedDollar).toBe(false);
+    });
   });
 });

@@ -144,7 +144,9 @@ public class DllInjector {
 "@
 
 try {
-    $result = [DllInjector]::Inject(${pid}, "${dllPath.replace(/\\/g, '\\\\').replace(/"/g, '`"').replace(/`/g, '``').replace(/\$/g, '`$')}")
+    // Backtick doubling MUST run first: later escapes introduce backticks that
+    // would otherwise be doubled into literals (string breakout).
+    $result = [DllInjector]::Inject(${pid}, "${dllPath.replace(/`/g, '``').replace(/"/g, '`"').replace(/\$/g, '`$')}")
     $result | ConvertTo-Json -Compress
 } catch {
     @{ success = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress
