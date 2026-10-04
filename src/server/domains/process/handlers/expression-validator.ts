@@ -52,6 +52,18 @@ const BLOCKED_MEMBER_PATTERNS = [
 // Dangerous global access patterns
 const BLOCKED_GLOBALS = new Set(['AsyncFunction', 'GeneratorFunction', 'AsyncGeneratorFunction']);
 
+/**
+ * Resolve the property name of a MemberExpression property node: Identifier
+ * (`a.b`) or StringLiteral in computed access (`a['b']`). Returns null for
+ * dynamic properties (`a[expr]`) — those are not statically blockable and are
+ * out of scope for this validator.
+ */
+function resolvePropertyName(prop: import('@babel/types').Node): string | null {
+  if (prop.type === 'Identifier') return prop.name;
+  if (prop.type === 'StringLiteral') return prop.value;
+  return null;
+}
+
 export interface ValidationResult {
   valid: boolean;
   error?: string;
@@ -122,11 +134,36 @@ export function validateExpression(expression: string): ValidationResult {
       MemberExpression(path) {
         const obj = path.node.object;
         const prop = path.node.property;
+        const propName = resolvePropertyName(prop);
+
+        if (propName !== null && BLOCKED_IDENTIFIERS.has(propName)) {
+          // Catches both dot access (a.eval) and computed-literal access
+          // (a['eval']) to any blocked name — the previous check only fired
+          // for Identifier properties, so window['eval'] slipped through.
+          violation = `Access to '${propName}' property is blocked for security reasons`;
+          path.stop();
+          return;
+        }
 
         if (obj.type === 'Identifier' && prop.type === 'Identifier') {
           for (const pattern of BLOCKED_MEMBER_PATTERNS) {
             if (obj.name === pattern.object && prop.name === pattern.property) {
               violation = `Access to '${pattern.object}.${pattern.property}' is blocked for security reasons`;
+              path.stop();
+              return;
+            }
+          }
+        }
+
+        // Block computed-literal access to pattern members (Object['constructor'])
+        if (prop.type === 'StringLiteral') {
+          for (const pattern of BLOCKED_MEMBER_PATTERNS) {
+            if (
+              obj.type === 'Identifier' &&
+              obj.name === pattern.object &&
+              prop.value === pattern.property
+            ) {
+              violation = `Access to '${pattern.object}[${pattern.property}]' is blocked for security reasons`;
               path.stop();
               return;
             }
@@ -157,6 +194,15 @@ export function validateExpression(expression: string): ValidationResult {
         if (callee.type === 'Identifier' && BLOCKED_IDENTIFIERS.has(callee.name)) {
           violation = `Instantiation of '${callee.name}' is blocked for security reasons`;
           path.stop();
+          return;
+        }
+        // Block member/computed callees: new (window.Function)(), new window['Function']()
+        if (callee.type === 'MemberExpression') {
+          const propName = resolvePropertyName(callee.property);
+          if (propName !== null && BLOCKED_IDENTIFIERS.has(propName)) {
+            violation = `Instantiation of member '${propName}' is blocked for security reasons`;
+            path.stop();
+          }
         }
       },
 
@@ -166,6 +212,15 @@ export function validateExpression(expression: string): ValidationResult {
         if (callee.type === 'Identifier' && callee.name === 'eval') {
           violation = `Call to 'eval' is blocked for security reasons`;
           path.stop();
+          return;
+        }
+        // Block member/computed eval calls: window.eval(...), window['eval'](...)
+        if (callee.type === 'MemberExpression') {
+          const propName = resolvePropertyName(callee.property);
+          if (propName === 'eval' || propName === 'Function') {
+            violation = `Call to member '${propName}' is blocked for security reasons`;
+            path.stop();
+          }
         }
       },
     });
