@@ -45,13 +45,23 @@ function parse(result: { content: Array<{ text?: string; type?: string }> }): Js
 function makeFuseBuffer(
   overrides: Partial<{ runAsNode: boolean; inspectArgs: boolean; nodeOptions: boolean }> = {},
 ) {
-  const sentinel = 'dL7pKGdnNz796PbbjQWNKmHXBZIA';
+  // Real @electron/fuses v2 wire: 32-byte ASCII sentinel + version(1) + length(1)
+  // + one state byte per fuse in FuseV1Options order
+  // (RunAsNode, EnableCookieEncryption, EnableNodeOptionsEnvironmentVariable,
+  // EnableNodeCliInspectArguments, ...).
+  const sentinel = 'dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX';
   const buffer = Buffer.alloc(64);
   buffer.write(sentinel, 0, 'ascii');
   const base = sentinel.length;
-  buffer[base] = overrides.runAsNode === false ? 0 : 0x31;
-  buffer[base + 2] = overrides.nodeOptions === false ? 0 : 0x31;
-  buffer[base + 3] = overrides.inspectArgs === false ? 0 : 0x31;
+  buffer[base] = 1; // fuse wire version (FuseVersion.V1)
+  buffer[base + 1] = 9; // wire length (9 fuse values)
+  const wire: number[] = [0x31, 0x31, 0x31, 0x31, 0x31, 0x31, 0x31, 0x31, 0x31];
+  if (overrides.runAsNode === false) wire[0] = 0x30;
+  if (overrides.nodeOptions === false) wire[2] = 0x30;
+  if (overrides.inspectArgs === false) wire[3] = 0x30;
+  wire.forEach((value, i) => {
+    buffer[base + 2 + i] = value;
+  });
   return buffer;
 }
 
@@ -131,6 +141,31 @@ describe('electron_launch_debug', () => {
     expect(status.main.alive).toBe(true);
     // @ts-expect-error
     expect(status.renderer.alive).toBe(true);
+  });
+
+  it('should report no fuse warnings when all debug fuses are enabled (real fuse wire format)', async () => {
+    const { handleElectronLaunchDebug } = await loadModule();
+
+    // Real wire: sentinel + version byte + length byte + fixed-order fuse bytes.
+    // The old layout read the version byte (0x01) as RunAsNode and the
+    // EnableCookieEncryption byte as InspectArgs, misreporting enabled fuses.
+    mockPathExists.mockResolvedValueOnce(true);
+    mockReadFile.mockResolvedValueOnce(makeFuseBuffer());
+    mockFetch.mockResolvedValue({ ok: true, text: async () => 'ready' });
+    mockSpawn.mockReturnValue({ pid: 7777, unref: vi.fn() });
+
+    const launch = parse(
+      await handleElectronLaunchDebug({
+        exePath: 'C:\\Electron\\electron.exe',
+        mainPort: 9333,
+        rendererPort: 9334,
+        waitMs: 0,
+      }),
+    );
+
+    expect(launch.success).toBe(true);
+    // Empty warning list is serialized as undefined (omitted field).
+    expect(launch.fuseWarnings).toBeUndefined();
   });
 
   it('should accept renamed exe when Electron companion files exist', async () => {

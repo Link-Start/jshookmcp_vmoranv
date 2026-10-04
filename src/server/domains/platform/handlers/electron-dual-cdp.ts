@@ -13,8 +13,8 @@ import type { ToolResponse } from '@server/types';
 import { parseStringArg, pathExists } from '@server/domains/platform/handlers/platform-utils';
 import { handleSafe } from '@server/domains/shared/ResponseBuilder';
 
-/** Fuse sentinel for quick check */
-const FUSE_SENTINEL = 'dL7pKGdnNz796PbbjQWNKmHXBZIA';
+/** Fuse sentinel for quick check (@electron/fuses v2, 32-byte ASCII) */
+const FUSE_SENTINEL = 'dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX';
 const FUSE_ENABLE = 0x31;
 
 /** Track launched processes for cleanup */
@@ -42,11 +42,15 @@ async function quickFuseCheck(exePath: string): Promise<FuseCheckResult> {
       return { fuseFound: false, runAsNode: false, inspectArgs: false, nodeOptions: false };
 
     const base = idx + sentinelBuf.length;
+    // @electron/fuses wire: sentinel + version(1) + length(1) + one state byte
+    // per fuse in FuseV1Options order. Short wires must not be misread.
+    if ((buffer[base + 1] ?? 0) < 4)
+      return { fuseFound: true, runAsNode: false, inspectArgs: false, nodeOptions: false };
     return {
       fuseFound: true,
-      runAsNode: buffer[base] === FUSE_ENABLE, // index 0: RunAsNode
-      nodeOptions: buffer[base + 2] === FUSE_ENABLE, // index 2: EnableNodeOptionsEnvironmentVariable
-      inspectArgs: buffer[base + 3] === FUSE_ENABLE, // index 3: EnableNodeCliInspectArguments
+      runAsNode: buffer[base + 2] === FUSE_ENABLE, // wire index 0: RunAsNode
+      nodeOptions: buffer[base + 4] === FUSE_ENABLE, // wire index 2: EnableNodeOptionsEnvironmentVariable
+      inspectArgs: buffer[base + 5] === FUSE_ENABLE, // wire index 3: EnableNodeCliInspectArguments
     };
   } catch {
     return { fuseFound: false, runAsNode: false, inspectArgs: false, nodeOptions: false };
