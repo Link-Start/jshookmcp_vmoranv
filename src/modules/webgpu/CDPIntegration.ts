@@ -47,8 +47,13 @@ export {
 
 /** Handle returned by `ensureDevice` — adapter/device are page-context objects. */
 export interface DeviceHandle {
-  adapter: any;
-  device: any;
+  /**
+   * GPUAdapter / GPUDevice are page-context platform objects with no
+   * structured-clone serializer: returning them across page.evaluate throws
+   * DataCloneError. The real handles live in the in-page cache
+   * (window.__webgpuDeviceCache); consumers reach them via evaluate. Only
+   * serializable metadata crosses the boundary.
+   */
   fresh: boolean;
   adapterInfo: GPUAdapterInfo;
 }
@@ -84,8 +89,6 @@ export async function ensureDevice(
     const existing: PageDeviceCache | undefined = w.__webgpuDeviceCache;
     if (existing && !existing.lost && existing.adapter && existing.device) {
       return {
-        adapter: existing.adapter,
-        device: existing.device,
         fresh: false,
         adapterInfo: existing.adapterInfo,
       };
@@ -130,7 +133,7 @@ export async function ensureDevice(
 
     w.__webgpuDeviceCache = cache;
 
-    return { adapter, device, fresh: true, adapterInfo };
+    return { fresh: true, adapterInfo };
   }, pp);
 
   return result as DeviceHandle;

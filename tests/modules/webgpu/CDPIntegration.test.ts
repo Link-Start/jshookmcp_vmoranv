@@ -456,8 +456,6 @@ describe('CDPIntegration', () => {
   describe('ensureDevice (defect #5: multi-adapter/device cache)', () => {
     it('creates a new device on first call (fresh=true)', async () => {
       const handle = {
-        adapter: { __mock: 'adapter' },
-        device: { __mock: 'device' },
         fresh: true,
         adapterInfo: {
           vendor: 'arm',
@@ -471,8 +469,10 @@ describe('CDPIntegration', () => {
       const result = await ensureDevice(mockPage as Page);
 
       expect(result.fresh).toBe(true);
-      expect(result.adapter).toBe(handle.adapter);
-      expect(result.device).toBe(handle.device);
+      // GPUAdapter/GPUDevice cannot cross page.evaluate (DataCloneError) —
+      // only serializable metadata may cross the boundary.
+      expect('adapter' in result).toBe(false);
+      expect('device' in result).toBe(false);
       expect(result.adapterInfo.vendor).toBe('arm');
       // evaluate called with powerPreference default 'none'
       const evalCall = mockPage.evaluate.mock.calls[0];
@@ -482,8 +482,6 @@ describe('CDPIntegration', () => {
 
     it('reuses cached device on subsequent call (fresh=false)', async () => {
       const handle = {
-        adapter: { __mock: 'adapter' },
-        device: { __mock: 'device' },
         fresh: false,
         adapterInfo: {
           vendor: 'qualcomm',
@@ -516,8 +514,6 @@ describe('CDPIntegration', () => {
 
     it('forwards powerPreference to evaluate', async () => {
       const handle = {
-        adapter: {},
-        device: {},
         fresh: true,
         adapterInfo: { vendor: '', architecture: '', device: '', description: '' },
       };
