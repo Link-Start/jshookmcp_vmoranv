@@ -129,6 +129,27 @@ describe('PageLockManager', () => {
       expect(results).toEqual([0, 1, 2, 3, 4]);
       expect(execution).toEqual([0, 1, 2, 3, 4]);
     });
+
+    it('never lets two callers hold the lock at the same time under heavy contention', async () => {
+      let active = 0;
+      let maxActive = 0;
+
+      const promises = Array.from({ length: 50 }, (_, i) =>
+        manager.withLock('page1', async () => {
+          active++;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 3));
+          active--;
+          return i;
+        }),
+      );
+
+      const results = await Promise.all(promises);
+
+      expect(results).toHaveLength(50);
+      expect(maxActive).toBe(1);
+      expect(active).toBe(0);
+    });
   });
 
   describe('Lock State Management', () => {
