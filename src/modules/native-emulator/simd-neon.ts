@@ -152,7 +152,7 @@ export const neonBic = (a: Uint8Array, b: Uint8Array, q: number): Uint8Array<Arr
   mapLanes2(a, b, 3, q, (x, y, mask) => x & (~y & mask));
 export const neonOrn = (a: Uint8Array, b: Uint8Array, q: number): Uint8Array<ArrayBuffer> =>
   mapLanes2(a, b, 3, q, (x, y, mask) => x | (~y & mask));
-/** BSL: Vd = (Vd & Vm) | (Vn & ~Vm) — bit select, dst is also an operand. */
+/** BSL: Vd = (Vd & Vn) | (Vm & ~Vd) — old Vd is the selector: Vd=1 takes Vn, Vd=0 takes Vm. */
 export const neonBsl = (
   vd: Uint8Array,
   vn: Uint8Array,
@@ -164,16 +164,16 @@ export const neonBsl = (
   const m = readLanes(vm, 3, q);
   const mask = widthMask(8);
   return packLanes(
-    d.map((dd, i) => ((dd & (n[i] ?? 0n)) | ((m[i] ?? 0n) & (~(n[i] ?? 0n) & mask))) & mask),
+    d.map((dd, i) => ((dd & (n[i] ?? 0n)) | ((m[i] ?? 0n) & (~dd & mask))) & mask),
     3,
   );
 };
 
 /**
- * BIT (Bitwise Insert if True): per bit `Vd = Vn ? Vm : Vd`.
- * Identity (ARM ARM C7.2.4): `Vd = (Vd & ~Vn) | (Vm & Vn)`.
- * Wherever the condition source Vn is 1, copy Vm into Vd; leave Vd where Vn=0.
- * dst `vd` is both source and destination (read-modify-write).
+ * BIT (Bitwise Insert if True): per bit `Vd = Vm ? Vn : Vd`.
+ * Identity (ARM ARM): `Vd = (Vn & Vm) | (Vd & ~Vm)`.
+ * Vm is the condition selector: wherever Vm is 1, copy Vn into Vd; leave Vd
+ * where Vm=0. dst `vd` is both source and destination (read-modify-write).
  */
 export const neonBit = (
   vd: Uint8Array,
@@ -187,18 +187,18 @@ export const neonBit = (
   const mask = widthMask(8);
   return packLanes(
     d.map((dd, i) => {
-      const ni = n[i] ?? 0n;
-      return ((dd & (~ni & mask)) | ((m[i] ?? 0n) & ni)) & mask;
+      const mi = m[i] ?? 0n;
+      return ((dd & (~mi & mask)) | ((n[i] ?? 0n) & mi)) & mask;
     }),
     3,
   );
 };
 
 /**
- * BIF (Bitwise Insert if False): per bit `Vd = Vn ? Vd : Vm`.
- * Identity (ARM ARM C7.2.5): `Vd = (Vd & Vn) | (Vm & ~Vn)`.
- * Wherever the condition source Vn is 0, copy Vm into Vd; leave Vd where Vn=1.
- * dst `vd` is both source and destination (read-modify-write).
+ * BIF (Bitwise Insert if False): per bit `Vd = Vm ? Vd : Vn`.
+ * Identity (ARM ARM): `Vd = (Vn & ~Vm) | (Vd & Vm)`.
+ * Wherever the condition selector Vm is 0, copy Vn into Vd; leave Vd where
+ * Vm=1. dst `vd` is both source and destination (read-modify-write).
  */
 export const neonBif = (
   vd: Uint8Array,
@@ -212,8 +212,8 @@ export const neonBif = (
   const mask = widthMask(8);
   return packLanes(
     d.map((dd, i) => {
-      const ni = n[i] ?? 0n;
-      return ((dd & ni) | ((m[i] ?? 0n) & (~ni & mask))) & mask;
+      const mi = m[i] ?? 0n;
+      return ((dd & mi) | ((n[i] ?? 0n) & (~mi & mask))) & mask;
     }),
     3,
   );

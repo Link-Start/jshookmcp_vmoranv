@@ -7,8 +7,8 @@
  *
  * Test vectors are derived from the canonical ARM ARM identities (no generated
  * fixture needed — the math is closed-form over GF(2)[x]):
- *   BIT:  Vd = (Vd & ~Vn) | (Vm & Vn)        —Vm inserts where Vn=1
- *   BIF:  Vd = (Vd & Vn)  | (Vm & ~Vn)       —Vm inserts where Vn=0
+ *   BIT:  Vd = (Vn & Vm) | (Vd & ~Vm)        —Vn inserts where Vm=1 (Vm is the selector)
+ *   BIF:  Vd = (Vn & ~Vm) | (Vd & Vm)        —Vn inserts where Vm=0
  *   PMUL: Vd[i] = PolyMul_8(Vn[i], Vm[i])    —GF(2)[x] coeff mul mod x^8
  *
  * PMUL is independently cross-checked against AES x-time semantics: the AES
@@ -83,72 +83,86 @@ function encodeThreeSameMul(
 // ── Unit-level neon helpers (pure functions, no CPU) ─────────────────────────
 
 describe('E4: neonBit / neonBif pure helpers (ARM ARM identities)', () => {
-  it('BIT: Vm replaces Vd where Vn=1 (mask all-ones → Vd := Vm)', () => {
-    // Vn = 0xFF: every bit is True → Vd := Vm entirely.
-    const out = neonBit(v(0xcc), v(0xff), v(0x55), 0);
+  it('BIT: Vn replaces Vd where Vm=1 (selector all-ones → Vd := Vn)', () => {
+    // Vm = 0xFF: every bit is True → Vd := Vn entirely.
+    const out = neonBit(v(0xcc), v(0x55), v(0xff), 0);
     expect(lane(out, 0)).toBe(0x55n);
   });
 
-  it('BIT: Vn=0 → Vd unchanged (no insert)', () => {
-    const out = neonBit(v(0xcc), v(0x00), v(0x55), 0);
+  it('BIT: Vm=0 → Vd unchanged (no insert)', () => {
+    const out = neonBit(v(0xcc), v(0x55), v(0x00), 0);
     expect(lane(out, 0)).toBe(0xccn);
   });
 
-  it('BIT: partial mask inserts exactly the masked bits of Vm', () => {
-    // Vn = 0xF0 (high nibble), Vd = 0xCC, Vm = 0x12
-    // Where Vn=1 (high nibble): take Vm high nibble (0x1) → 0x10
-    // Where Vn=0 (low  nibble): keep Vd low nibble (0xC) → 0x0C
+  it('BIT: partial selector inserts exactly the selected bits of Vn', () => {
+    // Vm = 0xF0 (high nibble), Vd = 0xCC, Vn = 0x12
+    // Where Vm=1 (high nibble): take Vn high nibble (0x1) → 0x10
+    // Where Vm=0 (low  nibble): keep Vd low nibble (0xC) → 0x0C
     // Expect 0x1C.
-    const out = neonBit(v(0xcc), v(0xf0), v(0x12), 0);
+    const out = neonBit(v(0xcc), v(0x12), v(0xf0), 0);
     expect(lane(out, 0)).toBe(0x1cn);
   });
 
-  it('BIF: Vm replaces Vd where Vn=0 (mask all-ones → unchanged)', () => {
-    // Vn = 0xFF: every bit True → keep Vd everywhere (Vd unchanged).
-    const out = neonBif(v(0xcc), v(0xff), v(0x55), 0);
+  it('BIT: asymmetric vector locks the operand direction (Vm is the selector)', () => {
+    // Vd=0xAA, Vn=0xCC, Vm=0x66 — Vn≠Vm so a swapped implementation cannot
+    // pass this. Correct: (0xCC & 0x66) | (0xAA & ~0x66) = 0x44|0x88 = 0xCC.
+    // The old (Vn-as-selector) code computed (0xAA & ~0xCC) | (0x66 & 0xCC)
+    // = 0x22|0x44 = 0x66.
+    const out = neonBit(v(0xaa), v(0xcc), v(0x66), 0);
     expect(lane(out, 0)).toBe(0xccn);
   });
 
-  it('BIF: Vn=0 → Vd := Vm entirely (insert everywhere)', () => {
-    const out = neonBif(v(0xcc), v(0x00), v(0x55), 0);
+  it('BIF: Vd unchanged where Vm=1 (selector all-ones → unchanged)', () => {
+    // Vm = 0xFF: every bit True → keep Vd everywhere (Vd unchanged).
+    const out = neonBif(v(0xcc), v(0x55), v(0xff), 0);
+    expect(lane(out, 0)).toBe(0xccn);
+  });
+
+  it('BIF: Vm=0 → Vd := Vn entirely (insert everywhere)', () => {
+    const out = neonBif(v(0xcc), v(0x55), v(0x00), 0);
     expect(lane(out, 0)).toBe(0x55n);
   });
 
-  it('BIF: partial mask inserts the un-masked bits of Vm (complement of BIT)', () => {
-    // Vn = 0xF0 → where Vn=0 (low nibble): take Vm low nibble (0x2) → 0x02
-    //                  where Vn=1 (high nibble): keep Vd high nibble (0xC) → 0xC0
+  it('BIF: partial selector inserts the un-selected bits of Vn (complement of BIT)', () => {
+    // Vm = 0xF0 → where Vm=0 (low nibble): take Vn low nibble (0x2) → 0x02
+    //                  where Vm=1 (high nibble): keep Vd high nibble (0xC) → 0xC0
     // Expect 0xC2.
-    const out = neonBif(v(0xcc), v(0xf0), v(0x12), 0);
+    const out = neonBif(v(0xcc), v(0x12), v(0xf0), 0);
     expect(lane(out, 0)).toBe(0xc2n);
   });
 
-  it('BIT and BIF are complementary — BIT ∪ BIF covers Vm into all of Vd', () => {
-    // BIT inserts Vm where Vn=1, BIF inserts Vm where Vn=0; OR-ing their results
-    // (over the same Vd) yields Vm everywhere Vd was, equivalent to Vm XOR'd only
-    // where Vd differed. Easier check: with Vn as a partition, BIT gives the
-    // Vn=1 slice and BIF gives the Vn=0 slice, and (BIT_result | BIF_result) on
-    // the same inputs with Vm in both = the partition-merge which equals
-    // (Vd & Vn) | (Vm & ~Vn) | (Vd & ~Vn) | (Vm & Vn) = Vd | Vm.
+  it('BIF: asymmetric vector locks the operand direction', () => {
+    // Vd=0xAA, Vn=0xCC, Vm=0x66. Correct: (0xCC & ~0x66) | (0xAA & 0x66)
+    // = 0x88|0x22 = 0xAA. Old swapped code: (0xAA & 0xCC) | (0x66 & ~0xCC)
+    // = 0x88|0x33 = 0xBB.
+    const out = neonBif(v(0xaa), v(0xcc), v(0x66), 0);
+    expect(lane(out, 0)).toBe(0xaan);
+  });
+
+  it('BIT and BIF are complementary — together they insert all of Vn over Vd', () => {
+    // BIT inserts Vn where Vm=1, BIF inserts Vn where Vm=0; OR-ing their results
+    // always yields Vn | Vd: where Vm=1 BIT gives Vn and BIF gives Vd; where
+    // Vm=0 BIT gives Vd and BIF gives Vn. Union = Vn | Vd.
     const vd = v(0b1010_0101);
-    const vn = v(0b1111_0000);
-    const vm = v(0b1100_0011);
+    const vn = v(0b1100_0011);
+    const vm = v(0b1111_0000);
     const bitR = neonBit(vd, vn, vm, 0);
     const bifR = neonBif(vd, vn, vm, 0);
     const merged = Number(lane(bitR, 0)) | Number(lane(bifR, 0));
-    // Vd | Vm = 0b1110_0111 = 0xE7
+    // Vn | Vd = 0xC3 | 0xA5 = 0xE7
     expect(merged).toBe(0xe7);
   });
 
   it('Q=1 form uses all 16 bytes; Q=0 zeroes the high half on write', () => {
-    // 128-bit form: replicate the partial-mask pattern across 2 lanes.
+    // 128-bit form: replicate the partial-selector pattern across 2 lanes.
     const vd = v(0xcc, 0x33, 0xaa, 0x55);
-    const vn = v(0xf0, 0x0f, 0xff, 0x00);
-    const vm = v(0x12, 0x34, 0x56, 0x78);
+    const vn = v(0x12, 0x34, 0x56, 0x78);
+    const vm = v(0xf0, 0x0f, 0xff, 0x00);
     const outQ1 = neonBit(vd, vn, vm, 1);
-    expect(lane(outQ1, 0)).toBe(0x1cn); // 0xCC BIT 0xF0 / 0x12 → high from Vm, low from Vd
-    expect(lane(outQ1, 1)).toBe(0x34n); // 0x33 BIT 0x0F / 0x34 → low from Vm, high from Vd
-    expect(lane(outQ1, 2)).toBe(0x56n); // 0xFF mask → entirely Vm
-    expect(lane(outQ1, 3)).toBe(0x55n); // 0x00 mask → entirely Vd
+    expect(lane(outQ1, 0)).toBe(0x1cn); // 0xCC BIT 0x12 / sel 0xF0 → high from Vn, low from Vd
+    expect(lane(outQ1, 1)).toBe(0x34n); // 0x33 BIT 0x34 / sel 0x0F → low from Vn, high from Vd
+    expect(lane(outQ1, 2)).toBe(0x56n); // sel 0xFF mask → entirely Vn
+    expect(lane(outQ1, 3)).toBe(0x55n); // sel 0x00 mask → entirely Vd
   });
 });
 
@@ -218,8 +232,8 @@ describe('E4: CpuEngine executes BIT/BIF/PMUL via dispatcher', () => {
     const engine = runOne(
       (e) => {
         e.writeVReg(0, v(0xcc)); // Vd
-        e.writeVReg(1, v(0xf0)); // Vn (condition)
-        e.writeVReg(2, v(0x12)); // Vm (data source)
+        e.writeVReg(1, v(0x12)); // Vn (data source)
+        e.writeVReg(2, v(0xf0)); // Vm (selector)
       },
       // Vd=0, Vn=1, Vm=2, size=10 (BIT), U=1, Q=0
       encodeThreeSameLogical(0, 1, 2, 0b10, 1, 0),
@@ -231,8 +245,8 @@ describe('E4: CpuEngine executes BIT/BIF/PMUL via dispatcher', () => {
     const engine = runOne(
       (e) => {
         e.writeVReg(0, v(0xcc));
-        e.writeVReg(1, v(0xf0));
-        e.writeVReg(2, v(0x12));
+        e.writeVReg(1, v(0x12));
+        e.writeVReg(2, v(0xf0));
       },
       encodeThreeSameLogical(0, 1, 2, 0b11, 1, 0),
     );
@@ -247,10 +261,10 @@ describe('E4: CpuEngine executes BIT/BIF/PMUL via dispatcher', () => {
         const vm = new Uint8Array(16);
         new DataView(vd.buffer).setUint8(0, 0xcc);
         new DataView(vd.buffer).setUint8(8, 0x33);
-        new DataView(vn.buffer).setUint8(0, 0xf0);
-        new DataView(vn.buffer).setUint8(8, 0x0f);
-        new DataView(vm.buffer).setUint8(0, 0x12);
-        new DataView(vm.buffer).setUint8(8, 0x34);
+        new DataView(vn.buffer).setUint8(0, 0x12);
+        new DataView(vn.buffer).setUint8(8, 0x34);
+        new DataView(vm.buffer).setUint8(0, 0xf0);
+        new DataView(vm.buffer).setUint8(8, 0x0f);
         e.writeVReg(0, vd);
         e.writeVReg(1, vn);
         e.writeVReg(2, vm);
