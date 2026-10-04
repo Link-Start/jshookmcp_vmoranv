@@ -14,7 +14,7 @@ import { SynonymExpander } from './SynonymExpander';
 // ── BM25 parameters (runtime-tunable via env) ──
 
 /**
- * K1 — term frequency saturation. Default 1.5 (typical range 1.2..2.0).
+ * K1 — term frequency saturation. Default 1 (SEARCH_BM25_K1; typical range 1.2..2.0).
  * B  — length normalization factor. Default 0.75 (textbook). Previously
  *      hardcoded at 0.3 which under-penalized long descriptions.
  */

@@ -3,7 +3,9 @@
  *
  * Builds trigram sets from tool names at construction time and computes
  * Jaccard similarity at query time for edit-distance-tolerant matching.
- * Memory footprint: ~238 names × ~5 trigrams avg ≈ ~1200 entries (~10KB).
+ * Memory footprint scales with the tool catalog (~700 names × ~10-20
+ * trigrams each ≈ order 10⁴ entries; strings are shared references inside
+ * per-name Sets).
  */
 
 import { SEARCH_TRIGRAM_THRESHOLD } from '@src/constants';

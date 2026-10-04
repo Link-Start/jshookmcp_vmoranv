@@ -481,14 +481,28 @@ export class ToolSearchEngine {
     const searchStartTime = performance.now();
 
     // Tokenise without synonyms first, then keep only the most informative.
-    let queryTokens = this.distillQueryTokens(this.bm25Scorer.tokenise(query));
+    const queryTokens = this.distillQueryTokens(this.bm25Scorer.tokenise(query));
     if (queryTokens.length === 0) {
       return [];
     }
 
+    // ── Query result cache (§4.3 CSAPC) ──
+    // Checked before the self-RAG quick path so simple queries (exact tool
+    // names, single tokens) also benefit — they previously bypassed the cache.
+    // A cached entry stays valid while the live vector weight drifts within
+    // SEARCH_CACHE_VECTOR_WEIGHT_TOLERANCE of the weight recorded at insert
+    // time; this avoids the full-flush behavior of an epoch bump.
+    const cacheKey = buildSearchCacheKey(query, topK, visibleDomains, this.extensionEtag);
+    const cached = this.queryCache.get(cacheKey);
+    if (cached && this.isCachedEntryFresh(cached)) {
+      const active = activeToolNames ?? new Set<string>();
+      return cached.results.map((r) => ({ ...r, isActive: active.has(r.name) }));
+    }
+
     // ── Self-RAG quick path: skip expensive signals for simple queries ──
     if (SEARCH_SELF_RAG_ENABLED && this.isSimpleQuery(query, queryTokens)) {
-      return this.quickPathSearch(
+      const quickStartMs = performance.now();
+      const quickResults = this.quickPathSearch(
         query,
         queryTokens,
         topK,
@@ -496,25 +510,22 @@ export class ToolSearchEngine {
         visibleDomains,
         profile,
       );
-    }
-
-    // ── IDF-based query distillation ──
-    // When the query is verbose (>6 tokens), keep only the most discriminative ones.
-    // Uses IDF as a proxy for informativeness — rare tokens carry more signal.
-    // Only considers tokens that exist in the index (df > 0); OOV tokens are noise.
-    if (queryTokens.length > 6) {
-      const inVocab = queryTokens.filter((t) => this.invertedIndex.has(t));
-      if (inVocab.length >= 3) {
-        const scored = inVocab.map((t) => {
-          const postings = this.invertedIndex.get(t)!;
-          const df = postings.length;
-          const idf = Math.log((this.docCount - df + 0.5) / (df + 0.5) + 1);
-          return { token: t, idf };
-        });
-        scored.sort((a, b) => b.idf - a.idf);
-        const kept = new Set(scored.slice(0, 6).map((s) => s.token));
-        queryTokens = queryTokens.filter((t) => kept.has(t));
-      }
+      // Quick-path results were previously invisible to the quality tracker
+      // and the cache: simple queries — the highest-hit-rate class — never
+      // showed up in MRR / latency metrics. Record and cache them like
+      // full-path results.
+      this.qualityTracker.recordSearch(
+        query,
+        quickResults.map((r) => r.name),
+        quickResults.map((r) => r.score),
+        performance.now() - quickStartMs,
+      );
+      this.queryCache.set(cacheKey, {
+        results: quickResults,
+        vectorWeightAtCache: this.feedbackTracker.getVectorWeight(),
+        cachedAtMs: Date.now(),
+      });
+      return quickResults;
     }
 
     // Synonym expansion after distillation to preserve synonym signal
@@ -524,16 +535,6 @@ export class ToolSearchEngine {
     queryTokens.push(...synonymTokens);
 
     const explicitToolMention = this.findExplicitToolMention(query);
-
-    // A cached entry stays valid while the live vector weight drifts within
-    // SEARCH_CACHE_VECTOR_WEIGHT_TOLERANCE of the weight recorded at insert
-    // time. Avoids the full flush that the previous epoch counter caused.
-    const cacheKey = buildSearchCacheKey(query, topK, visibleDomains, this.extensionEtag);
-    const cached = this.queryCache.get(cacheKey);
-    if (cached && this.isCachedEntryFresh(cached)) {
-      const active = activeToolNames ?? new Set<string>();
-      return cached.results.map((r) => ({ ...r, isActive: active.has(r.name) }));
-    }
 
     const intentToolBonuses = this.intentBoost.resolveIntentToolBonuses(query);
 
