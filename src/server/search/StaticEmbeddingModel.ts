@@ -4,7 +4,11 @@ import { access, mkdir, readFile, rename, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { readEnvInteger, readEnvNullableString, readEnvString } from '@src/config/environment';
+// Relative + explicit .ts extension on purpose: this module loads inside the
+// embedding worker thread (see EmbeddingWorker.ts), which does not inherit the
+// tsx alias loader — `@src/...` specifiers fail there with
+// "Cannot find package '@src/config'" and silently degrade search to lexical.
+import { readEnvInteger, readEnvNullableString, readEnvString } from '../../config/environment.ts';
 
 interface TokenizerEncoding {
   ids: number[];

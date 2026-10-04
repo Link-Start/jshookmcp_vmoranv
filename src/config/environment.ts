@@ -7,7 +7,11 @@
  * call unless a consumer intentionally snapshots them.
  */
 import { cpus } from 'node:os';
-import { bootstrapRuntimeEnv } from './env-bootstrap.js';
+// .ts extension on purpose (allowImportingTsExtensions): this module loads
+// inside the search embedding worker thread, which runs on Node's native
+// type-stripping runtime — it neither resolves path aliases nor maps `.js`
+// specifiers back to `.ts` sources (see StaticEmbeddingModel.ts).
+import { bootstrapRuntimeEnv } from './env-bootstrap.ts';
 
 bootstrapRuntimeEnv();
 
