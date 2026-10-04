@@ -34,7 +34,7 @@ import {
 } from '@src/constants';
 import { BM25ScorerImpl } from './BM25Scorer';
 import { EmbeddingEngine } from './EmbeddingEngine';
-import { loadToolEmbeddingsCache, saveToolEmbeddingsCache } from './EmbeddingCache';
+import { loadToolEmbeddingsCachePartial, saveToolEmbeddingsCacheV2 } from './EmbeddingCache';
 import { IntentBoostImpl } from './IntentBoost';
 import { TrigramIndex } from './TrigramIndex';
 import { FeedbackTracker } from './FeedbackTracker';
@@ -948,6 +948,11 @@ export class ToolSearchEngine {
   /**
    * Load catalog embeddings from disk or compute them once. Concurrent callers
    * share the same promise, while failures degrade to lexical search and remain retryable.
+   *
+   * Incremental (cache v2): per-tool hash matching lets unchanged tools reuse
+   * their cached vectors; only tools whose name/description changed are
+   * (re)embedded. A full miss (no cache file, v1 legacy file, or corruption)
+   * falls back to embedding the whole catalog.
    */
   private ensureToolEmbeddings(): Promise<void> {
     if (this.toolEmbeddings || !this.embeddingEngine) {
@@ -960,24 +965,41 @@ export class ToolSearchEngine {
       return Promise.resolve();
     }
 
-    const descriptions = this.docs.map(
-      (doc) => `${doc.name.replace(/_/g, ' ')}: ${doc.description}`,
-    );
+    const tools = this.docs.map((doc): import('./EmbeddingCache').ToolEmbeddingKey => ({
+      name: doc.name,
+      description: `${doc.name.replace(/_/g, ' ')}: ${doc.description}`,
+    }));
     const modelId = this.vectorModelId;
     const engine = this.embeddingEngine;
     const run = (async () => {
       try {
-        const cached = await loadToolEmbeddingsCache(modelId, descriptions);
-        if (cached && cached.length === descriptions.length) {
-          this.toolEmbeddings = cached;
-          this.embeddingRetryAfterMs = 0;
-          return;
+        const partial = await loadToolEmbeddingsCachePartial(modelId, tools);
+        let embeddings: Float32Array[];
+
+        if (partial) {
+          const missingIndexes: number[] = [];
+          for (const [index, cached] of partial.entries()) {
+            if (!cached) missingIndexes.push(index);
+          }
+          if (missingIndexes.length === 0) {
+            this.toolEmbeddings = partial as Float32Array[];
+            this.embeddingRetryAfterMs = 0;
+            return;
+          }
+          const fresh = await engine.embedBatch(
+            missingIndexes.map((index) => tools[index]!.description),
+          );
+          for (const [offset, index] of missingIndexes.entries()) {
+            partial[index] = fresh[offset] ?? null;
+          }
+          embeddings = partial as Float32Array[];
+        } else {
+          embeddings = await engine.embedBatch(tools.map((tool) => tool.description));
         }
 
-        const embeddings = await engine.embedBatch(descriptions);
         this.toolEmbeddings = embeddings;
         this.embeddingRetryAfterMs = 0;
-        await saveToolEmbeddingsCache(modelId, descriptions, embeddings);
+        await saveToolEmbeddingsCacheV2(modelId, tools, embeddings);
       } catch (error) {
         // Embeddings are optional; BM25 and trigram remain available.
         this.embeddingRetryAfterMs = Date.now() + Math.max(0, SEARCH_VECTOR_RETRY_COOLDOWN_MS);

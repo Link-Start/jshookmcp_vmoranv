@@ -165,6 +165,11 @@ export const SEARCH_BM25_B = float('SEARCH_BM25_B', 0.75);
  * Dense vector search (Phase 8 — Hybrid Semantic Routing).
  *
  * SEARCH_VECTOR_ENABLED: master switch for embedding-based search signal.
+ *   Defaults follow the transport: per-client stdio processes default to false
+ *   (lexical-only keeps cold-start latency and per-process model memory low),
+ *   while a shared HTTP daemon defaults to true (one process amortizes the
+ *   model load across requests). Set SEARCH_VECTOR_ENABLED=true to enable
+ *   vector search on stdio explicitly.
  * SEARCH_VECTOR_MODEL_ID: Hugging Face ID of a Model2Vec-compatible static embedding model.
  * SEARCH_VECTOR_COSINE_WEIGHT: initial weight of the vector cosine signal in RRF fusion.
  * SEARCH_VECTOR_DYNAMIC_WEIGHT: when true, vector weight self-tunes based on tool-call feedback.
