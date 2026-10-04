@@ -1011,6 +1011,8 @@ export class CpuEngine implements ExecutionContext {
       },
       read: (addr, len) => this.readMemory(addr, len),
       write: (addr, bytes) => this.memory.writeCode(addr, bytes),
+      loadValue: (addr, bytes) => this.memory.loadValue(addr, bytes),
+      storeValue: (addr, bytes, value) => this.memory.storeValue(addr, bytes, value),
       sp: this.registerFile.sp,
     };
   }

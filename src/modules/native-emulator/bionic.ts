@@ -782,7 +782,9 @@ export function createBionicLibrary(
     const num = Number(ctx.x(0));
     const den = Number(ctx.x(1));
     const ptr = alloc(8);
-    ctx.storeValue!(ptr, 4, BigInt(num / den));
+    // C div_t truncates toward zero; `num / den` can be fractional (7/2=3.5)
+    // and BigInt() would throw RangeError on it.
+    ctx.storeValue!(ptr, 4, BigInt(Math.trunc(num / den)));
     ctx.storeValue!(ptr + 4, 4, BigInt(num % den));
     return BigInt(ptr);
   });
