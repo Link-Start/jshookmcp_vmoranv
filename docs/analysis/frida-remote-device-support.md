@@ -13,6 +13,7 @@
 ```ts
 // src/modules/binary-instrument/FridaSession.ts
 const args = [...targetArgs, '--runtime=v8', '-q', '-e', script];   // ~L506
+
 ```
 
 目标参数生成 (`buildTargetArgs`, ~L527-537):
@@ -21,6 +22,7 @@ const args = [...targetArgs, '--runtime=v8', '-q', '-e', script];   // ~L506
 if (/^\d+$/.test(target)) return ['-p', target];                    // PID
 if (target.includes('/') || target.includes('\\')) return ['-f', target]; // 二进制路径
 return ['-n', target];                                              // 进程名(本地设备)
+
 ```
 
 四个独立缺陷:
@@ -50,6 +52,7 @@ export interface FridaDeviceArgsOptions {
   device?: FridaDevice;
   host?: string;                               // type=remote 时使用的地址:port
 }
+
 ```
 
 命令行映射,新增私有方法:
@@ -63,6 +66,7 @@ private buildDeviceArgs(device: FridaDevice): string[] {
     case 'id':     return ['-D', device.id];
   }
 }
+
 ```
 
 `runFridaCommandWithArgs` 改为把设备参数放在**最前**(frida CLI 的 `-U/-H/-D` 必须出现在 `-n/-p/-f` 之前):
@@ -73,6 +77,7 @@ const args = [
   ...targetArgs,
   '--runtime=v8', '-q', '-e', script,
 ];
+
 ```
 
 ### 2.2 会话记录携带设备
@@ -83,6 +88,7 @@ interface FridaSessionRecord extends FridaSessionInfo {
   device: FridaDevice;          // 新增
   ...
 }
+
 ```
 
 - `attach(target, device?)`、`spawn(target, device?)` 签名扩展,未传时默认 `{ type: 'local' }`(保持向后兼容,本地行为不变)。
@@ -120,11 +126,14 @@ interface FridaSessionRecord extends FridaSessionInfo {
 DSL 支持 `.enum()`(已确认,见 `registry` 里 ToolSpec 的 enum 实现)。改动:
 
 - `frida_attach`(~L20):加
+
   ```ts
   .enum('device', ['local', 'usb', 'remote', 'id'], 'Frida 设备: local(默认)/usb/remote(-H host)/id(-D id)')
   .string('host', 'device=remote 时的 host:port,例如 192.168.1.11:27042')
   .number('pid', '远程场景直接用 PID attach,避免 App Label 名称不匹配')
+
   ```
+
 - `frida_spawn`(~L26):同样加 `device`/`host`。
 - `frida_dex_dump`(~L106):把现有 `usb` 布尔升级为 `device` 枚举 + `host`,保留 `usb` 布尔做向后兼容(映射到 `{ type:'usb' }`)。
 - 新增 `frida_list_devices` / `frida_list_processes` 两个 `tool()` 定义。
@@ -140,10 +149,13 @@ DSL 支持 `.enum()`(已确认,见 `registry` 里 ToolSpec 的 enum 实现)。�
 ### 3.4 `src/server/domains/binary-instrument/handlers/frida.ts`(dex_dump)
 
 - `handleFridaDexDump`(~L19):`dexArgs` 拼装改为设备感知:
+
   ```ts
   // local: 无参数;usb: ['-U'];remote: ['-H', host];id: ['-D', id]
   dexArgs.push(...deviceArgs, ...);
+
   ```
+
   当前写死的 `if (usb) dexArgs.push('-U')`(~L40)替换为设备分支;`-p`/`-n` 逻辑保留(同样注意 App Label 问题,建议优先 `-p`)。
 
 ### 3.5 `src/server/domains/binary-instrument/manifest.ts`
@@ -173,11 +185,14 @@ DSL 支持 `.enum()`(已确认,见 `registry` 里 ToolSpec 的 enum 实现)。�
 1. **宿主机 frida**:`C:\Python313\Scripts\frida.exe`,版本 **17.12.0**(python `frida 17.12.0`)。
 2. **模拟器侧 frida-server**:`frida-server-17.12.0-android-x86_64`,root 运行 `nohup /data/local/tmp/frida-server -l 0.0.0.0:27042 &`(MuMu 桥接网卡 IP `192.168.1.11`,Android 15,x86_64)。
 3. **通道验证(等价于改造后的 `-H` 路径)**:
+
    ```bash
    FRIDA_HOST=192.168.1.11:27042 "C:/Python313/Scripts/frida.exe" \
      -n HyperCeiler --runtime=v8 -q -e 'console.log(Process.id)'
    # 输出: ATTACH_OK pid=2695 arch=x64; Java.available=true
+
    ```
+
    证明 `-H host:port + -n <App Label>` 是可行调用形态。
 4. **进程名**:frida 枚举该模拟器进程显示 **`HyperCeiler`**(App Label),不是 `com.sevtinge.hyperceiler` —— `-n` 必须用 Label 或直接 `-p <pid>`。
 5. **frida-tools 的环境变量 fallback**(临时方案,不推荐长期依赖):`frida_tools/application.py` 在未显式给 `-D/-U/-H` 时读取 `FRIDA_DEVICE`/`FRIDA_HOST`(实现见 ~L199-209)。`FRIDA_HOST` 可与 `-n` 组合直接工作。
