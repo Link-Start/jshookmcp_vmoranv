@@ -267,7 +267,8 @@ export function neonSqshl(
   for (let i = 0; i < laneCount; i++) {
     const value = readLaneSigned(vn, i, size);
     const shiftRaw = readLaneSigned(vm, i, size);
-    const shift = Number(shiftRaw & 0xffn); // Only low 8 bits
+    // ARM ARM: the shift is the SIGNED lane value; negative = right shift.
+    const shift = Number(shiftRaw);
 
     let result: bigint;
     if (shift >= 0) {
@@ -307,7 +308,8 @@ export function neonUqshl(
   for (let i = 0; i < laneCount; i++) {
     const value = readLaneUnsigned(vn, i, size);
     const shiftRaw = readLaneSigned(vm, i, size);
-    const shift = Number(shiftRaw & 0xffn);
+    // ARM ARM: the shift is the SIGNED lane value; negative = right shift.
+    const shift = Number(shiftRaw);
 
     let result: bigint;
     if (shift >= 0) {
@@ -415,7 +417,10 @@ export function neonSqrshl(
   for (let i = 0; i < laneCount; i++) {
     const value = readLaneSigned(vn, i, size);
     const shiftRaw = readLaneSigned(vm, i, size);
-    const shift = Number(shiftRaw & 0xffn);
+    // Signed lane: negative = rounding right shift. Any shift >= bits
+    // saturates identically and any shift <= -(bits+1) rounds to 0, so clamp
+    // the magnitude to keep huge lanes from ballooning the BigInt shifts.
+    const shift = Math.max(-(bits + 1), Math.min(bits, Number(shiftRaw)));
 
     let result: bigint;
     if (shift >= 0) {
@@ -449,7 +454,8 @@ export function neonUqrshl(
   for (let i = 0; i < laneCount; i++) {
     const value = readLaneUnsigned(vn, i, size);
     const shiftRaw = readLaneSigned(vm, i, size);
-    const shift = Number(shiftRaw & 0xffn);
+    // Signed lane: negative = rounding right shift; clamped as in SQRSHL.
+    const shift = Math.max(-(bits + 1), Math.min(bits, Number(shiftRaw)));
 
     let result: bigint;
     if (shift >= 0) {
@@ -483,11 +489,12 @@ export function neonSqxtn(
 ): void {
   if (size >= 3) throw new Error('SQXTN: invalid size (must be 0-2)');
 
-  // Narrowing behavior depends on Q:
-  // Q=0 (SQXTN): read ALL wide lanes from 128 bits, write to low 64 bits
-  // Q=1 (SQXTN2): read 64 bits of wide lanes, write to high 64 bits (preserving low)
+  // ARM ARM SQXTN#advsimd: elements = 64 DIV esize over 2*esize-wide lanes —
+  // both Q=0 and Q=1 narrow the FULL 128-bit source; Q only picks the
+  // destination half (low for Q=0 via the dispatcher's zeroed result, high
+  // for Q=1 via the dispatcher's pre-filled old Vd).
   const inputSize = size + 1;
-  const laneCount = q === 0 ? 16 >> inputSize : 8 >> inputSize;
+  const laneCount = 16 >> inputSize;
   const outputBits = 8 << size;
   const offset = q === 1 ? laneCount : 0; // Destination offset in narrow lanes
 
@@ -511,11 +518,9 @@ export function neonUqxtn(
 ): void {
   if (size >= 3) throw new Error('UQXTN: invalid size (must be 0-2)');
 
-  // Narrowing behavior depends on Q:
-  // Q=0 (UQXTN): read ALL wide lanes from 128 bits, write to low 64 bits
-  // Q=1 (UQXTN2): read 64 bits of wide lanes, write to high 64 bits (preserving low)
+  // As SQXTN: both Q forms narrow the full 128-bit source; Q picks the half.
   const inputSize = size + 1;
-  const laneCount = q === 0 ? 16 >> inputSize : 8 >> inputSize;
+  const laneCount = 16 >> inputSize;
   const outputBits = 8 << size;
   const offset = q === 1 ? laneCount : 0; // Destination offset in narrow lanes
 

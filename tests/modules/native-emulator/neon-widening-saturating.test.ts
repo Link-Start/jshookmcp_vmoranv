@@ -868,7 +868,7 @@ describe('NEON Saturating Instructions', () => {
     });
 
     it('SQXTN2: high half narrowing', () => {
-      const v0 = v(1, 2, 3, 4);
+      const v0 = v(1, 2, 3, 4, 5, 6, 7, 8);
       const v1 = new Uint8Array(16);
       new DataView(v1.buffer).setInt16(0, 256, true);
       new DataView(v1.buffer).setInt16(2, -129, true);
@@ -883,12 +883,18 @@ describe('NEON Saturating Instructions', () => {
 
       const result = engine.readVReg(0);
       const view = new DataView(result.buffer, result.byteOffset);
+      // The full 128-bit Vn is narrowed into the upper half (bytes 8-15);
+      // the low half of the destination is unchanged.
       expect(view.getInt8(0)).toBe(1); // preserved
       expect(view.getInt8(1)).toBe(2); // preserved
       expect(view.getInt8(2)).toBe(3); // preserved
       expect(view.getInt8(3)).toBe(4); // preserved
-      expect(view.getInt8(4)).toBe(127); // saturated
-      expect(view.getInt8(5)).toBe(-128); // saturated
+      expect(view.getInt8(4)).toBe(5); // preserved
+      expect(view.getInt8(5)).toBe(6); // preserved
+      expect(view.getInt8(6)).toBe(7); // preserved
+      expect(view.getInt8(7)).toBe(8); // preserved
+      expect(view.getInt8(8)).toBe(127); // saturated, upper half
+      expect(view.getInt8(9)).toBe(-128); // saturated, upper half
     });
   });
 
