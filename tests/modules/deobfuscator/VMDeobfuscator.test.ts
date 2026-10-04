@@ -104,4 +104,46 @@ describe('VMDeobfuscator', () => {
     // Babel 8: AST types changed, interpreter function removal may not trigger
     expect(out).toContain('vm instruction array removed');
   });
+
+  it('removes the full interpreter function when it contains nested blocks', () => {
+    const code = `
+      function runVm(pc) {
+        if (pc > 0) { doWork(); }
+        switch (pc) { case 1: step(); break; }
+        return finish(pc);
+      }
+      runVm(1);
+    `;
+    const out = new VMDeobfuscator().simplifyVMCode(code, {
+      interpreterFunction: 'runVm',
+    });
+
+    expect(out).toContain('vm interpreter removed');
+    expect(out).not.toContain('doWork');
+    expect(out).not.toContain('step');
+    expect(out).not.toContain('finish');
+    expect(out).toContain('runVm(1)');
+    expect(out).not.toContain('{');
+    expect(out).not.toContain('}');
+  });
+
+  it('removes const/let instruction array declarations', () => {
+    const out = new VMDeobfuscator().simplifyVMCode('const ops = [1,2,3,4]; run();', {
+      instructionArray: 'ops',
+    });
+
+    expect(out).toContain('vm instruction array removed');
+  });
+
+  it('removes nested-array instruction declarations without corrupting output', () => {
+    const code = 'var ops = [[1,2],[3,4]]; run();';
+    const out = new VMDeobfuscator().simplifyVMCode(code, {
+      instructionArray: 'ops',
+    });
+
+    expect(out).toContain('vm instruction array removed');
+    expect(out).not.toContain('[1,2]');
+    expect(out).not.toContain(']');
+    expect(out).toContain('run();');
+  });
 });

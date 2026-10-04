@@ -1,4 +1,5 @@
 import { logger } from '@utils/logger';
+import { escapeRegexStr } from '@utils/escapeForRegex';
 import * as parser from '@babel/parser';
 import traverse from '@babel/traverse';
 import type { NodePath } from '@babel/traverse';
@@ -172,19 +173,11 @@ export class VMDeobfuscator {
       let simplified = code;
 
       if (vmComponents.interpreterFunction) {
-        const regex = new RegExp(
-          `function\\s+${vmComponents.interpreterFunction}\\s*\\([^)]*\\)\\s*\\{[^}]*\\}`,
-          'g',
-        );
-        simplified = simplified.replace(regex, '/* vm interpreter removed */');
+        simplified = this.removeInterpreterFunction(simplified, vmComponents.interpreterFunction);
       }
 
       if (vmComponents.instructionArray) {
-        const regex = new RegExp(
-          `var\\s+${vmComponents.instructionArray}\\s*=\\s*\\[[^\\]]*\\];`,
-          'g',
-        );
-        simplified = simplified.replace(regex, '/* vm instruction array removed */');
+        simplified = this.removeInstructionArray(simplified, vmComponents.instructionArray);
       }
 
       return simplified;
@@ -193,4 +186,90 @@ export class VMDeobfuscator {
       return code;
     }
   }
+
+  /**
+   * Replace `function NAME(...) { ... }` — the body is scanned to the matching
+   * brace, so nested blocks (if/for/switch/try) are removed whole instead of
+   * being cut at the first `}`. Returns the code unchanged when no match.
+   */
+  private removeInterpreterFunction(code: string, name: string): string {
+    const match = new RegExp(`function\\s+${escapeRegexStr(name)}\\s*\\(`).exec(code);
+    if (!match) {
+      return code;
+    }
+    const openIdx = code.indexOf('{', match.index + match[0].length);
+    if (openIdx === -1) {
+      return code;
+    }
+    const endIdx = VMDeobfuscator.scanToMatching(code, openIdx, '{', '}');
+    if (endIdx === -1) {
+      return code;
+    }
+    return (
+      code.slice(0, match.index) +
+      '/* vm interpreter removed */' +
+      trimTrailingSemicolon(code.slice(endIdx + 1))
+    );
+  }
+
+  /**
+   * Replace `(var|let|const) NAME = [...];` — scanned to the matching bracket,
+   * so nested arrays are removed whole. Returns the code unchanged when no
+   * match (mirrors the old regex fallback of leaving the code untouched).
+   */
+  private removeInstructionArray(code: string, name: string): string {
+    const match = new RegExp(`(?:var|let|const)\\s+${escapeRegexStr(name)}\\s*=\\s*\\[`).exec(code);
+    if (!match) {
+      return code;
+    }
+    const endIdx = VMDeobfuscator.scanToMatching(code, match.index + match[0].length - 1, '[', ']');
+    if (endIdx === -1) {
+      return code;
+    }
+    return (
+      code.slice(0, match.index) +
+      '/* vm instruction array removed */' +
+      trimTrailingSemicolon(code.slice(endIdx + 1))
+    );
+  }
+
+  /**
+   * Scan forward from an opening delimiter to its matching close, skipping
+   * string literals (single/double quote and backtick, with backslash escapes).
+   * Returns -1 when the construct is unterminated.
+   */
+  private static scanToMatching(
+    text: string,
+    openIdx: number,
+    open: string,
+    close: string,
+  ): number {
+    let depth = 0;
+    let quote: string | null = null;
+    for (let i = openIdx; i < text.length; i++) {
+      const ch = text[i];
+      if (quote !== null) {
+        if (ch === '\\') {
+          i++;
+        } else if (ch === quote) {
+          quote = null;
+        }
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        quote = ch;
+      } else if (ch === open) {
+        depth++;
+      } else if (ch === close) {
+        depth--;
+        if (depth === 0) {
+          return i;
+        }
+      }
+    }
+    return -1;
+  }
+}
+
+/** Drop a single trailing `;` left over from a removed declaration. */
+function trimTrailingSemicolon(tail: string): string {
+  return tail.startsWith(';') ? tail.slice(1) : tail;
 }
