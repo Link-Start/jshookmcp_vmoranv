@@ -33,7 +33,9 @@ export function execDataProcessingImmediate(ctx: ExecutionContext, insn: number)
     const immhi = (insn >>> 5) & 0x7ffff;
     const rd = insn & 0b11111;
     const imm = ctx.signExtend(BigInt((immhi << 2) | immlo), 21);
-    const value = op === 1 ? BigInt(ctx.pc & ~0xfff) + (imm << 12n) : BigInt(ctx.pc) + imm;
+    // BigInt mask: `ctx.pc & ~0xfff` would coerce PC to a signed 32-bit int,
+    // truncating the page base for PCs above 4 GiB (typical .so mappings).
+    const value = op === 1 ? (BigInt(ctx.pc) & ~0xfffn) + (imm << 12n) : BigInt(ctx.pc) + imm;
     ctx.writeGpr(rd, BigInt.asUintN(64, value));
     return true;
   }

@@ -72,6 +72,16 @@ describe('CpuEngine extended ISA — PC-relative addressing', () => {
     const engine = runProgram([0x90000040], 0x1000);
     expect(engine.readRegister('x0')).toBe(0x9000);
   });
+
+  it('ADRP at PC ≥ 2^32 keeps the upper 32 bits of the page base', () => {
+    // ADRP must mask with 64-bit arithmetic: `ctx.pc & ~0xfff` coerces PC to a
+    // signed 32-bit int, so a PC above 4 GiB (typical for .so mappings at
+    // 0x7f...) truncates to its low 32 bits. Page base of 0x1_0000_1234 is
+    // 0x1_0000_1000 (+ imm 0x8000) = 0x1_0000_9000, NOT 0x1000 + 0x8000.
+    const base = 0x1_0000_1234;
+    const bytes = runAndReadX0([0x90000040], base); // adrp x0, #+0x8000
+    expect(bytes).toEqual([0x00, 0x90, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00]);
+  });
 });
 
 describe('CpuEngine extended ISA — logical immediate', () => {
