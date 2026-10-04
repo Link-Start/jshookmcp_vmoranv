@@ -475,6 +475,20 @@ export async function executeToolWithTracking(ctx: MCPServerContext, name: strin
         'searchQualityTracker',
       );
     searchQualityTracker?.associateLastSearch(name);
+    // Learning signal for the search engine (adaptive vector weight +
+    // recency boost) fires on the direct-call path too, not just the
+    // call_tool proxy — this is the common path for agents invoking an
+    // already-active tool. Registered by getSearchEngine; absent until the
+    // first search builds the engine (no signal to learn from before that).
+    try {
+      const searchEngine =
+        ctx.getDomainInstance<import('@server/search/ToolSearchEngine').ToolSearchEngine>(
+          'searchEngine',
+        );
+      searchEngine?.recordToolCallFeedback(name, '');
+    } catch {
+      /* non-critical — feedback must never fail a tool call */
+    }
     ctx.mcpLog.info('jshookmcp', {
       event: 'tool_called',
       toolName: name,

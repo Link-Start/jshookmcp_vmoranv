@@ -408,28 +408,18 @@ describe('MCPServer.search.handlers.call', () => {
     expect(state.logger.error).toHaveBeenCalled();
   });
 
-  it('records search engine feedback after successful execution', async () => {
+  it('does not record engine feedback manually (moved to execution pipeline)', async () => {
     const recordToolCallFeedback = vi.fn();
     state.getSearchEngine.mockReturnValue({ recordToolCallFeedback });
     const ctx = createCtx();
 
     await handleCallTool(ctx, { name: 'test_tool' });
 
-    expect(recordToolCallFeedback).toHaveBeenCalledWith('test_tool', '');
-  });
-
-  it('ignores feedback errors gracefully', async () => {
-    state.getSearchEngine.mockReturnValue({
-      recordToolCallFeedback: vi.fn(() => {
-        throw new Error('feedback error');
-      }),
-    });
-    const ctx = createCtx();
-
-    const response = await handleCallTool(ctx, { name: 'test_tool' });
-    const result = parseResponse(response);
-
-    expect(result.result).toBe('ok');
+    // The call_tool proxy dispatches via executeToolWithTracking, which now
+    // records search-engine feedback (vector weight + recency) for BOTH the
+    // direct-call and proxy paths. A manual record here would double-count
+    // the learning signal.
+    expect(recordToolCallFeedback).not.toHaveBeenCalled();
   });
 
   it('returns error response when tool execution throws', async () => {

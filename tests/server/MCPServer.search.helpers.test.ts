@@ -90,10 +90,15 @@ vi.mock('@src/constants', async (importOriginal) => ({
 vi.mock('@server/ToolSearch', () => ({
   ToolSearchEngine: class MockToolSearchEngine {
     public args: any[];
+    public readonly qualityTrackerStub = { qualityTracker: true };
 
     constructor(...args: any[]) {
       this.args = args;
       mocks.engineInstances.push(this);
+    }
+
+    getSearchQualityTracker() {
+      return this.qualityTrackerStub;
     }
   },
 }));
@@ -373,6 +378,42 @@ describe('MCPServer.search.helpers — tool activation budget', () => {
       budget: base - 1,
       maxTools: 7,
       headroom: 0,
+    });
+  });
+
+  describe('searchEngine domain-instance registration', () => {
+    it('registers the engine and its quality tracker as domain instances', async () => {
+      const setDomainInstance = vi.fn();
+      const ctx = createCtx({
+        setDomainInstance,
+        getDomainInstance: vi.fn(() => undefined),
+      });
+
+      const engine = await getSearchEngine(ctx);
+
+      // Synchronous consumers (tool-call feedback + quality association in
+      // MCPServer.execution) must reach the SAME instances the engine records
+      // into; before this wiring they saw a tracker that never received a
+      // single recordSearch, so associateLastSearch was a permanent no-op.
+      expect(setDomainInstance).toHaveBeenCalledWith('searchEngine', engine);
+      expect(setDomainInstance).toHaveBeenCalledWith(
+        'searchQualityTracker',
+        (engine as any).qualityTrackerStub,
+      );
+    });
+
+    it('does not re-register on a cache hit with an unchanged signature', async () => {
+      const setDomainInstance = vi.fn();
+      const ctx = createCtx({
+        setDomainInstance,
+        getDomainInstance: vi.fn(() => undefined),
+      });
+
+      await getSearchEngine(ctx);
+      const callsAfterFirst = setDomainInstance.mock.calls.length;
+      await getSearchEngine(ctx);
+
+      expect(setDomainInstance.mock.calls.length).toBe(callsAfterFirst);
     });
   });
 });

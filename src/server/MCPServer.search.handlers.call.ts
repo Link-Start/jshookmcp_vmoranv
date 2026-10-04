@@ -16,8 +16,6 @@ import { asTextResponse, asErrorResponse } from '@server/domains/shared/response
 import type { MCPServerContext } from '@server/MCPServer.context';
 import type { ToolResponse } from '@server/types';
 import { normalizeToolName } from '@server/MCPServer.search.validation';
-import { getSearchEngine } from '@server/MCPServer.search.helpers';
-import { registerSearchSnapshotSourcesFromCtx } from '@server/search/snapshotRegistration';
 import { getRuntimeState } from '@server/runtime/ServerRuntimeState';
 import { getToolInputSchema } from '@server/ToolRouter.probe';
 import { loadSearchCatalog } from '@server/registry/SearchCatalog';
@@ -343,19 +341,11 @@ export async function handleCallTool(
     );
     const response = await ctx.executeToolWithTracking(name, validatedArgs);
 
-    // Record feedback for vector weight tuning (Phase 8).
-    // call_tool has no search query in scope — the caller supplies only the
-    // tool name and args. Query→tool association for this path is handled by
-    // SearchQualityTracker.associateLastSearch from MCPServer.execution.
-    try {
-      const engine = await getSearchEngine(ctx);
-      engine.recordToolCallFeedback(name, '');
-      // Trackers live on the engine; register them for persistence the first
-      // time the engine is built. Idempotent — the scheduler dedupes by source.
-      registerSearchSnapshotSourcesFromCtx(ctx, engine);
-    } catch {
-      /* non-critical — ignore feedback errors */
-    }
+    // Search-engine feedback (vector weight + recency) and quality
+    // association are recorded inside executeToolWithTracking — the same
+    // pipeline the direct-call path takes — so the call_tool proxy no longer
+    // records them manually (that would double-count the learning signal).
+    // Snapshot-source registration moved into getSearchEngine.
 
     return attachCallToolMetadata(response, callMetadata);
   } catch (error) {

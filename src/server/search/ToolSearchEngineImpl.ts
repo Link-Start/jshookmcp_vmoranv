@@ -513,7 +513,10 @@ export class ToolSearchEngine {
       // Quick-path results were previously invisible to the quality tracker
       // and the cache: simple queries — the highest-hit-rate class — never
       // showed up in MRR / latency metrics. Record and cache them like
-      // full-path results.
+      // full-path results. The vector signal never participates in the quick
+      // path, so clear any stale ranking from a prior full-path query —
+      // otherwise the next tool-call feedback would learn from it.
+      this.feedbackTracker.recordVectorRanking(null);
       this.qualityTracker.recordSearch(
         query,
         quickResults.map((r) => r.name),
@@ -877,30 +880,36 @@ export class ToolSearchEngine {
     // ── Signal 3: Dense vector cosine similarity ──
     // Two-stage retrieval: skip vector scoring when BM25 top result is
     // already strong enough that embeddings rarely change the ranking.
-    let vectorScores: Map<number, number>;
-    let vectorRanked: Map<number, number>;
+    // `null` marks "vector signal did not participate" (skip threshold,
+    // engine disabled, or embeddings unavailable) — distinct from an empty
+    // map, which means it participated but matched nothing.
+    let vectorScores: Map<number, number> | null;
     if (SEARCH_VECTOR_BM25_SKIP_THRESHOLD > 0 && bm25Ranked.size > 0) {
       const topBm25Idx = [...bm25Ranked.entries()].find(([, r]) => r === 0)?.[0];
       const topBm25Score = topBm25Idx !== undefined ? scores[topBm25Idx]! : 0;
-      if (topBm25Score >= SEARCH_VECTOR_BM25_SKIP_THRESHOLD) {
-        vectorScores = new Map();
-        vectorRanked = new Map();
-      } else {
-        vectorScores = await this.computeVectorCosineScores(query);
-        vectorRanked = rankByMap(vectorScores);
-      }
+      vectorScores =
+        topBm25Score >= SEARCH_VECTOR_BM25_SKIP_THRESHOLD
+          ? null
+          : await this.computeVectorCosineScores(query);
     } else {
       vectorScores = await this.computeVectorCosineScores(query);
-      vectorRanked = rankByMap(vectorScores);
     }
+    const vectorRanked = vectorScores === null ? null : rankByMap(vectorScores);
 
-    // Store the latest vector ranking for feedback tracking. Even when vector
-    // scoring is skipped we must clear any stale ranking from a prior query.
-    const ranking = new Map<string, number>();
-    for (const [docIdx, rank] of vectorRanked) {
-      ranking.set(this.docs[docIdx]!.name, rank);
+    // Store the latest vector ranking for feedback tracking. Passing `null`
+    // when the signal did not participate matters: previously a skipped query
+    // stored an EMPTY ranking, so the next tool-call feedback saw "tool not
+    // in ranking" and took a constant down-step, eroding the vector weight on
+    // strong-BM25 queries even though the vector signal never voted.
+    if (vectorRanked === null) {
+      this.feedbackTracker.recordVectorRanking(null);
+    } else {
+      const ranking = new Map<string, number>();
+      for (const [docIdx, rank] of vectorRanked) {
+        ranking.set(this.docs[docIdx]!.name, rank);
+      }
+      this.feedbackTracker.recordVectorRanking(ranking);
     }
-    this.feedbackTracker.recordVectorRanking(ranking);
 
     // ── Fuse via RRF ──
     const fusedRrfScores = new Float64Array(this.docCount);
@@ -917,7 +926,7 @@ export class ToolSearchEngine {
         rrfScore += trigramWeight * (1 / (k + trigramRank));
       }
 
-      const vectorRank = vectorRanked.get(i);
+      const vectorRank = vectorRanked?.get(i);
       if (vectorRank !== undefined && this.feedbackTracker.getVectorWeight() > 0) {
         rrfScore += this.feedbackTracker.getVectorWeight() * (1 / (k + vectorRank));
       }
@@ -986,22 +995,25 @@ export class ToolSearchEngine {
 
   /**
    * Compute dense vector cosine similarity scores for query vs all tools.
-   * Returns Map<docIndex, cosineScore>.
+   * Returns Map<docIndex, cosineScore>, or `null` when the vector signal is
+   * unavailable (engine disabled, catalog embeddings not yet warmed, or the
+   * query embedding failed) — the caller treats `null` as "did not
+   * participate" rather than "matched nothing".
    *
    * Prewarm-in-progress fast path: when the background embedding job hasn't
-   * finished seeding `toolEmbeddings` yet, return an empty Map immediately
-   * rather than awaiting the in-flight prewarm (which would block the search
-   * for the full cold-start duration). The engine falls back to BM25 + trigram
-   * for this query; subsequent queries pick up the vector signal once prewarm
-   * lands. If the embedding engine is disabled or fails, also returns empty.
+   * finished seeding `toolEmbeddings` yet, return `null` immediately rather
+   * than awaiting the in-flight prewarm (which would block the search for the
+   * full cold-start duration). The engine falls back to BM25 + trigram for
+   * this query; subsequent queries pick up the vector signal once prewarm
+   * lands.
    */
-  private async computeVectorCosineScores(query: string): Promise<Map<number, number>> {
-    if (!this.embeddingEngine) return new Map();
+  private async computeVectorCosineScores(query: string): Promise<Map<number, number> | null> {
+    if (!this.embeddingEngine) return null;
 
     if (!this.toolEmbeddings) {
-      if (this.prewarmPromise) return new Map();
+      if (this.prewarmPromise) return null;
       await this.ensureToolEmbeddings();
-      if (!this.toolEmbeddings) return new Map();
+      if (!this.toolEmbeddings) return null;
     }
 
     let queryEmbedding: Float32Array;
@@ -1011,7 +1023,7 @@ export class ToolSearchEngine {
       logger.warn(
         `[search] query embedding unavailable; using lexical ranking: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return new Map();
+      return null;
     }
 
     const results = new Map<number, number>();

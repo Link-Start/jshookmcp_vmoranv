@@ -75,6 +75,20 @@ describe('FeedbackTracker', () => {
       tracker.recordVectorRanking(ranking);
       expect(tracker.getVectorWeight()).toBe(INIT);
     });
+
+    it('treats a null ranking (vector signal did not participate) as no evidence', () => {
+      const tracker = new FeedbackTracker();
+      tracker.recordVectorRanking(new Map([['tool_a', 0]]));
+      tracker.recordToolCallFeedback('tool_a', true);
+      const after = tracker.getVectorWeight();
+
+      // e.g. BM25-skip threshold fired or the self-RAG quick path was taken:
+      // the vector signal never participated, so the next tool-call feedback
+      // must not move the learned weight in either direction.
+      tracker.recordVectorRanking(null);
+      expect(tracker.recordToolCallFeedback('tool_a', true)).toBe(false);
+      expect(tracker.getVectorWeight()).toBe(after);
+    });
   });
 
   describe('recordToolCallFeedback', () => {

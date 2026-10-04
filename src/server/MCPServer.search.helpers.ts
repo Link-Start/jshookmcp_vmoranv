@@ -11,6 +11,7 @@ import type { MCPServerContext } from '@server/MCPServer.context';
 import { ToolSearchEngine } from '@server/ToolSearch';
 import { DOMAIN_TOOL_COUNT_MAP } from '@server/registry/generated-domains';
 import { loadSearchCatalog } from '@server/registry/SearchCatalog';
+import { registerSearchSnapshotSourcesFromCtx } from '@server/search/snapshotRegistration';
 import {
   MCP_TOOL_ACTIVATION_BUDGET_TOKENS,
   MCP_TOOL_MAX_ACTIVE_TOOLS,
@@ -147,6 +148,23 @@ export async function getSearchEngine(ctx: MCPServerContext): Promise<ToolSearch
   );
   engine.extensionEtag = signature;
   searchEngineCache.set(ctx, { signature, engine });
+
+  // Expose the engine + its quality tracker to synchronous consumers: the
+  // tool-call feedback and search-quality association hooks in
+  // MCPServer.execution read them via getDomainInstance. Before this wiring
+  // execution saw a separately-constructed tracker that never received a
+  // single recordSearch, so associateLastSearch was a permanent no-op.
+  // Registered on every (re)construction so extension reloads swap the live
+  // instances; a signature-stable cache hit skips re-registration because the
+  // instances are unchanged.
+  if (typeof ctx.setDomainInstance === 'function') {
+    ctx.setDomainInstance('searchEngine', engine);
+    ctx.setDomainInstance('searchQualityTracker', engine.getSearchQualityTracker());
+  }
+  // Persistence registration lives here so every construction path (not just
+  // the search_tools / call_tool handlers) wires the snapshot scheduler.
+  registerSearchSnapshotSourcesFromCtx(ctx, engine);
+
   return engine;
 }
 

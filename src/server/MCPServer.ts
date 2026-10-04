@@ -40,7 +40,6 @@ import {
   MCP_TRANSPORT,
 } from '@src/constants';
 import { ActivationController } from '@server/activation/ActivationController';
-import { SearchQualityTracker } from '@server/search/SearchQualityTracker';
 import { registerSingleTool as registerSingleToolImpl } from '@server/MCPServer.tools';
 import { registerSearchMetaTools } from '@server/MCPServer.search';
 import { registerServerResources } from '@server/MCPServer.resources';
@@ -123,7 +122,6 @@ export class MCPServer implements MCPServerContext {
   /** MCP 2.0 Tasks protocol — background scheduler for long-running tool operations. */
   public readonly taskManager: TaskManager;
   private readonly circuitBrokenTools = new Set<string>();
-  private readonly searchQualityTracker = new SearchQualityTracker();
   /** Offloads large response data (>512KB) to disk / DetailedDataManager to keep context lean. */
   public readonly largeDataOffloader: LargeDataOffloader;
   public readonly handlerDeps: ToolHandlerDeps;
@@ -518,7 +516,10 @@ export class MCPServer implements MCPServerContext {
     this.samplingBridge = new LLMSamplingBridge(this.server);
     this.elicitationBridge = new ElicitationBridge(this.server);
     this.setDomainInstance('activationController', new ActivationController(this.eventBus, this));
-    this.setDomainInstance('searchQualityTracker', this.searchQualityTracker);
+    // NOTE: 'searchQualityTracker' / 'searchEngine' domain instances are
+    // registered by getSearchEngine() when the first search builds the engine
+    // — the engine's own tracker is the one recordSearch writes to, so a
+    // separately-constructed instance here would never see a record.
 
     // Snapshot scheduler for StateBoard + EvidenceGraph persistence
     const stateDir = getStateDir();

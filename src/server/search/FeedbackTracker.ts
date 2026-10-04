@@ -87,9 +87,14 @@ export class FeedbackTracker implements SnapshotSource {
    * Store the vector ranking from the most recent search. Called by the
    * search engine after the vector signal has been scored.
    *
-   * @param ranking Map of tool name → rank (0-based; lower = better)
+   * @param ranking Map of tool name → rank (0-based; lower = better), or
+   *   `null` when the vector signal did not participate in the ranking
+   *   (BM25-skip threshold fired, self-RAG quick path taken, or embeddings
+   *   unavailable). `null` leaves the next tool-call feedback without vector
+   *   evidence, so the learned weight stays put instead of taking a
+   *   down-step.
    */
-  recordVectorRanking(ranking: Map<string, number>): void {
+  recordVectorRanking(ranking: Map<string, number> | null): void {
     this.lastVectorRanking = ranking;
   }
 

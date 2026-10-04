@@ -661,7 +661,10 @@ describe('Hybrid Vector Search', () => {
       (engine as any).feedbackTracker.recordVectorRanking(new Map([['stale_tool', 0]]));
       await engine.search('navigate', 5);
 
-      expect((engine as any).feedbackTracker.lastVectorRanking).toEqual(new Map());
+      // `null` (signal did not participate) — not an empty map, which the
+      // feedback tracker would misread as "tool not ranked" evidence and
+      // turn into a constant down-step.
+      expect((engine as any).feedbackTracker.lastVectorRanking).toBeNull();
     } finally {
       // @ts-expect-error test mutates mocked constant
       constants.SEARCH_VECTOR_BM25_SKIP_THRESHOLD = previousThreshold;
