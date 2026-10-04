@@ -21,6 +21,40 @@ import { execFileAsync, executePowerShellScript } from '@modules/process/memory/
 const mockExecFileAsync = vi.mocked(execFileAsync);
 const mockExecutePowerShellScript = vi.mocked(executePowerShellScript);
 
+/**
+ * Simulate PowerShell double-quoted-string parsing (backtick is the only
+ * escape char; `"` terminates; a raw `$` triggers expansion). Used to prove
+ * that the escaped outputPath cannot break out of the string literal or
+ * inject a subexpression.
+ */
+function decodePsStringLiteral(
+  script: string,
+  marker: string,
+): {
+  value: string;
+  restAfterQuote: string;
+  unescapedDollar: boolean;
+} {
+  const markerIdx = script.indexOf(marker);
+  if (markerIdx === -1) throw new Error(`marker not found: ${marker}`);
+  const open = script.indexOf('"', markerIdx + marker.length);
+  let value = '';
+  let unescapedDollar = false;
+  for (let i = open + 1; i < script.length; i++) {
+    const ch = script[i]!;
+    if (ch === '`') {
+      value += script[i + 1] ?? '';
+      i++;
+    } else if (ch === '"') {
+      return { value, restAfterQuote: script.slice(i + 1, i + 2), unescapedDollar };
+    } else {
+      if (ch === '$') unescapedDollar = true;
+      value += ch;
+    }
+  }
+  return { value, restAfterQuote: '', unescapedDollar };
+}
+
 describe('dumpMemoryRegion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -250,6 +284,34 @@ describe('dumpMemoryRegion', () => {
       const result = await dumpMemoryRegion('win32', 1234, 'FF00', 100, 'C:\\dump.bin');
       expect(result.success).toBe(false);
       expect(result.error).toBe('PowerShell execution failed');
+    });
+
+    describe('outputPath escaping (PowerShell injection)', () => {
+      beforeEach(() => {
+        mockExecutePowerShellScript.mockResolvedValue({
+          stdout: JSON.stringify({ success: true, message: 'ok' }),
+          stderr: '',
+        });
+      });
+
+      it.each([
+        // backtick directly before `$` eats the escape → unescaped subexpression
+        'a`$(calc)b',
+        // backtick directly before `"` eats the escape → string breakout
+        'a`"b',
+        // plain quote must stay escaped
+        'x"y',
+        // benign path must round-trip byte-exact (no backslash doubling)
+        'C:\\temp\\dump.bin',
+      ])('round-trips %j safely inside the PS string literal', async (outputPath) => {
+        await dumpMemoryRegion('win32', 1234, 'FF00', 100, outputPath);
+
+        const script = mockExecutePowerShellScript.mock.calls[0]![0] as string;
+        const decoded = decodePsStringLiteral(script, '[MemoryDumper]::DumpMemory(');
+        expect(decoded.value).toBe(outputPath);
+        expect(decoded.restAfterQuote).toBe(')');
+        expect(decoded.unescapedDollar).toBe(false);
+      });
     });
   });
 });
