@@ -11,6 +11,7 @@ import { isRecord } from './type-guards';
 import type {
   BrowserFleetWorkerConfig,
   Config,
+  ObservabilityConfig,
   ReverseEngineeringConfig,
   SearchCjkQueryAliasConfig,
   SearchConfig,
@@ -393,6 +394,22 @@ const ConfigSchema = z.object({
   SEARCH_VECTOR_COSINE_WEIGHT: envFloat(0.53).pipe(z.number().min(0).max(10)),
   SEARCH_VECTOR_DYNAMIC_WEIGHT: envBool(true),
 
+  // Observability (src/server/observability/). The OTLP exporter additionally
+  // honours the standard OTEL_EXPORTER_OTLP_* vars inside the exporters.
+  JSHOOK_OBSERVABILITY_EXPORTER: z.preprocess(
+    (value) =>
+      typeof value === 'string' && value.trim().length > 0 ? value.trim().toLowerCase() : 'none',
+    z.enum(['none', 'memory', 'otlp']),
+  ),
+  JSHOOK_OBSERVABILITY_MAX_SPANS: envInt(500).pipe(z.number().min(1).max(100_000)),
+  JSHOOK_OTLP_QUERY_TEXT: z.preprocess(
+    (value) =>
+      typeof value === 'string' && value.trim().length > 0
+        ? value.trim().toLowerCase()
+        : 'truncated',
+    z.enum(['off', 'truncated', 'full']),
+  ),
+
   // Extension/plugin trust boundary
   EXTENSION_REGISTRY_BASE_URL: optionalTrimmedString,
   MCP_PLUGIN_ROOTS: z.string().optional().default(''),
@@ -769,6 +786,14 @@ function buildSearchConfig(env: ParsedConfigEnvironment): SearchConfig {
   };
 }
 
+function buildObservabilityConfig(env: ParsedConfigEnvironment): ObservabilityConfig {
+  return {
+    exporter: env.JSHOOK_OBSERVABILITY_EXPORTER,
+    maxSpans: env.JSHOOK_OBSERVABILITY_MAX_SPANS,
+    queryText: env.JSHOOK_OTLP_QUERY_TEXT,
+  };
+}
+
 function parseCsvList(value: unknown): string[] {
   if (typeof value !== 'string' || value.trim().length === 0) {
     return [];
@@ -970,6 +995,7 @@ export function getConfig(): Config {
   // whenever the package root was not writable.
   const absoluteCacheDir = resolveConfigPath(cacheDir, writableBase);
   const search = buildSearchConfig(env);
+  const observability = buildObservabilityConfig(env);
   const paths = {
     screenshotDir: resolveConfigPath(env.MCP_SCREENSHOT_DIR, writableBase),
     captchaScreenshotDir: resolveConfigPath(env.CAPTCHA_SCREENSHOT_DIR, writableBase),
@@ -1064,6 +1090,7 @@ export function getConfig(): Config {
     },
     reverseEngineering: buildReverseEngineeringConfig(env),
     search,
+    observability,
     extensions: {
       registryBaseUrl: env.EXTENSION_REGISTRY_BASE_URL,
       pluginRoots: parseCsvList(env.MCP_PLUGIN_ROOTS),

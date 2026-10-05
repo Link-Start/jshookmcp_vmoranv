@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { createInstrumentation } from '@server/observability/createInstrumentation';
 import { InMemoryInstrumentation } from '@server/observability/InMemoryInstrumentation';
 import { NoopInstrumentation } from '@server/observability/InstrumentationContract';
+import { OtlpInstrumentation } from '@server/observability/OtlpInstrumentation';
 
 describe('createInstrumentation', () => {
   it('defaults to the zero-overhead no-op when the section is absent', () => {
@@ -24,6 +25,12 @@ describe('createInstrumentation', () => {
   it('selects the in-memory recorder for the "memory" exporter', () => {
     expect(createInstrumentation({ observability: { exporter: 'memory' } })).toBeInstanceOf(
       InMemoryInstrumentation,
+    );
+  });
+
+  it('selects the OTLP exporter for the "otlp" exporter', () => {
+    expect(createInstrumentation({ observability: { exporter: 'otlp' } })).toBeInstanceOf(
+      OtlpInstrumentation,
     );
   });
 

@@ -453,6 +453,20 @@ export async function closeServer(ctx: MCPServerContext): Promise<void> {
     // Flush snapshots before any other cleanup
     const getInst =
       typeof ctx.getDomainInstance === 'function' ? ctx.getDomainInstance.bind(ctx) : null;
+
+    // Flush the OTLP instrumentation (if any) before the process unwinds:
+    // stdio deployments are one short-lived process per client session, so
+    // spans still sitting in the batch queue would be lost without this
+    // forced push. Bounded inside OtlpInstrumentation; failures are swallowed
+    // there — a dead collector must not stall shutdown.
+    const instrumentation =
+      getInst?.<import('./observability/InstrumentationContract').InstrumentationContract>(
+        'instrumentation',
+      );
+    if (instrumentation?.shutdown) {
+      await instrumentation.shutdown();
+    }
+
     const modernHttpHandler = getInst?.<{ close: () => Promise<void> }>('modernHttpHandler');
     if (modernHttpHandler) {
       try {

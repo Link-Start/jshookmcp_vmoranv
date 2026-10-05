@@ -99,6 +99,9 @@ Runtime configuration is defined by `src/utils/config.ts`. The current runtime d
 | `SEARCH_VECTOR_PREWARM`                   | Load the embedding model when the search engine starts; shared daemons load lazily by default. | `false`   |
 | `SEARCH_VECTOR_WORKER_IDLE_MS`            | Release the embedding worker after this idle period; `0` keeps it resident. | stdio: `15000`; HTTP: `300000` |
 | `SEARCH_VECTOR_FETCH_TIMEOUT_MS`          | Per-request timeout for static model/tokenizer downloads.         | `15000`                          |
+| `JSHOOK_OBSERVABILITY_EXPORTER`          | Telemetry backend: `none` (zero-overhead no-op) / `memory` (in-process buffer) / `otlp` (standard OTLP/HTTP export; any collector-style endpoint works). | `none` |
+| `JSHOOK_OBSERVABILITY_MAX_SPANS`         | Span window cap for the `memory` backend.                           | `500`                            |
+| `JSHOOK_OTLP_QUERY_TEXT`                 | Query-text capture policy for `search.query` spans: `off` / `truncated` (first 64 chars + overflow marker) / `full` (queries can embed sensitive reverse-engineering material — use `full` with care). | `truncated` |
 | `SEARCH_VECTOR_RETRY_COOLDOWN_MS`         | Retry cooldown after an embedding load failure.                   | `60000`                          |
 | `SEARCH_VECTOR_CACHE_ENABLED`             | Persist catalog embeddings on disk.                               | `true`                           |
 | `JSHOOK_EMBEDDING_CACHE_DIR`              | Override the embedding cache directory.                           | `~/.jshookmcp/cache/embeddings`  |

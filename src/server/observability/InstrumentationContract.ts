@@ -41,6 +41,11 @@ export interface InstrumentationContract {
   startSpan(name: string, attrs?: Record<string, unknown>): SpanLike;
   emitMetric(name: string, value: number, type: MetricType, attrs?: Record<string, unknown>): void;
   flush?(): Promise<void>;
+  /**
+   * One-way teardown: flush what is buffered and stop background timers.
+   * Called from closeServer(); safe to skip for no-op/memory backends.
+   */
+  shutdown?(): Promise<void>;
 }
 
 /* ---------- Well-known names ---------- */
@@ -62,6 +67,15 @@ export const SpanNames = {
    * not have — the same defect class as the rest of this file's history.
    */
   captchaDetect: 'captcha.detect',
+  /**
+   * One span per tool-search pipeline run (full path AND quick path).
+   * Attributes carry the D-3 decision inputs: bm25_top_score,
+   * vector_participated, quick_path, result_count, latency at end. Query
+   * text is included only per the query-text policy (see
+   * `redactQueryText`), because search strings in a reverse-engineering
+   * context can embed target URLs and credentials.
+   */
+  searchQuery: 'search.query',
 } as const;
 
 export const MetricNames = {
@@ -74,6 +88,14 @@ export const MetricNames = {
   bridgeRequestsTotal: 'bridge_requests_total',
   bridgeDurationMs: 'bridge_duration_ms',
   pluginActiveTotal: 'plugin_active_total',
+  searchQueriesTotal: 'search_queries_total',
+  searchLatencyMs: 'search_latency_ms',
+  /**
+   * Tool-call feedback: +1 per search that was followed by a tool call.
+   * Attributes: rank_bucket (top1/top3/top5/top10), tool. This is the
+   * lakehouse gold — joins `search.query` spans with `tool.execute` spans.
+   */
+  searchFeedbackUsed: 'search_feedback_used',
 } as const;
 
 /* ---------- No-op implementation ---------- */

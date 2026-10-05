@@ -41,6 +41,12 @@ import { FeedbackTracker } from './FeedbackTracker';
 import { QueryNormalizer } from './QueryNormalizer';
 import { ReRanker, type ReRankInput, type ToolMetadata } from './ReRanker';
 import { SearchQualityTracker } from './SearchQualityTracker';
+import {
+  getGlobalInstrumentation,
+  MetricNames,
+  SpanNames,
+} from '@server/observability/InstrumentationContract';
+import { redactQueryText } from '@server/observability/queryTextPolicy';
 import { logger } from '@utils/logger';
 import {
   applyGraphExpansionToScores,
@@ -480,9 +486,25 @@ export class ToolSearchEngine {
   ): Promise<ToolSearchResult[]> {
     const searchStartTime = performance.now();
 
+    // ── search.query telemetry span ──
+    // Global instrumentation (not a constructor dep): the MCPServer installs the
+    // live exporter process-wide; search-tune worker processes never do, so
+    // tuning runs emit nothing and pay only no-op cost. Query text is captured
+    // per the global policy — see redactQueryText for why capture is bounded.
+    const instrumentation = getGlobalInstrumentation();
+    const telemetrySpan = instrumentation.startSpan(SpanNames.searchQuery, {
+      'search.query_text': redactQueryText(query),
+      'search.query_length': query.length,
+      'search.top_k': topK,
+    });
+
     // Tokenise without synonyms first, then keep only the most informative.
     const queryTokens = this.distillQueryTokens(this.bm25Scorer.tokenise(query));
     if (queryTokens.length === 0) {
+      telemetrySpan.end({ 'search.result_count': 0 });
+      instrumentation.emitMetric(MetricNames.searchQueriesTotal, 1, 'counter', {
+        outcome: 'empty_query',
+      });
       return [];
     }
 
@@ -496,6 +518,14 @@ export class ToolSearchEngine {
     const cached = this.queryCache.get(cacheKey);
     if (cached && this.isCachedEntryFresh(cached)) {
       const active = activeToolNames ?? new Set<string>();
+      telemetrySpan.end({
+        'search.cache_hit': true,
+        'search.result_count': cached.results.length,
+        'search.latency_ms': Math.round(performance.now() - searchStartTime),
+      });
+      instrumentation.emitMetric(MetricNames.searchQueriesTotal, 1, 'counter', {
+        outcome: 'cache_hit',
+      });
       return cached.results.map((r) => ({ ...r, isActive: active.has(r.name) }));
     }
 
@@ -527,6 +557,18 @@ export class ToolSearchEngine {
         // captured and the vector signal never participates.
         { vectorParticipated: false },
       );
+      const quickLatencyMs = Math.round(performance.now() - searchStartTime);
+      telemetrySpan.end({
+        'search.quick_path': true,
+        'search.result_count': quickResults.length,
+        'search.latency_ms': quickLatencyMs,
+      });
+      instrumentation.emitMetric(MetricNames.searchQueriesTotal, 1, 'counter', {
+        outcome: 'quick_path',
+      });
+      instrumentation.emitMetric(MetricNames.searchLatencyMs, quickLatencyMs, 'histogram', {
+        outcome: 'quick_path',
+      });
       this.queryCache.set(cacheKey, {
         results: quickResults,
         vectorWeightAtCache: this.feedbackTracker.getVectorWeight(),
@@ -625,6 +667,21 @@ export class ToolSearchEngine {
 
     // ── Search quality tracking ──
     const latencyMs = performance.now() - searchStartTime;
+    telemetrySpan.end({
+      'search.quick_path': false,
+      'search.result_count': results.length,
+      'search.latency_ms': Math.round(latencyMs),
+      ...(topBm25Score > 0
+        ? { 'search.bm25_top_score': Math.round(topBm25Score * 1000) / 1000 }
+        : {}),
+      'search.vector_participated': vectorParticipated,
+    });
+    instrumentation.emitMetric(MetricNames.searchQueriesTotal, 1, 'counter', {
+      outcome: vectorParticipated ? 'full_path_vector' : 'full_path_lexical',
+    });
+    instrumentation.emitMetric(MetricNames.searchLatencyMs, Math.round(latencyMs), 'histogram', {
+      outcome: vectorParticipated ? 'full_path_vector' : 'full_path_lexical',
+    });
     this.qualityTracker.recordSearch(
       query,
       results.map((r) => r.name),
@@ -1111,7 +1168,35 @@ export class ToolSearchEngine {
    * Called from MCPServer when a tool is invoked after a search.
    */
   associateLastSearch(toolName: string): void {
-    this.qualityTracker.associateLastSearch(toolName);
+    const rank = this.qualityTracker.associateLastSearch(toolName);
+    if (rank !== undefined) {
+      this.emitSearchFeedbackMetric(rank, toolName);
+    }
+  }
+
+  /**
+   * Emit the search→usage feedback signal to the instrumentation backend.
+   * Separate from associateLastSearch's quality-tracker bookkeeping: the
+   * tracker feeds local snapshots (search-tune realtime dataset), the metric
+   * feeds the OTLP/lakehouse plane where `search_feedback_used` joins
+   * `search.query` spans with `tool.execute` spans across sessions.
+   */
+  private emitSearchFeedbackMetric(rank0Based: number, toolName: string): void {
+    const instrumentation = getGlobalInstrumentation();
+    const bucket =
+      rank0Based === 0
+        ? 'top1'
+        : rank0Based < 3
+          ? 'top3'
+          : rank0Based < 5
+            ? 'top5'
+            : rank0Based < 10
+              ? 'top10'
+              : 'beyond';
+    instrumentation.emitMetric(MetricNames.searchFeedbackUsed, 1, 'counter', {
+      rank_bucket: bucket,
+      tool: toolName,
+    });
   }
 
   /**

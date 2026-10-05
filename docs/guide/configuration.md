@@ -99,6 +99,9 @@ Clone 仓库后，在项目根目录创建 `.env` 文件（参考 `.env.example`
 | `SEARCH_VECTOR_PREWARM`                   | 搜索引擎启动时是否立即加载 embedding 模型；共享 daemon 默认按需加载。 | `false`              |
 | `SEARCH_VECTOR_WORKER_IDLE_MS`            | embedding worker 空闲多久后释放；`0` 表示常驻。          | stdio：`15000`；HTTP：`300000` |
 | `SEARCH_VECTOR_FETCH_TIMEOUT_MS`          | 静态模型/tokenizer 单次下载请求超时。                    | `15000`                 |
+| `JSHOOK_OBSERVABILITY_EXPORTER`          | 遥测后端：`none`（零开销 no-op）/ `memory`（进程内缓冲）/ `otlp`（标准 OTLP/HTTP 导出，任意 collector 式端点可接）。 | `none` |
+| `JSHOOK_OBSERVABILITY_MAX_SPANS`         | `memory` 后端的 span 窗口上限。                          | `500`                   |
+| `JSHOOK_OTLP_QUERY_TEXT`                 | `search.query` span 的查询文本采集策略：`off` / `truncated`（前 64 字符+溢出标记）/ `full`（逆向查询可能内嵌敏感信息，慎用 full）。 | `truncated` |
 | `SEARCH_VECTOR_RETRY_COOLDOWN_MS`         | embedding 加载失败后的重试冷却时间。                     | `60000`                 |
 | `SEARCH_VECTOR_CACHE_ENABLED`             | 是否将工具目录 embedding 持久化到磁盘。                  | `true`                  |
 | `JSHOOK_EMBEDDING_CACHE_DIR`              | embedding 磁盘缓存目录覆盖值。                            | `~/.jshookmcp/cache/embeddings` |

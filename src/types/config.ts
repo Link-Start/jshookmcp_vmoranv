@@ -20,20 +20,12 @@ export interface Config {
   /**
    * Span/metric export (see `src/server/observability/`).
    *
-   * NOT REACHABLE FROM THE SHIPPED LOADER YET. `getConfig()` in
-   * `src/utils/config.ts` has no `observability` key and no env reader, so
-   * `createInstrumentation` always sees `undefined` from a real `Config` and
-   * always returns `NoopInstrumentation`. Every wired span/metric site is
-   * therefore a no-op in production as shipped.
-   *
-   * The section is honoured when a `Config` is constructed programmatically
-   * (tests, embedders) — `createInstrumentation` reads it correctly. To make it
-   * live in the shipped server it still needs: an `observability` key in
-   * `DEFAULT_CONFIG`, a branch in `getConfig()`, an env reader in
-   * `src/constants/`, and a matching `.env.example` line (which the
-   * `tests/scripts/env-example.test.ts` guard then enforces in both
-   * directions). Until then, treat `memory` as a test/embedding facility, not
-   * an operator-facing feature.
+   * Reachable from the shipped loader: `getConfig()` builds it from
+   * `JSHOOK_OBSERVABILITY_EXPORTER` / `JSHOOK_OBSERVABILITY_MAX_SPANS` /
+   * `JSHOOK_OTLP_QUERY_TEXT`, so `createInstrumentation` honours the operator
+   * config in production. `otlp` additionally reads the standard
+   * `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_HEADERS` vars natively
+   * inside the exporters.
    */
   observability?: ObservabilityConfig;
 }
@@ -48,18 +40,25 @@ export interface Config {
  * that nothing in `src/` calls `snapshot()`, so the buffer has no production
  * reader either; a health endpoint or shutdown flush is still missing.
  *
- * A network exporter (OTLP, Prometheus) is the third case and is deliberately
- * NOT implemented here: it needs a dependency and a transport this repo has not
- * chosen. The interface is shaped so that adding one means implementing
- * `InstrumentationContract` and adding a branch to `createInstrumentation`.
+ * `otlp` selects `OtlpInstrumentation`: spans and metrics stream to any
+ * OTLP/HTTP endpoint (self-hosted collector, SigNoz, Grafana Cloud, a
+ * Cloudflare Worker receiver). The endpoint and auth headers come from the
+ * standard OTEL_EXPORTER_OTLP_* env vars; `queryText` bounds how much of the
+ * search query string leaves the process (reverse-engineering queries can
+ * embed target URLs and credentials).
  */
 export interface ObservabilityConfig {
-  exporter?: 'none' | 'memory';
+  exporter?: 'none' | 'memory' | 'otlp';
   /**
    * Span window size for the `memory` exporter. Bounded on purpose: a process
    * that keeps one span per tool call forever is a memory leak.
    */
   maxSpans?: number;
+  /**
+   * Capture policy for the `search.query` span's text attribute:
+   * `truncated` (default, first 64 chars + overflow marker), `full`, `off`.
+   */
+  queryText?: 'off' | 'truncated' | 'full';
 }
 
 /** One ordered tool-execution permission rule (the LAST matching rule wins). */

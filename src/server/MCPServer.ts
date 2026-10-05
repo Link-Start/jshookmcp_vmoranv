@@ -51,6 +51,7 @@ import {
   INSTRUMENTATION_DOMAIN_KEY,
   setGlobalInstrumentation,
 } from '@server/observability/InstrumentationContract';
+import { setGlobalQueryTextPolicy } from '@server/observability/queryTextPolicy';
 import { getAllManifests, ensureDomainLoaded } from '@server/registry/index';
 import {
   RuntimeSnapshotScheduler,
@@ -330,6 +331,10 @@ export class MCPServer implements MCPServerContext {
     const instrumentation = createInstrumentation(config);
     this.setDomainInstance(INSTRUMENTATION_DOMAIN_KEY, instrumentation);
     setGlobalInstrumentation(instrumentation);
+    // Query-text capture policy for search.query spans: installed here (not in
+    // the engine) so search-tune worker processes — which never construct an
+    // MCPServer — keep the safe default instead of importing server config.
+    setGlobalQueryTextPolicy(config.observability?.queryText);
     this.tokenBudget.setExternalCleanup(() => this.detailedData.clear());
     const { tools, profile } = resolveToolsForRegistration(config);
     this.selectedTools = tools;

@@ -114,8 +114,15 @@ export class SearchQualityTracker implements SnapshotSource {
     }
   }
 
-  associateLastSearch(toolName: string): void {
-    if (!this.lastRecordId) return;
+  /**
+   * Associate a tool call with the most recent search record.
+   * Returns the 0-based rank the tool held in that search's results when the
+   * association landed, or undefined when it did not (no last record, or the
+   * tool was not in the returned set) — the engine uses the rank to emit the
+   * search_feedback_used metric.
+   */
+  associateLastSearch(toolName: string): number | undefined {
+    if (!this.lastRecordId) return undefined;
     const arr = this.records.toArray();
     for (let i = arr.length - 1; i >= 0; i--) {
       const record = arr[i]!;
@@ -125,10 +132,12 @@ export class SearchQualityTracker implements SnapshotSource {
           record.usedTool = toolName;
           record.usedToolRank = rank + 1;
           this.dirty = true;
+          return rank;
         }
-        return;
+        return undefined;
       }
     }
+    return undefined;
   }
 
   computeMetrics(): SearchQualityMetrics {
