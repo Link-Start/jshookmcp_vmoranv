@@ -1168,35 +1168,10 @@ export class ToolSearchEngine {
    * Called from MCPServer when a tool is invoked after a search.
    */
   associateLastSearch(toolName: string): void {
-    const rank = this.qualityTracker.associateLastSearch(toolName);
-    if (rank !== undefined) {
-      this.emitSearchFeedbackMetric(rank, toolName);
-    }
-  }
-
-  /**
-   * Emit the search→usage feedback signal to the instrumentation backend.
-   * Separate from associateLastSearch's quality-tracker bookkeeping: the
-   * tracker feeds local snapshots (search-tune realtime dataset), the metric
-   * feeds the OTLP/lakehouse plane where `search_feedback_used` joins
-   * `search.query` spans with `tool.execute` spans across sessions.
-   */
-  private emitSearchFeedbackMetric(rank0Based: number, toolName: string): void {
-    const instrumentation = getGlobalInstrumentation();
-    const bucket =
-      rank0Based === 0
-        ? 'top1'
-        : rank0Based < 3
-          ? 'top3'
-          : rank0Based < 5
-            ? 'top5'
-            : rank0Based < 10
-              ? 'top10'
-              : 'beyond';
-    instrumentation.emitMetric(MetricNames.searchFeedbackUsed, 1, 'counter', {
-      rank_bucket: bucket,
-      tool: toolName,
-    });
+    // Metric emission (search_feedback_used) lives inside the tracker's
+    // associateLastSearch — the production execution path calls the tracker
+    // directly, so the engine wrapper must not be the only emission point.
+    this.qualityTracker.associateLastSearch(toolName);
   }
 
   /**

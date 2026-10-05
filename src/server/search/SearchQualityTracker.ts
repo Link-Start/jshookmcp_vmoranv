@@ -1,6 +1,36 @@
 import { RingBuffer } from '@utils/RingBuffer';
 import type { SnapshotSource } from '@server/persistence/RuntimeSnapshotScheduler';
 import { SEARCH_VECTOR_BM25_SKIP_THRESHOLD } from '@src/constants';
+import {
+  getGlobalInstrumentation,
+  MetricNames,
+} from '@server/observability/InstrumentationContract';
+
+/**
+ * Emit the search→usage feedback signal to the instrumentation backend.
+ * rank_bucket + tool attributes let the lakehouse join `search.query` spans
+ * with `tool.execute` spans across sessions (what ranking actually
+ * delivered). Called from SearchQualityTracker.associateLastSearch — the
+ * choke point BOTH the engine wrapper and the production execution path go
+ * through.
+ */
+function emitSearchFeedbackMetric(rank0Based: number, toolName: string): void {
+  const instrumentation = getGlobalInstrumentation();
+  const bucket =
+    rank0Based === 0
+      ? 'top1'
+      : rank0Based < 3
+        ? 'top3'
+        : rank0Based < 5
+          ? 'top5'
+          : rank0Based < 10
+            ? 'top10'
+            : 'beyond';
+  instrumentation.emitMetric(MetricNames.searchFeedbackUsed, 1, 'counter', {
+    rank_bucket: bucket,
+    tool: toolName,
+  });
+}
 
 export interface SearchQueryRecord {
   id: string;
@@ -118,8 +148,11 @@ export class SearchQualityTracker implements SnapshotSource {
    * Associate a tool call with the most recent search record.
    * Returns the 0-based rank the tool held in that search's results when the
    * association landed, or undefined when it did not (no last record, or the
-   * tool was not in the returned set) — the engine uses the rank to emit the
-   * search_feedback_used metric.
+   * tool was not in the returned set). On a successful association the
+   * search_feedback_used metric is emitted through the process-global
+   * instrumentation — living HERE (not on the engine wrapper) because the
+   * production execution path calls this tracker directly, bypassing the
+   * engine; the metric must fire on both paths.
    */
   associateLastSearch(toolName: string): number | undefined {
     if (!this.lastRecordId) return undefined;
@@ -132,6 +165,7 @@ export class SearchQualityTracker implements SnapshotSource {
           record.usedTool = toolName;
           record.usedToolRank = rank + 1;
           this.dirty = true;
+          emitSearchFeedbackMetric(rank, toolName);
           return rank;
         }
         return undefined;
