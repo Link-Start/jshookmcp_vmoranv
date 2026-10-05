@@ -38,6 +38,8 @@ JSHOOK_OTLP_QUERY_TEXT=full        # 完整文本（仅在私有端点下使用�
 
 删除上述环境变量即恢复默认（no-op，零网络活动）。已生成的匿名 install.id 存于 `~/.jshookmcp/state/install-id`，删除该文件即可重置身份。
 
+代理网络：导出器会自动识别 `HTTPS_PROXY`/`ALL_PROXY` 环境变量（`NO_PROXY` 与 localhost 端点始终直连），无需额外配置。
+
 ## 其他后端
 
 `JSHOOK_OBSERVABILITY_EXPORTER=memory` 将 span/指标保存在进程内存中（诊断用）；`none` 为默认 no-op。
