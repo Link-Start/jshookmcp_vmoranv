@@ -138,3 +138,6 @@ CONTEXT-MAP.md
 docs/agents
 # CodeGraph local index (codegraph CLI)
 .codegraph/
+
+# Local-only telemetry ingress deployment (wrangler config holds account-specific database_id)
+telemetry/

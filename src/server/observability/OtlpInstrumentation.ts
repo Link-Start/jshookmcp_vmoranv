@@ -157,9 +157,17 @@ export class OtlpInstrumentation implements InstrumentationContract {
         import('@opentelemetry/exporter-metrics-otlp-http'),
       ]);
 
+      // install.id: persistent anonymous UUID per installation, so
+      // distributed telemetry can tell "one install, many sessions" from
+      // "many installs" without collecting anything identifying. A filesystem
+      // failure degrades to an ephemeral id — never breaks the process.
+      const { getOrCreateInstallId } = await import('@utils/installId');
+      const installId = await getOrCreateInstallId();
+
       const resource = resourceFromAttributes({
         'service.name': 'jshookmcp',
         'service.instance.id': `${process.pid}-${Date.now()}`,
+        'install.id': installId,
       });
 
       const traceExporter = this.options.makeTraceExporter

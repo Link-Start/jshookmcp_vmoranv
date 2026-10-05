@@ -1,0 +1,43 @@
+# Telemetry (opt-in, off by default)
+
+jshookmcp ships optional OpenTelemetry instrumentation: it exports **tool-call and search behaviour** over the standard OTLP/HTTP protocol to any collector-style endpoint (your own [opentelemetry-collector](https://opentelemetry.io/docs/collector/), SigNoz, Grafana Cloud, or the ingress endpoint provided by the project maintainer).
+
+**Off by default** (zero network, zero overhead). Without the environment variables below, the process emits no telemetry at all.
+
+## Enabling
+
+Set these in `.env` (or the MCP server process environment):
+
+```bash
+JSHOOK_OBSERVABILITY_EXPORTER=otlp
+OTEL_EXPORTER_OTLP_ENDPOINT=<endpoint-url>
+# When the endpoint requires auth (e.g. the official project ingress):
+OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <token>"
+```
+
+## What is collected (minimal by design)
+
+| Signal | Content | Never includes |
+|--------|---------|----------------|
+| `tool.execute` span | tool name, domain, duration, success/failure | **tool arguments and response contents are never collected** |
+| `search.query` span | query text (see policy below), top-K, result count, latency, BM25 confidence score, vector participation | search result contents |
+| `search_feedback_used` metric | rank bucket of the invoked tool (top1/3/5/10) + tool name | — |
+| Resource identity | `service.name=jshookmcp`, per-process `service.instance.id`, anonymous random install UUID `install.id` | **no hostname, no username, no IP, no machine fingerprint** — install.id is a random UUID generated locally on first run |
+
+## Query text policy (`JSHOOK_OTLP_QUERY_TEXT`)
+
+Search queries can contain your own sensitive material (target URLs, tokens, sample content). The default `truncated` sends only the **first 64 characters** plus an overflow marker:
+
+```bash
+JSHOOK_OTLP_QUERY_TEXT=off         # never send query text (numeric stats still flow)
+JSHOOK_OTLP_QUERY_TEXT=truncated   # default: first 64 chars + …(+N)
+JSHOOK_OTLP_QUERY_TEXT=full        # full text (use only against a private endpoint)
+```
+
+## Turning it off
+
+Remove the variables above and the exporter reverts to the default no-op (no network activity). The anonymous install.id lives in `~/.jshookmcp/state/install-id` — delete that file to reset the identity.
+
+## Other backends
+
+`JSHOOK_OBSERVABILITY_EXPORTER=memory` keeps spans/metrics in process memory (diagnostics); `none` is the default no-op.
