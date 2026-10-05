@@ -157,6 +157,15 @@ export class OtlpInstrumentation implements InstrumentationContract {
         import('@opentelemetry/exporter-metrics-otlp-http'),
       ]);
 
+      // Proxy support: OTLP endpoints on GFW-filtered hosts (e.g. *.workers.dev)
+      // are unreachable directly from proxied networks. The OTel node transport
+      // uses node:http (not fetch), so undici dispatchers and
+      // NODE_USE_ENV_PROXY do NOT apply — the supported hook is a
+      // function-valued `httpAgentOptions` mapped to the agent factory.
+      // HttpsProxyAgent honors HTTP CONNECT; NO_PROXY entries and localhost
+      // endpoints stay direct.
+      const agentOptions = await buildProxyAgentOptions();
+
       // install.id: persistent anonymous UUID per installation, so
       // distributed telemetry can tell "one install, many sessions" from
       // "many installs" without collecting anything identifying. A filesystem
@@ -172,11 +181,11 @@ export class OtlpInstrumentation implements InstrumentationContract {
 
       const traceExporter = this.options.makeTraceExporter
         ? (this.options.makeTraceExporter() as never)
-        : new traceExpModule.OTLPTraceExporter(
-            this.options.traceUrl
-              ? { url: this.options.traceUrl, headers: this.options.headers }
-              : { headers: this.options.headers },
-          );
+        : new traceExpModule.OTLPTraceExporter({
+            ...(this.options.traceUrl ? { url: this.options.traceUrl } : {}),
+            headers: this.options.headers,
+            ...agentOptions,
+          });
       const spanProvider = new BasicTracerProvider({
         resource,
         spanProcessors: [
@@ -188,11 +197,11 @@ export class OtlpInstrumentation implements InstrumentationContract {
 
       const metricExporter = this.options.makeMetricExporter
         ? (this.options.makeMetricExporter() as never)
-        : new metricExpModule.OTLPMetricExporter(
-            this.options.metricUrl
-              ? { url: this.options.metricUrl, headers: this.options.headers }
-              : { headers: this.options.headers },
-          );
+        : new metricExpModule.OTLPMetricExporter({
+            ...(this.options.metricUrl ? { url: this.options.metricUrl } : {}),
+            headers: this.options.headers,
+            ...agentOptions,
+          });
       const metricProvider = new MeterProvider({
         resource,
         readers: [
@@ -431,4 +440,60 @@ function noopSpan(name: string): SpanLike {
       /* no-op */
     },
   };
+}
+
+// ── proxy support ──
+
+/**
+ * Build the `httpAgentOptions` constructor injection for the OTLP exporters
+ * when (a) a proxy env var is present and (b) the configured OTLP endpoint
+ * host is not covered by NO_PROXY. Returns `{}` (no injection → default
+ * direct agents) otherwise. https-proxy-agent is an optional dependency:
+ * a missing package degrades to direct connection.
+ */
+async function buildProxyAgentOptions(): Promise<Record<string, unknown>> {
+  const proxyUrl =
+    process.env.https_proxy ??
+    process.env.HTTPS_PROXY ??
+    process.env.all_proxy ??
+    process.env.ALL_PROXY;
+  if (!proxyUrl) return {};
+
+  const endpoint =
+    process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '';
+  let targetHost = '';
+  try {
+    targetHost = endpoint ? new URL(endpoint).hostname : '';
+  } catch {
+    targetHost = '';
+  }
+  // No endpoint configured (or unparseable): the default collector is
+  // localhost — a proxy would only get in the way.
+  if (!targetHost || isNoProxyMatch(targetHost, process.env.NO_PROXY ?? process.env.no_proxy)) {
+    return {};
+  }
+
+  try {
+    const { HttpsProxyAgent } = await import('https-proxy-agent');
+    const agent = new HttpsProxyAgent(proxyUrl);
+    return {
+      // Function-valued httpAgentOptions is the legacy constructor path's
+      // agentFactory hook — a top-level `agentFactory` option is silently
+      // dropped by convertLegacyHttpOptions.
+      httpAgentOptions: async () => agent as never,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/** NO_PROXY matching: comma-separated hostnames/suffixes; localhost + loopback always bypass. */
+function isNoProxyMatch(host: string, noProxy: string | undefined): boolean {
+  if (host === 'localhost' || host === '::1' || host.startsWith('127.')) return true;
+  if (!noProxy) return false;
+  return noProxy
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase().replace(/^\./, ''))
+    .filter(Boolean)
+    .some((entry) => host.toLowerCase() === entry || host.toLowerCase().endsWith(`.${entry}`));
 }
