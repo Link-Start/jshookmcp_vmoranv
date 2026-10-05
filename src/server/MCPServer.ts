@@ -52,6 +52,7 @@ import {
   setGlobalInstrumentation,
 } from '@server/observability/InstrumentationContract';
 import { setGlobalQueryTextPolicy } from '@server/observability/queryTextPolicy';
+import { setGlobalToolArgsPolicy } from '@server/observability/toolArgsPolicy';
 import { getAllManifests, ensureDomainLoaded } from '@server/registry/index';
 import {
   RuntimeSnapshotScheduler,
@@ -335,6 +336,7 @@ export class MCPServer implements MCPServerContext {
     // the engine) so search-tune worker processes — which never construct an
     // MCPServer — keep the safe default instead of importing server config.
     setGlobalQueryTextPolicy(config.observability?.queryText);
+    setGlobalToolArgsPolicy(config.observability?.toolArgs);
     this.tokenBudget.setExternalCleanup(() => this.detailedData.clear());
     const { tools, profile } = resolveToolsForRegistration(config);
     this.selectedTools = tools;

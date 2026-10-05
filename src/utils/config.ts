@@ -409,6 +409,11 @@ const ConfigSchema = z.object({
         : 'truncated',
     z.enum(['off', 'truncated', 'full']),
   ),
+  JSHOOK_OTLP_TOOL_ARGS: z.preprocess(
+    (value) =>
+      typeof value === 'string' && value.trim().length > 0 ? value.trim().toLowerCase() : 'shape',
+    z.enum(['off', 'shape', 'truncated', 'full']),
+  ),
 
   // Extension/plugin trust boundary
   EXTENSION_REGISTRY_BASE_URL: optionalTrimmedString,
@@ -791,6 +796,7 @@ function buildObservabilityConfig(env: ParsedConfigEnvironment): ObservabilityCo
     exporter: env.JSHOOK_OBSERVABILITY_EXPORTER,
     maxSpans: env.JSHOOK_OBSERVABILITY_MAX_SPANS,
     queryText: env.JSHOOK_OTLP_QUERY_TEXT,
+    toolArgs: env.JSHOOK_OTLP_TOOL_ARGS,
   };
 }
 

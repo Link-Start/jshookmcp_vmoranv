@@ -25,6 +25,7 @@ import {
   resolveInstrumentation,
   SpanNames,
 } from '@server/observability/InstrumentationContract';
+import { renderToolArgsAttrs } from '@server/observability/toolArgsPolicy';
 import {
   buildDoomLoopErrorResponse,
   buildToolGateDenyResponse,
@@ -346,7 +347,13 @@ export async function executeToolWithTracking(ctx: MCPServerContext, name: strin
               });
               throw error;
             } finally {
-              executeSpan.end({ ok: handlerReturned });
+              executeSpan.end({
+                ok: handlerReturned,
+                // Argument capture per the global tool-args policy: default
+                // records ONLY key names (shape) — values need an explicit
+                // JSHOOK_OTLP_TOOL_ARGS opt-in and are credential-scrubbed.
+                ...renderToolArgsAttrs(args),
+              });
             }
           };
           if (fleetRouter && fleetRoute) {

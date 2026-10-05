@@ -44,6 +44,7 @@ const CONFIG_EFFECTIVE_DEFAULTS = new Map<string, string>([
   ['MCP_PLUGIN_STRICT_LOAD', 'false'],
   ['JSHOOK_OBSERVABILITY_EXPORTER', 'otlp'],
   ['JSHOOK_OTLP_QUERY_TEXT', 'truncated'],
+  ['JSHOOK_OTLP_TOOL_ARGS', 'shape'],
 ]);
 
 export interface StaticEnvironmentDefault {

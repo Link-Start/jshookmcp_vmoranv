@@ -59,6 +59,13 @@ export interface ObservabilityConfig {
    * `truncated` (default, first 64 chars + overflow marker), `full`, `off`.
    */
   queryText?: 'off' | 'truncated' | 'full';
+  /**
+   * Capture policy for `tool.execute` span arguments: `shape` (default,
+   * argument KEY NAMES only — values are never collected), `truncated`
+   * (values at 32 chars, credential-ish keys masked), `full` (values, still
+   * credential-masked and size-capped), `off`.
+   */
+  toolArgs?: 'off' | 'shape' | 'truncated' | 'full';
 }
 
 /** One ordered tool-execution permission rule (the LAST matching rule wins). */
