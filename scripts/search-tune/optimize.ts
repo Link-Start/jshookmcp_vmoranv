@@ -24,6 +24,12 @@
  *                      Σ|param−default|/(max−min) — 0 disables.
  *   --no-prune         disable freezing low-sensitivity params to shipped
  *                      defaults after phase 1 (pruner).
+ *   --vector           enable the dense-vector signal in every worker
+ *                      (SEARCH_VECTOR_ENABLED=true) and include the two
+ *                      vector-scoring params in phase-1 sampling. Without it,
+ *                      workers run vectorEnabled=false and the vector params
+ *                      are excluded — sampling them in a lexical run fits
+ *                      noise on a dead dimension.
  *   --dry-run          run the full pipeline but do NOT write .env.
  */
 import { execFile } from 'node:child_process';
@@ -410,6 +416,13 @@ interface TrialSpec {
   /** Source trial id when this spec is a holdout-verification re-run. */
   sourceTrialId?: string;
   /**
+   * Whether the worker runs with the dense-vector signal on. Propagated to a
+   * deterministic SEARCH_VECTOR_ENABLED env override (explicit 'false' in
+   * lexical runs, so a shell-leaked SEARCH_VECTOR_ENABLED cannot silently
+   * flip a lexical run into a vector run).
+   */
+  vectorEnabled?: boolean;
+  /**
    * Restrict scoring to cases carrying one of these tags. Used by the OOD
    * domain holdout so the trial measures domains the candidate was never
    * tuned on, instead of the whole fixture.
@@ -455,6 +468,8 @@ interface OptimizeOptions {
   regularization: number;
   /** Freeze low-sensitivity params to shipped defaults after phase 1. */
   prune: boolean;
+  /** Enable the dense-vector signal in workers (phase-1 vector params join). */
+  vector: boolean;
   /** Run the pipeline without writing .env. */
   dryRun: boolean;
 }
@@ -482,6 +497,7 @@ function parseOptions(): OptimizeOptions {
     dataset,
     regularization: parseFloat(get('--regularization', '0.01')),
     prune: !has('--no-prune'),
+    vector: has('--vector'),
     dryRun: has('--dry-run'),
   };
 }
@@ -496,6 +512,10 @@ function spawnWorker(spec: TrialSpec): Promise<TrialResult | null> {
   for (const [key, value] of Object.entries(spec.params)) {
     envOverrides[key] = String(value);
   }
+  // Deterministic vector switch: explicit in BOTH modes so a shell-exported
+  // SEARCH_VECTOR_ENABLED can never flip a lexical run (or mute a --vector
+  // run) halfway through the trial population.
+  envOverrides.SEARCH_VECTOR_ENABLED = spec.vectorEnabled ? 'true' : 'false';
   envOverrides.TRIAL_SPEC_ENV = JSON.stringify(spec);
 
   return new Promise((res) => {
@@ -612,11 +632,16 @@ async function orchestrate(): Promise<void> {
   await writeFile(outFile, '', 'utf-8');
 
   const defs = await loadSearchSpace();
-  const phase1Defs = getPhaseParams(defs, 1);
-  const phase3Defs = getPhaseParams(defs, 3);
-  const phase4Defs = getPhaseParams(defs, 4);
+  const phase1Defs = getPhaseParams(defs, 1, { vectorEnabled: options.vector });
+  const phase3Defs = getPhaseParams(defs, 3, { vectorEnabled: options.vector });
+  const phase4Defs = getPhaseParams(defs, 4, { vectorEnabled: options.vector });
   console.log(
     `Search tuning: ${defs.length} params (${phase1Defs.length} lexical, ${phase3Defs.length} profile, ${phase4Defs.length} rerank)`,
+  );
+  console.log(
+    options.vector
+      ? 'Vector signal: ENABLED (workers run SEARCH_VECTOR_ENABLED=true; vector-scoring params join phase 1)'
+      : 'Vector signal: disabled (lexical run; vector-scoring params excluded from sampling)',
   );
   console.log(`Using ${options.concurrency} CPU cores, seed=${options.seed}`);
 
@@ -661,6 +686,7 @@ async function orchestrate(): Promise<void> {
       dataset: options.dataset === 'realtime' ? 'realtime' : 'search-quality',
       params: params as Record<string, number>,
       seed: options.seed + i,
+      vectorEnabled: options.vector || undefined,
     });
   }
   const p1Results = await runTrials(p1Specs, options.concurrency, 'Phase 1 — Random', outFile);
@@ -721,6 +747,7 @@ async function orchestrate(): Promise<void> {
         dataset: options.dataset === 'realtime' ? 'realtime' : 'search-quality',
         params: params as Record<string, number>,
         seed: options.seed + 10000 + p2idx,
+        vectorEnabled: options.vector || undefined,
       });
       p2idx++;
     }
@@ -752,6 +779,7 @@ async function orchestrate(): Promise<void> {
     seed: options.seed + 40000 + i,
     evaluateHoldout: true,
     sourceTrialId: trial.trialId,
+    vectorEnabled: options.vector || undefined,
   }));
   const sourceByHoldoutId = new Map(holdoutSpecs.map((s) => [s.trialId, s.sourceTrialId] as const));
   const evolveScoreByTrialId = new Map(
@@ -837,6 +865,7 @@ async function orchestrate(): Promise<void> {
             params: bestLexical.params,
             seed: options.seed + 50000,
             onlyTags: [...ood.heldOutTags],
+            vectorEnabled: options.vector || undefined,
           },
         ],
         1,
@@ -868,6 +897,7 @@ async function orchestrate(): Promise<void> {
       dataset: options.dataset === 'realtime' ? 'realtime' : 'profile-tier',
       params: merged as Record<string, number>,
       seed: options.seed + 20000 + i,
+      vectorEnabled: options.vector || undefined,
     });
   }
   const p3Results = await runTrials(p3Specs, options.concurrency, 'Phase 3 — Profile', outFile);
@@ -890,6 +920,7 @@ async function orchestrate(): Promise<void> {
       dataset: options.dataset === 'realtime' ? 'realtime' : 'rerank-state',
       params: merged as Record<string, number>,
       seed: options.seed + 30000 + i,
+      vectorEnabled: options.vector || undefined,
     });
   }
   const p4Results = await runTrials(p4Specs, options.concurrency, 'Phase 4 — Rerank', outFile);
