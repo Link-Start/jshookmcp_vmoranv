@@ -168,6 +168,21 @@ export async function activateToolNames(
   };
 }
 
+/**
+ * Human-readable explanation for tools skipped over the activation budget.
+ * Shared with the call_tool auto-activation path so a budget-blocked proxy
+ * call reports WHY it failed instead of a misleading "Unknown tool".
+ */
+export function formatActivationBudgetHint(summary: ActivationSummary): string {
+  return (
+    `Skipped ${summary.budgetExceeded.length} tool(s) over the activation budget ` +
+    `(used ${summary.budget.usedTokens}/${summary.budget.maxTokens} tokens, ` +
+    `${summary.budget.activeTools}/${summary.budget.maxTools} tools): ` +
+    `${summary.budgetExceeded.join(', ')}. Deactivate unused tools first or raise ` +
+    `MCP_TOOL_ACTIVATION_BUDGET_TOKENS / MCP_TOOL_MAX_ACTIVE_TOOLS.`
+  );
+}
+
 // ── activate_tools handler ──
 
 export async function handleActivateTools(
@@ -194,11 +209,7 @@ export async function handleActivateTools(
 
   const hint =
     result.budgetExceeded.length > 0
-      ? `Skipped ${result.budgetExceeded.length} tool(s) over the activation budget ` +
-        `(used ${result.budget.usedTokens}/${result.budget.maxTokens} tokens, ` +
-        `${result.budget.activeTools}/${result.budget.maxTools} tools): ` +
-        `${result.budgetExceeded.join(', ')}. Deactivate unused tools first or raise ` +
-        `MCP_TOOL_ACTIVATION_BUDGET_TOKENS / MCP_TOOL_MAX_ACTIVE_TOOLS.`
+      ? formatActivationBudgetHint(result)
       : result.activated.length > 0
         ? 'Tools activated. If they do not appear in your tool list, use call_tool({ name: "<tool>", args: {...} ' +
           '}) to invoke them.'

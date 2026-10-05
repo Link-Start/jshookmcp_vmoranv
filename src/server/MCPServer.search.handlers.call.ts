@@ -237,15 +237,21 @@ function resolveCallToolArgs(args: Record<string, unknown>): {
  * tools/list_changed (and search-tier sessions) can still call it. Returns
  * false when the tool is absent from the catalog or the registry is down.
  */
+/** Why auto-activation did (or did not) put the tool within reach. */
+type AutoActivateOutcome =
+  | { status: 'ok' }
+  | { status: 'not-found' }
+  | { status: 'budget-exceeded'; hint: string };
+
 async function autoActivateCallTool(
   ctx: MCPServerContext,
   name: string,
   searchCatalog: Awaited<ReturnType<typeof loadSearchCatalog>>,
   callMetadata: ReturnType<typeof buildCallToolMetadata>,
-): Promise<boolean> {
+): Promise<AutoActivateOutcome> {
   try {
     const catalogEntry = searchCatalog.entryByName.get(name);
-    if (!catalogEntry) return false;
+    if (!catalogEntry) return { status: 'not-found' };
     const { activateToolNames } = await import('@server/MCPServer.search.handlers.activate');
     const domain = catalogEntry.domain;
     if (domain && !ctx.enabledDomains.has(domain)) {
@@ -260,14 +266,34 @@ async function autoActivateCallTool(
       }
     }
     if (!ctx.router.has(name)) {
-      await activateToolNames(ctx, [name]);
+      const activation = await activateToolNames(ctx, [name]);
+      // The summary is the ONLY truth: activateToolNames silently SKIPS tools
+      // over the activation budget, so "we asked" ≠ "it activated". Trusting
+      // the request used to report activatedTools=[name] and then fail the
+      // dispatch with a misleading "Unknown tool".
+      const landed = activation.activated.includes(name) || activation.alreadyActive.includes(name);
+      if (!landed) {
+        callMetadata.wasAutoActivated = false;
+        callMetadata.activatedTools = [];
+        if (activation.budgetExceeded.includes(name)) {
+          const { formatActivationBudgetHint } =
+            await import('@server/MCPServer.search.handlers.activate');
+          return { status: 'budget-exceeded', hint: formatActivationBudgetHint(activation) };
+        }
+        return { status: 'not-found' };
+      }
+      callMetadata.wasAutoActivated = true;
+      callMetadata.activatedTools = activation.activated.includes(name) ? [name] : [];
+    } else {
+      // Domain activation above brought the tool online without individual
+      // activation — the tool IS active now.
+      callMetadata.wasAutoActivated = true;
+      callMetadata.activatedTools = [name];
     }
-    callMetadata.wasAutoActivated = true;
-    callMetadata.activatedTools = [name];
-    return true;
+    return { status: 'ok' };
   } catch {
     /* registry not initialised — fall through to error */
-    return false;
+    return { status: 'not-found' };
   }
 }
 
@@ -319,13 +345,21 @@ export async function handleCallTool(
   // but not yet activated (e.g., when search returned 0 results and domain
   // fallback activation was triggered).
   if (!ctx.router.has(name)) {
-    const autoActivated = await autoActivateCallTool(ctx, name, searchCatalog, callMetadata);
+    const autoActivation = await autoActivateCallTool(ctx, name, searchCatalog, callMetadata);
 
-    if (!autoActivated) {
+    if (autoActivation.status !== 'ok') {
+      // Budget-blocked: the tool exists but the activation budget silently
+      // skipped it — say THAT, with the same remediation hint
+      // activate_tools reports, instead of the old misleading pair
+      // (activatedTools=[name] + "Unknown tool").
+      const error =
+        autoActivation.status === 'budget-exceeded'
+          ? `Tool "${name}" could not be auto-activated: ${autoActivation.hint}`
+          : `Tool "${name}" is not currently active. Use activate_tools or activate_domain first, then call it directly.`;
       return asTextResponse(
         JSON.stringify({
           success: false,
-          error: `Tool "${name}" is not currently active. Use activate_tools or activate_domain first, then call it directly.`,
+          error,
           ...callMetadata,
         }),
       );

@@ -64,10 +64,23 @@ vi.mock('@server/MCPServer.search.helpers', () => ({
   })),
 }));
 
-vi.mock('@server/MCPServer.search.handlers.activate', () => ({
+vi.mock('@server/MCPServer.search.handlers.activate', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   activateToolNames: state.activateToolNames,
   handleActivateTools: state.handleActivateTools,
   handleDeactivateTools: state.handleDeactivateTools,
+}));
+
+vi.mock('@server/registry/SearchCatalog', () => ({
+  // The real catalog depends on registry state that this suite mocks away;
+  // the call handler only needs entryByName lookups for auto-activation.
+  loadSearchCatalog: vi.fn(async () => ({
+    entryByName: new Map([['binary_decode', { name: 'binary_decode', domain: 'encoding' }]]),
+    toolByName: new Map(),
+    domainByToolName: new Map([['binary_decode', 'encoding']]),
+    tools: [],
+    sceneKeywordsByToolName: new Map(),
+  })),
 }));
 
 vi.mock('@server/registry/index', async (importOriginal) => ({
@@ -111,7 +124,9 @@ describe('MCPServer.search.handlers.call', () => {
       activated: ['test_tool'],
       alreadyActive: [],
       notFound: [],
+      budgetExceeded: [],
       totalActive: 1,
+      budget: { usedTokens: 0, maxTokens: 30_000, activeTools: 1, maxTools: 50 },
     });
   });
 
@@ -299,6 +314,39 @@ describe('MCPServer.search.handlers.call', () => {
     // Auto-activation is disabled for security. Tools must be explicitly activated.
     expect(result.success).toBe(false);
     expect(result.error).toContain('not currently active');
+    expect(ctx.executeToolWithTracking).not.toHaveBeenCalled();
+  });
+
+  it('reports budget-blocked activation accurately instead of a misleading Unknown tool', async () => {
+    // Regression: activateToolNames silently SKIPS tools over the activation
+    // budget; the old code discarded the summary and unconditionally claimed
+    // activatedTools=[name], then failed the dispatch with "Unknown tool".
+    // 'binary_decode' exists in the real search catalog, so auto-activation
+    // reaches the budget check.
+    state.activateToolNames.mockResolvedValue({
+      activated: [],
+      alreadyActive: [],
+      notFound: [],
+      budgetExceeded: ['binary_decode'],
+      totalActive: 50,
+      budget: { usedTokens: 9_787, maxTokens: 30_000, activeTools: 50, maxTools: 50 },
+    });
+    const ctx = createCtx({
+      router: { has: vi.fn(() => false) },
+      enabledDomains: new Set<string>(),
+    });
+
+    const response = await handleCallTool(ctx, { name: 'binary_decode', args: {} });
+    const result = parseResponse(response);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('could not be auto-activated');
+    expect(result.error).toContain('activation budget');
+    expect(result.error).toContain('MCP_TOOL_ACTIVATION_BUDGET_TOKENS');
+    expect(result.error).toContain('binary_decode');
+    // No false claims about activation, and nothing was dispatched.
+    expect(result.wasAutoActivated).toBe(false);
+    expect(result.activatedTools).toEqual([]);
     expect(ctx.executeToolWithTracking).not.toHaveBeenCalled();
   });
 
