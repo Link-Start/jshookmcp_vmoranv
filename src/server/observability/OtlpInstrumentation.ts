@@ -40,7 +40,14 @@ export interface OtlpInstrumentationOptions {
   metricUrl?: string;
   /** Headers forwarded with every export (e.g. basic-auth for Grafana Cloud). */
   headers?: Record<string, string>;
-  /** BatchSpanProcessor delay; small default because stdio processes are short-lived. */
+  /**
+   * BatchSpanProcessor delay. 30s: coalesce spans into fewer requests so a
+   * large install base conserves the ingress free-tier request quota
+   * (100k req/day) instead of spending one request per sparse span. The
+   * processor only exports when the queue is NON-empty, so idle processes
+   * send nothing (idle = silent). Graceful shutdown force-flushes (bounded),
+   * so the 30s window is only lost on a hard crash.
+   */
   spanScheduleDelayMs?: number;
   /** Periodic metric reader interval. */
   metricExportIntervalMs?: number;
@@ -191,7 +198,7 @@ export class OtlpInstrumentation implements InstrumentationContract {
         resource,
         spanProcessors: [
           new BatchSpanProcessor(traceExporter, {
-            scheduledDelayMillis: this.options.spanScheduleDelayMs ?? 2_000,
+            scheduledDelayMillis: this.options.spanScheduleDelayMs ?? 30_000,
           }),
         ],
       });
