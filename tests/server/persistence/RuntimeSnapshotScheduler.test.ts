@@ -176,6 +176,85 @@ describe('RuntimeSnapshotScheduler', () => {
     scheduler.dispose();
   });
 
+  it('registerAsync completes the restore before resolving', async () => {
+    // Lazy sources (search trackers) register mid-session while the scheduler
+    // is already started. The awaited variant must finish restoreSnapshot
+    // BEFORE it resolves — a fire-and-forget restore races with the first
+    // record and restoreSnapshot() wipes whatever was recorded first.
+    // The race only exists when a state file to restore is PRESENT — a fresh
+    // file makes restoreOne bail at readFile, and there is nothing to clobber.
+    const scheduler = new RuntimeSnapshotScheduler({ debounceMs: 5, periodicMs: 60_000 });
+    await scheduler.start();
+    const filePath = resolve(tmpDir, 'lazy.json');
+    await writeFile(filePath, '{}', 'utf-8');
+
+    let restored = false;
+    const source = {
+      isPersistDirty: () => false,
+      exportSnapshot: () => ({}),
+      restoreSnapshot: () => {
+        restored = true;
+      },
+      markPersisted: () => undefined,
+    };
+
+    await scheduler.registerAsync(filePath, source);
+    // Not "eventually" — already true at the moment the await returned.
+    expect(restored).toBe(true);
+  });
+
+  it('registerAsync is idempotent: re-registering the same source does not re-restore', async () => {
+    const scheduler = new RuntimeSnapshotScheduler({ debounceMs: 5, periodicMs: 60_000 });
+    await scheduler.start();
+    const filePath = resolve(tmpDir, 'lazy.json');
+    await writeFile(filePath, '{}', 'utf-8');
+    const restoreSnapshot = vi.fn();
+    const source = {
+      isPersistDirty: () => false,
+      exportSnapshot: () => ({}),
+      restoreSnapshot,
+      markPersisted: () => undefined,
+    };
+
+    await scheduler.registerAsync(filePath, source);
+    await scheduler.registerAsync(filePath, source);
+
+    expect(restoreSnapshot).toHaveBeenCalledTimes(1);
+    expect(scheduler.getRegisteredSources()).toHaveLength(1);
+  });
+
+  it('registerAsync swaps a rebuilt source for the same file (engine reload)', async () => {
+    // Extension reload re-constructs the search engine; the new trackers must
+    // REPLACE the retired ones under the same file path, or flushes keep
+    // persisting the dead instances.
+    const scheduler = new RuntimeSnapshotScheduler({ debounceMs: 5, periodicMs: 60_000 });
+    await scheduler.start();
+
+    const retired = {
+      isPersistDirty: () => false,
+      exportSnapshot: () => ({ generation: 'retired' }),
+      restoreSnapshot: () => undefined,
+      markPersisted: () => undefined,
+    };
+    const live = {
+      isPersistDirty: () => true,
+      exportSnapshot: () => ({ generation: 'live' }),
+      restoreSnapshot: () => undefined,
+      markPersisted: () => undefined,
+    };
+    const filePath = resolve(tmpDir, 'search-quality.json');
+    await scheduler.registerAsync(filePath, retired);
+    await scheduler.registerAsync(filePath, live);
+
+    expect(scheduler.getRegisteredSources()).toHaveLength(1);
+    expect(scheduler.getRegisteredSources()?.[0]?.source).toBe(live);
+
+    // The swap is visible to flushes: the live instance is what lands on disk.
+    await scheduler.flushAll();
+    const written = JSON.parse(await readFile(filePath, 'utf-8'));
+    expect(written).toEqual({ generation: 'live' });
+  });
+
   it('skips clean sources during flush', async () => {
     const scheduler = new RuntimeSnapshotScheduler();
     const store = new StateBoardStore();

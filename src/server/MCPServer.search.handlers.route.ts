@@ -62,7 +62,7 @@ export async function handleRouteTool(
   const engine = await getSearchEngine(ctx);
   // Trackers live on the engine; register them for persistence the first time
   // the engine is built. Idempotent — the scheduler dedupes by source.
-  registerSearchSnapshotSourcesFromCtx(ctx, engine);
+  await registerSearchSnapshotSourcesFromCtx(ctx, engine);
   // SECURITY: Default autoActivate to false to prevent privilege escalation.
   // Previously defaulted to true, allowing prompt injection to activate powerful tools.
   const autoActivate = context?.autoActivate === true;

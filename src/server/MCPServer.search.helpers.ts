@@ -163,7 +163,10 @@ export async function getSearchEngine(ctx: MCPServerContext): Promise<ToolSearch
   }
   // Persistence registration lives here so every construction path (not just
   // the search_tools / call_tool handlers) wires the snapshot scheduler.
-  registerSearchSnapshotSourcesFromCtx(ctx, engine);
+  // Awaited: registerAsync completes the restore before the engine is handed
+  // out, so the first recordSearch can never race (and be clobbered by) a
+  // still-in-flight restoreSnapshot.
+  await registerSearchSnapshotSourcesFromCtx(ctx, engine);
 
   return engine;
 }

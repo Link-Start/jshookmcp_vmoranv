@@ -19,15 +19,18 @@ import type { RuntimeSnapshotScheduler } from '@server/persistence/RuntimeSnapsh
 import type { MCPServerContext } from '@server/MCPServer.context';
 import { resolve } from 'node:path';
 
-export function registerSearchSnapshotSources(
+export async function registerSearchSnapshotSources(
   scheduler: RuntimeSnapshotScheduler,
   engine: ToolSearchEngine,
   stateDir: string,
-): { feedbackTracker: unknown; qualityTracker: unknown } {
+): Promise<{ feedbackTracker: unknown; qualityTracker: unknown }> {
   const feedbackTracker = engine.getFeedbackTracker();
   const qualityTracker = engine.getSearchQualityTracker();
-  scheduler.register(resolve(stateDir, 'search-feedback.json'), feedbackTracker);
-  scheduler.register(resolve(stateDir, 'search-quality.json'), qualityTracker);
+  // registerAsync (not register): the scheduler is already started by the
+  // time the engine is built lazily, so the restore must COMPLETE before this
+  // resolves — the caller awaits it before the first search records anything.
+  await scheduler.registerAsync(resolve(stateDir, 'search-feedback.json'), feedbackTracker);
+  await scheduler.registerAsync(resolve(stateDir, 'search-quality.json'), qualityTracker);
   return { feedbackTracker, qualityTracker };
 }
 
@@ -37,15 +40,15 @@ export function registerSearchSnapshotSources(
  * by source, and a ctx without domain instances (bare test contexts, or a
  * profile that never built an engine) simply skips registration.
  */
-export function registerSearchSnapshotSourcesFromCtx(
+export async function registerSearchSnapshotSourcesFromCtx(
   ctx: MCPServerContext,
   engine: ToolSearchEngine,
-): void {
+): Promise<void> {
   const getInst =
     typeof ctx.getDomainInstance === 'function' ? ctx.getDomainInstance.bind(ctx) : null;
   const scheduler = getInst?.<RuntimeSnapshotScheduler>('snapshotScheduler');
   const stateDir = getInst?.<string>('snapshotStateDir');
   if (scheduler && stateDir) {
-    registerSearchSnapshotSources(scheduler, engine, stateDir);
+    await registerSearchSnapshotSources(scheduler, engine, stateDir);
   }
 }

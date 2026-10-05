@@ -49,23 +49,54 @@ export class RuntimeSnapshotScheduler {
   }
 
   register(filePath: string, source: SnapshotSource): void {
-    const existing = this.sources.find(
-      (entry) => entry.filePath === filePath || entry.source === source,
-    );
-    if (existing) {
-      if (existing.filePath !== filePath || existing.source !== source) {
-        logger.warn(`skipping conflicting snapshot registration for ${filePath}`);
-      }
-      return;
-    }
-
-    const entry = { source, filePath };
-    this.sources.push(entry);
-    if (this.started) {
+    const entry = this.upsertSource(filePath, source);
+    if (entry && this.started) {
       void this.restoreOne(entry).catch((err) =>
         logger.warn(`snapshot restore failed for ${entry.filePath}:`, err),
       );
     }
+  }
+
+  /**
+   * Awaitable registration: resolves only after the restore (when the
+   * scheduler is already started) has completed. Lazy sources — e.g. the
+   * search trackers, registered when the engine is first built mid-session —
+   * must use this variant and be awaited BEFORE any recording starts: the
+   * fire-and-forget restore in `register()` races with the first record,
+   * and restoreSnapshot() rebuilds internal state from the file, clobbering
+   * whatever was recorded before the restore landed.
+   */
+  async registerAsync(filePath: string, source: SnapshotSource): Promise<void> {
+    const entry = this.upsertSource(filePath, source);
+    if (entry && this.started) {
+      await this.restoreOne(entry);
+    }
+  }
+
+  /**
+   * Insert, dedupe, or swap a source. Returns the entry when a registration
+   * or replacement occurred, or undefined when the (source, path) pair is
+   * already registered — idempotent re-registration must not re-run the
+   * restore, or it would wipe records added since the first restore.
+   */
+  private upsertSource(filePath: string, source: SnapshotSource): SnapshotSourceEntry | undefined {
+    const byPath = this.sources.find((entry) => entry.filePath === filePath);
+    if (byPath) {
+      if (byPath.source === source) return undefined;
+      // Same file, new source: the live instance was rebuilt (engine
+      // re-construction on extension reload swaps the trackers). Replace in
+      // place so flushes persist the CURRENT instance, not the retired one.
+      byPath.source = source;
+      return byPath;
+    }
+    const bySource = this.sources.find((entry) => entry.source === source);
+    if (bySource) {
+      logger.warn(`skipping conflicting snapshot registration for ${filePath}`);
+      return undefined;
+    }
+    const entry: SnapshotSourceEntry = { source, filePath };
+    this.sources.push(entry);
+    return entry;
   }
 
   /** Read-only view of the registered sources (test/inspection surface). */

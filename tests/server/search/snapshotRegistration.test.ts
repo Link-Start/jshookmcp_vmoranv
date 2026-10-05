@@ -62,11 +62,11 @@ vi.mock('@src/constants', async (importOriginal) => ({
 import { handleSearchTools } from '@server/MCPServer.search.handlers.search';
 
 describe('registerSearchSnapshotSources', () => {
-  it('registers both trackers under distinct file names in the state dir', () => {
-    const register = vi.fn();
-    const scheduler = { register } as unknown as RuntimeSnapshotScheduler;
+  it('registers both trackers under distinct file names in the state dir', async () => {
+    const registerAsync = vi.fn(async () => undefined);
+    const scheduler = { registerAsync } as unknown as RuntimeSnapshotScheduler;
 
-    const registered = registerSearchSnapshotSources(
+    const registered = await registerSearchSnapshotSources(
       scheduler,
       fakeEngine() as never,
       resolve('tmp-state'),
@@ -75,42 +75,42 @@ describe('registerSearchSnapshotSources', () => {
     expect(registered.feedbackTracker).toEqual({ name: 'feedback' });
     expect(registered.qualityTracker).toEqual({ name: 'quality' });
 
-    expect(register).toHaveBeenCalledTimes(2);
-    expect(register).toHaveBeenCalledWith(
+    expect(registerAsync).toHaveBeenCalledTimes(2);
+    expect(registerAsync).toHaveBeenCalledWith(
       resolve('tmp-state', 'search-feedback.json'),
       expect.objectContaining({ name: 'feedback' }),
     );
-    expect(register).toHaveBeenCalledWith(
+    expect(registerAsync).toHaveBeenCalledWith(
       resolve('tmp-state', 'search-quality.json'),
       expect.objectContaining({ name: 'quality' }),
     );
   });
 
-  it('skips gracefully when the ctx has no scheduler or state dir', () => {
+  it('skips gracefully when the ctx has no scheduler or state dir', async () => {
     // A bare ctx (no domain instances) must not throw — registration is a
     // no-op, exactly like a profile whose engine was never built.
-    expect(() =>
+    await expect(
       registerSearchSnapshotSourcesFromCtx({} as never, fakeEngine() as never),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
-  it('skips gracefully when getDomainInstance is missing entirely', () => {
-    expect(() =>
+  it('skips gracefully when getDomainInstance is missing entirely', async () => {
+    await expect(
       registerSearchSnapshotSourcesFromCtx(
         { getDomainInstance: undefined } as never,
         fakeEngine() as never,
       ),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
-  it('is idempotent: a second registration does not grow the scheduler sources', () => {
+  it('is idempotent: a second registration does not grow the scheduler sources', async () => {
     // The engine is cached per ctx, so registerSearchSnapshotSources can run
     // on every search/route/call_tool — the scheduler must not accumulate
     // duplicate entries.
     const scheduler = new RuntimeSnapshotScheduler();
 
-    registerSearchSnapshotSources(scheduler, fakeEngine() as never, resolve('tmp-state'));
-    registerSearchSnapshotSources(scheduler, fakeEngine() as never, resolve('tmp-state'));
+    await registerSearchSnapshotSources(scheduler, fakeEngine() as never, resolve('tmp-state'));
+    await registerSearchSnapshotSources(scheduler, fakeEngine() as never, resolve('tmp-state'));
 
     expect(scheduler.getRegisteredSources()).toHaveLength(2);
     expect(scheduler.getRegisteredSources()?.map((s) => s.filePath)).toEqual([
@@ -119,7 +119,26 @@ describe('registerSearchSnapshotSources', () => {
     ]);
   });
 
-  it('works with real tracker instances (SnapshotSource contract shape)', () => {
+  it('swaps in rebuilt trackers for the same files (engine reload keeps flushes live)', async () => {
+    const scheduler = new RuntimeSnapshotScheduler();
+
+    await registerSearchSnapshotSources(scheduler, fakeEngine() as never, resolve('tmp-state'));
+    const rebuilt = fakeEngine({
+      feedback: { name: 'feedback-v2' },
+      quality: { name: 'quality-v2' },
+    }) as never;
+    await registerSearchSnapshotSources(scheduler, rebuilt, resolve('tmp-state'));
+
+    // Same two files, but the registered sources are the REBUILT instances.
+    const sources = scheduler.getRegisteredSources();
+    expect(sources).toHaveLength(2);
+    expect(sources?.map((s) => (s.source as unknown as { name: string }).name)).toEqual([
+      'feedback-v2',
+      'quality-v2',
+    ]);
+  });
+
+  it('works with real tracker instances (SnapshotSource contract shape)', async () => {
     const scheduler = new RuntimeSnapshotScheduler();
     const feedback = {
       isPersistDirty: () => true,
@@ -133,7 +152,7 @@ describe('registerSearchSnapshotSources', () => {
       restoreSnapshot: () => undefined,
       markPersisted: () => undefined,
     };
-    const registered = registerSearchSnapshotSources(
+    const registered = await registerSearchSnapshotSources(
       scheduler,
       fakeEngine({ feedback, quality }) as never,
       resolve('tmp-state'),

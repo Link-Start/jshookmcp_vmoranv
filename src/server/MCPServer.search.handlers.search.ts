@@ -32,7 +32,7 @@ export async function handleSearchTools(
   const engine = await getSearchEngine(ctx);
   // Trackers live on the engine; register them for persistence the first time
   // the engine is built. Idempotent — the scheduler dedupes by source.
-  registerSearchSnapshotSourcesFromCtx(ctx, engine);
+  await registerSearchSnapshotSourcesFromCtx(ctx, engine);
   const activeNames = getActiveToolNames(ctx);
   const visibleDomains = getVisibleDomainsForTier(ctx);
   let results = await engine.search(query, topK, activeNames, visibleDomains, getBaseTier(ctx));
