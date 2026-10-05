@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { resolve as pathResolve } from 'node:path';
 import { DEFAULT_SEARCH_CONFIG } from '../../src/config/search-defaults';
 import { DEFAULT_SEARCH_VECTOR_MODEL_ID } from '../../src/constants/search-model';
 import { SEARCH_VECTOR_BM25_SKIP_THRESHOLD } from '../../src/constants/search';
@@ -7,6 +8,7 @@ import { loadSearchCatalog } from '../../src/server/registry/SearchCatalog';
 import { buildSearchQualityFixture } from '../../tests/server/search/fixtures/search-quality.fixture';
 import type { SearchEvalCase } from '../../tests/server/search/fixtures/search-quality.fixture';
 import { aggregateSearchMetrics, evaluateCase, summarizeFailedCases } from './metrics';
+import { appendStaticModelReport, type StaticModelReportEntry } from './static-model-report';
 
 const SEMANTIC_CASES = [
   {
@@ -124,12 +126,21 @@ const SEMANTIC_CASES = [
 ] as const satisfies readonly SearchEvalCase[];
 
 async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const outIdx = args.indexOf('--out');
+  // Exclude the --out flag AND its value from model detection, or the output
+  // path would be picked up as the requested model.
+  const modelArgs = outIdx >= 0 ? args.filter((_, i) => i !== outIdx && i !== outIdx + 1) : args;
   const requestedModel =
-    process.argv
-      .slice(2)
+    modelArgs
       .map((argument) => argument.trim())
-      .find((argument) => argument.length > 0 && argument !== '--') ??
+      .find((argument) => argument.length > 0 && !argument.startsWith('--')) ??
     DEFAULT_SEARCH_VECTOR_MODEL_ID;
+  const outPath = pathResolve(
+    outIdx >= 0 && outIdx + 1 < args.length
+      ? args[outIdx + 1]!
+      : 'artifacts/search-tuning/static-model-report.json',
+  );
   const vectorEnabled = requestedModel.toLowerCase() !== 'lexical';
   const catalog = await loadSearchCatalog();
   const fixture = buildSearchQualityFixture();
@@ -195,31 +206,31 @@ async function main(): Promise<void> {
   const failures = summarizeFailedCases(rankedResults, cases);
   const semanticAggregate = aggregateSearchMetrics(semanticMetrics);
   const semanticFailures = summarizeFailedCases(semanticRankedResults, SEMANTIC_CASES);
-  console.log(
-    JSON.stringify(
-      {
-        model: vectorEnabled ? requestedModel : 'lexical',
-        toolCount: catalog.tools.length,
-        caseCount: cases.length,
-        skippedCaseIds,
-        vectorBm25SkipThreshold: SEARCH_VECTOR_BM25_SKIP_THRESHOLD,
-        indexMs,
-        queryMs,
-        meanQueryMs: queryMs / cases.length,
-        peakRssDeltaMb: (peakRss - rssBefore) / (1024 * 1024),
-        ...aggregate,
-        failures,
-        semantic: {
-          caseCount: SEMANTIC_CASES.length,
-          queryMs: semanticQueryMs,
-          meanQueryMs: semanticQueryMs / SEMANTIC_CASES.length,
-          ...semanticAggregate,
-          failures: semanticFailures,
-        },
-      },
-      null,
-      2,
-    ),
+  const result: StaticModelReportEntry = {
+    model: vectorEnabled ? requestedModel : 'lexical',
+    generatedAt: new Date().toISOString(),
+    toolCount: catalog.tools.length,
+    caseCount: cases.length,
+    skippedCaseIds,
+    vectorBm25SkipThreshold: SEARCH_VECTOR_BM25_SKIP_THRESHOLD,
+    indexMs,
+    queryMs,
+    meanQueryMs: queryMs / cases.length,
+    peakRssDeltaMb: (peakRss - rssBefore) / (1024 * 1024),
+    ...aggregate,
+    failures,
+    semantic: {
+      caseCount: SEMANTIC_CASES.length,
+      queryMs: semanticQueryMs,
+      meanQueryMs: semanticQueryMs / SEMANTIC_CASES.length,
+      ...semanticAggregate,
+      failures: semanticFailures,
+    },
+  };
+  console.log(JSON.stringify(result, null, 2));
+  const totalEntries = await appendStaticModelReport(outPath, result);
+  console.error(
+    `[static-model-report] appended to ${outPath} (${totalEntries} entr${totalEntries === 1 ? 'y' : 'ies'})`,
   );
 }
 
