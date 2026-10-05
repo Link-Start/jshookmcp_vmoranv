@@ -6,7 +6,13 @@
  *   tsx scripts/search-tune/report.ts [--in artifacts/search-tuning/trials.jsonl] [--out artifacts/search-tuning/report.md]
  */
 import { readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { isAbsolute, resolve as pathResolve } from 'node:path';
+import { VECTOR_TUNABLE_PARAM_KEYS } from './search-space';
 import type { TrialParams } from './search-space';
+
+/** Mirrors the overfit gate in optimize.ts (evolve/holdout gap > 0.15 → reject). */
+const RRSI_HOLDOUT_GAP_TOLERANCE = 0.15;
 
 /**
  * Reader-owned trial record shape, mirroring what optimize.ts actually
@@ -73,7 +79,7 @@ interface ParameterImportance {
   readonly score: number;
 }
 
-function computeSpearmanImportance(trials: TrialResult[]): ParameterImportance[] {
+export function computeSpearmanImportance(trials: TrialResult[]): ParameterImportance[] {
   if (trials.length < 5) return [];
 
   const paramKeys = new Set<string>();
@@ -99,7 +105,7 @@ function computeSpearmanImportance(trials: TrialResult[]): ParameterImportance[]
 function rankArray(values: number[]): number[] {
   const indexed = values.map((v, i) => ({ v, i }));
   indexed.sort((a, b) => a.v - b.v);
-  const ranks = Array.from({ length: values.length });
+  const ranks = Array.from({ length: values.length }, () => 0);
   for (let rank = 0; rank < indexed.length; rank++) {
     ranks[indexed[rank]!.i] = rank + 1;
   }
@@ -124,9 +130,32 @@ function spearmanCorrelation(x: number[], y: number[]): number {
   return den > 0 ? num / den : 0;
 }
 
+// ── RRSI holdout verification ──
+
+/**
+ * The RRSI-verified winner: among holdout-scored trials that PASS the
+ * overfit gap gate (evolve − holdout ≤ RRSI_HOLDOUT_GAP_TOLERANCE, mirroring
+ * optimize.ts), the one with the best holdout objective. A rejected trial is
+ * excluded even when its holdout score is the highest — same rule the tuner
+ * applies when picking what to write to .env.
+ */
+export function pickVerifiedWinner(trials: readonly TrialResult[]): TrialResult | undefined {
+  let winner: TrialResult | undefined;
+  for (const trial of trials) {
+    const holdout = trial.holdoutMetrics?.objectiveScore;
+    if (typeof holdout !== 'number') continue;
+    const gap = trial.metrics.objectiveScore - holdout;
+    if (gap > RRSI_HOLDOUT_GAP_TOLERANCE) continue;
+    if (winner === undefined || holdout > (winner.holdoutMetrics?.objectiveScore ?? -Infinity)) {
+      winner = trial;
+    }
+  }
+  return winner;
+}
+
 // ── report rendering ──
 
-function renderMarkdown(trials: TrialResult[], importance: ParameterImportance[]): string {
+export function renderMarkdown(trials: TrialResult[], importance: ParameterImportance[]): string {
   const now = new Date().toISOString();
 
   const lexical = trials.filter((t) => t.dataset === 'search-quality');
@@ -138,6 +167,12 @@ function renderMarkdown(trials: TrialResult[], importance: ParameterImportance[]
   const bestProfile = profile.toSorted(
     (a, b) => b.metrics.objectiveScore - a.metrics.objectiveScore,
   )[0];
+  const verifiedWinner = pickVerifiedWinner(trials);
+  const holdoutRows = trials
+    .filter((t) => typeof t.holdoutMetrics?.objectiveScore === 'number')
+    .toSorted(
+      (a, b) => (b.holdoutMetrics!.objectiveScore ?? 0) - (a.holdoutMetrics!.objectiveScore ?? 0),
+    );
 
   const top10Lexical = lexical
     .toSorted((a, b) => b.metrics.objectiveScore - a.metrics.objectiveScore)
@@ -200,6 +235,23 @@ function renderMarkdown(trials: TrialResult[], importance: ParameterImportance[]
     );
   }
 
+  // RRSI holdout verification: the raw best lexical config is only trusted
+  // after it survives the disjoint holdout slice. This table is the evidence.
+  if (holdoutRows.length > 0) {
+    lines.push('', '## RRSI Holdout Verification', '');
+    lines.push('| Trial | Evolve | Holdout | Gap | Verdict |');
+    lines.push('|-------|--------|---------|-----|---------|');
+    for (const t of holdoutRows) {
+      const evolve = t.metrics.objectiveScore;
+      const holdout = t.holdoutMetrics!.objectiveScore!;
+      const gap = evolve - holdout;
+      const verdict = gap > RRSI_HOLDOUT_GAP_TOLERANCE ? 'REJECT (overfit)' : 'ACCEPT';
+      lines.push(
+        `| ${t.trialId} | ${evolve.toFixed(4)} | ${holdout.toFixed(4)} | ${gap >= 0 ? '+' : ''}${gap.toFixed(3)} | ${verdict} |`,
+      );
+    }
+  }
+
   if (importance.length > 0) {
     lines.push('', '## Parameter Importance (|Spearman ρ|)', '');
     lines.push('| # | Parameter | Importance |');
@@ -210,24 +262,45 @@ function renderMarkdown(trials: TrialResult[], importance: ParameterImportance[]
     }
   }
 
-  // Recommended defaults
-  if (bestLexical) {
+  // Recommended defaults: prefer the RRSI-verified winner over the raw best —
+  // an evolve winner that was never holdout-scored (or got λ-regularized out
+  // of the verification shortlist) is exactly the overfit risk the gate
+  // exists to catch. Vector-signal keys are stripped: LEARN_* cannot be
+  // observed by any offline eval, and SKIP/COSINE from a lexical-only run are
+  // noise fitted on a dead dimension (see search-space.ts).
+  const recommendationSource = verifiedWinner ?? bestLexical;
+  if (recommendationSource) {
+    const vectorKeys: readonly string[] = VECTOR_TUNABLE_PARAM_KEYS;
+    const recommended = Object.entries(recommendationSource.params).filter(
+      ([key, value]) => value !== undefined && !vectorKeys.includes(key),
+    );
+    const excluded = Object.keys(recommendationSource.params).filter((key) =>
+      vectorKeys.includes(key),
+    );
     lines.push('', '## Recommended Defaults', '');
-    lines.push('```bash');
-    for (const [key, value] of Object.entries(bestLexical.params)) {
-      if (value !== undefined) {
-        lines.push(`export ${key}=${value}`);
-      }
+    lines.push(
+      `Source: ${recommendationSource.trialId}${verifiedWinner ? ' (RRSI holdout-verified)' : ' (raw best — no holdout-verified candidate present)'}`,
+    );
+    if (excluded.length > 0) {
+      lines.push(
+        '',
+        `> Excluded ${excluded.length} vector-signal key(s) (${excluded.join(', ')}): not tunable in a lexical-only run. Tune them separately with \`optimize.ts --vector\`.`,
+      );
+    }
+    lines.push('', '```bash');
+    for (const [key, value] of recommended) {
+      lines.push(`export ${key}=${value}`);
     }
     lines.push('```');
   }
 
   // Failed cases from best lexical
-  if (bestLexical && (bestLexical.failedCases?.length ?? 0) > 0) {
+  const failedCases = bestLexical?.failedCases ?? [];
+  if (failedCases.length > 0) {
     lines.push('', '## Failed Cases (Best Lexical)', '');
     lines.push('| Query | Expected | Actual Top-5 | Rank |');
     lines.push('|-------|----------|---------------|------|');
-    for (const fc of bestLexical.failedCases) {
+    for (const fc of failedCases) {
       lines.push(
         `| "${fc.query}" | ${fc.expectedTop.join(', ')} | ${fc.actualTop5.slice(0, 3).join(', ')} | ${fc.firstRelevantRank ?? 'N/A'} |`,
       );
@@ -240,6 +313,15 @@ function renderMarkdown(trials: TrialResult[], importance: ParameterImportance[]
 
 // ── main ──
 
+/** True when this module is the process entry point (tsx / node), so the
+ *  vitest import path runs no CLI side effects. */
+function isDirectRun(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const entryPath = isAbsolute(entry) ? entry : pathResolve(process.cwd(), entry);
+  return entryPath === fileURLToPath(import.meta.url);
+}
+
 async function main(): Promise<void> {
   const { inPath, outPath } = parseCliArgs();
 
@@ -247,11 +329,14 @@ async function main(): Promise<void> {
   const trials = await loadTrials(inPath);
   console.log(`Loaded ${trials.length} trials`);
 
-  // Importance over the randomized sampling phase (phase >= 2); phase 1 only
-  // carries the default-probe rows (2 records here), which is below the
-  // n>=5 significance floor and yields an empty table.
+  // Importance over the RANDOMIZED phase-1 slice. Phase 2 rows are ±1-step
+  // refinements clustered around the phase-1 winners: both param values and
+  // objectives concentrate, and rank correlation on that structured slice
+  // degenerates into near-uniform spurious ρ (the "every param ≈0.83" reports
+  // from before this fix). Phase 1's wide, unbiased coverage is the sound
+  // basis for importance.
   const importance = computeSpearmanImportance(
-    trials.filter((t) => t.dataset === 'search-quality' && t.phase >= 2),
+    trials.filter((t) => t.dataset === 'search-quality' && t.phase === 1),
   );
   console.log(`Computed importance for ${importance.length} parameters`);
 
@@ -260,7 +345,9 @@ async function main(): Promise<void> {
   console.log(`Report written to ${outPath}`);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+if (isDirectRun()) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
