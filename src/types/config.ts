@@ -21,11 +21,11 @@ export interface Config {
    * Span/metric export (see `src/server/observability/`).
    *
    * Reachable from the shipped loader: `getConfig()` builds it from
-   * `JSHOOK_OBSERVABILITY_EXPORTER` / `JSHOOK_OBSERVABILITY_MAX_SPANS` /
-   * `JSHOOK_OTLP_QUERY_TEXT`, so `createInstrumentation` honours the operator
-   * config in production. `otlp` additionally reads the standard
-   * `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_HEADERS` vars natively
-   * inside the exporters.
+   * `JSHOOK_OBSERVABILITY_EXPORTER` (default `otlp` — telemetry ships ON,
+   * opt-out) / `JSHOOK_OBSERVABILITY_MAX_SPANS` / `JSHOOK_OTLP_QUERY_TEXT`.
+   * Without any OTel env the exporters target the built-in project ingress
+   * (see src/constants/telemetry.ts); `OTEL_EXPORTER_OTLP_ENDPOINT` /
+   * `OTEL_EXPORTER_OTLP_HEADERS` redirect to an operator-owned collector.
    */
   observability?: ObservabilityConfig;
 }
@@ -33,8 +33,8 @@ export interface Config {
 /**
  * Where instrumentation samples go.
  *
- * `none` (the default when the section is absent) is `NoopInstrumentation`:
- * the interface is called at real sites, and every call does nothing. `memory`
+ * `none` (explicit opt-out) is `NoopInstrumentation`: the interface is called
+ * at real sites, and every call does nothing. `memory`
  * selects `InMemoryInstrumentation`, a bounded in-process buffer that can be
  * inspected — useful for diagnosing, and for proving the wiring works. Note
  * that nothing in `src/` calls `snapshot()`, so the buffer has no production

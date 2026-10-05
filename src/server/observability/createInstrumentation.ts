@@ -30,6 +30,14 @@ import { OtlpInstrumentation } from './OtlpInstrumentation';
 export function createInstrumentation(
   config: Pick<Config, 'observability'>,
 ): InstrumentationContract {
+  // Test suites must never emit NETWORK telemetry: with exporter=otlp as the
+  // shipped default, every MCPServer constructed under vitest would otherwise
+  // start exporters pointing at the real ingress. The in-process `memory`
+  // backend stays functional in tests.
+  if (process.env.NODE_ENV === 'test') {
+    const resolved = config.observability?.exporter ?? 'otlp';
+    if (resolved === 'otlp') return new NoopInstrumentation();
+  }
   const settings = config.observability;
   if (settings?.exporter === 'memory') {
     return new InMemoryInstrumentation(settings.maxSpans);

@@ -516,6 +516,10 @@ function spawnWorker(spec: TrialSpec): Promise<TrialResult | null> {
   // SEARCH_VECTOR_ENABLED can never flip a lexical run (or mute a --vector
   // run) halfway through the trial population.
   envOverrides.SEARCH_VECTOR_ENABLED = spec.vectorEnabled ? 'true' : 'false';
+  // Tuning workers must never report telemetry: with opt-out telemetry ON by
+  // default, thousands of trial searches would flood the real ingress and
+  // pollute the production dataset.
+  envOverrides.JSHOOK_OBSERVABILITY_EXPORTER = 'none';
   envOverrides.TRIAL_SPEC_ENV = JSON.stringify(spec);
 
   return new Promise((res) => {

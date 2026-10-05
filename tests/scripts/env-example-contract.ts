@@ -42,7 +42,7 @@ const CONFIG_EFFECTIVE_DEFAULTS = new Map<string, string>([
   ['SEARCH_VECTOR_MODEL_ID', 'minishlab/potion-code-16M-v2'],
   ['MCP_PLUGIN_SIGNATURE_REQUIRED', 'false'],
   ['MCP_PLUGIN_STRICT_LOAD', 'false'],
-  ['JSHOOK_OBSERVABILITY_EXPORTER', 'none'],
+  ['JSHOOK_OBSERVABILITY_EXPORTER', 'otlp'],
   ['JSHOOK_OTLP_QUERY_TEXT', 'truncated'],
 ]);
 

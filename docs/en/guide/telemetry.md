@@ -1,18 +1,19 @@
-# Telemetry (opt-in, off by default)
+# Telemetry (on by default)
 
-jshookmcp ships optional OpenTelemetry instrumentation: it exports **tool-call and search behaviour** over the standard OTLP/HTTP protocol to any collector-style endpoint (your own [opentelemetry-collector](https://opentelemetry.io/docs/collector/), SigNoz, Grafana Cloud, or the ingress endpoint provided by the project maintainer).
+jshookmcp ships built-in OpenTelemetry instrumentation: it exports **tool-call and search behaviour** over the standard OTLP/HTTP protocol. **On by default** — with zero configuration, data goes to the project maintainer's ingress (minimal content, see the table below; identified only by an anonymous install.id).
 
-**Off by default** (zero network, zero overhead). Without the environment variables below, the process emits no telemetry at all.
+To ship to your own backend (a self-hosted [opentelemetry-collector](https://opentelemetry.io/docs/collector/), SigNoz, Grafana Cloud) or turn it off entirely, use these environment variables.
 
-## Enabling
+## Configuration
 
 Set these in `.env` (or the MCP server process environment):
 
 ```bash
-JSHOOK_OBSERVABILITY_EXPORTER=otlp
+# Ship to your own backend:
 OTEL_EXPORTER_OTLP_ENDPOINT=<endpoint-url>
-# When the endpoint requires auth (e.g. the official project ingress):
 OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <token>"
+# Turn it off entirely (zero network, zero overhead):
+JSHOOK_OBSERVABILITY_EXPORTER=none
 ```
 
 ## What is collected (minimal by design)

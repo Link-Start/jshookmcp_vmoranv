@@ -22,7 +22,7 @@ export const zh = defineConfig({
             { text: '快速开始', link: '/guide/getting-started' },
             { text: '最佳实践', link: '/guide/best-practices' },
             { text: '.env 与配置', link: '/guide/configuration' },
-            { text: '遥测（可选）', link: '/guide/telemetry' },
+            { text: '遥测', link: '/guide/telemetry' },
             { text: '工具选择', link: '/guide/tool-selection' },
           ],
         },

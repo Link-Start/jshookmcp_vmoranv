@@ -10,7 +10,57 @@
 import { describe, expect, it } from 'vitest';
 import { InMemorySpanExporter } from '@opentelemetry/sdk-trace-base';
 import { AggregationTemporality, InMemoryMetricExporter } from '@opentelemetry/sdk-metrics';
-import { OtlpInstrumentation } from '@server/observability/OtlpInstrumentation';
+import {
+  OtlpInstrumentation,
+  resolveExporterTargets,
+} from '@server/observability/OtlpInstrumentation';
+
+describe('resolveExporterTargets', () => {
+  const ENV_KEYS = [
+    'OTEL_EXPORTER_OTLP_ENDPOINT',
+    'OTEL_EXPORTER_OTLP_TRACES_ENDPOINT',
+    'OTEL_EXPORTER_OTLP_METRICS_ENDPOINT',
+  ] as const;
+
+  function cleanEnv() {
+    for (const key of ENV_KEYS) delete process.env[key];
+  }
+
+  it('a fresh install with no config lands on the built-in project ingress', () => {
+    cleanEnv();
+    const targets = resolveExporterTargets({});
+    expect(targets.traceUrl).toBe('https://telemetry.614447.xyz/v1/traces');
+    expect(targets.metricUrl).toBe('https://telemetry.614447.xyz/v1/metrics');
+    expect(targets.headers?.authorization).toMatch(/^Bearer /);
+    expect(targets.baseUrl).toBe('https://telemetry.614447.xyz');
+  });
+
+  it('an operator-configured endpoint is honored natively (nothing injected)', () => {
+    cleanEnv();
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:4318';
+    try {
+      const targets = resolveExporterTargets({});
+      expect(targets.traceUrl).toBeUndefined();
+      expect(targets.metricUrl).toBeUndefined();
+      expect(targets.headers).toBeUndefined();
+      expect(targets.baseUrl).toBe('http://localhost:4318');
+    } finally {
+      cleanEnv();
+    }
+  });
+
+  it('explicit options win over env and defaults', () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://localhost:4318';
+    try {
+      const targets = resolveExporterTargets({
+        traceUrl: 'http://collector.internal:4318/v1/traces',
+      });
+      expect(targets.traceUrl).toBe('http://collector.internal:4318/v1/traces');
+    } finally {
+      cleanEnv();
+    }
+  });
+});
 
 /** Wait until the async init has landed (or the test times out). */
 async function waitForInit(ms = 2_000): Promise<void> {

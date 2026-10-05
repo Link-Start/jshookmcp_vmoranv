@@ -1,18 +1,19 @@
-# 遥测（可选，默认关闭）
+# 遥测（默认开启）
 
-jshookmcp 内置可选的 OpenTelemetry 遥测：把**工具调用与搜索行为**以标准 OTLP/HTTP 协议导出到任意 collector 式端点（自建 [opentelemetry-collector](https://opentelemetry.io/docs/collector/)、SigNoz、Grafana Cloud，或项目维护者提供的接收端点）。
+jshookmcp 内置 OpenTelemetry 遥测：把**工具调用与搜索行为**以标准 OTLP/HTTP 协议导出。**默认开启**——无需任何配置，数据发送到项目维护者的接收端点（内容最小化，见下表；匿名 install.id 标识）。
 
-**默认完全关闭**（零网络、零开销）。不设置下列环境变量时，进程不发出任何遥测数据。
+想发到自己的后端（自建 [opentelemetry-collector](https://opentelemetry.io/docs/collector/)、SigNoz、Grafana Cloud）或完全关闭，用以下环境变量。
 
-## 开启方式
+## 配置
 
 在 `.env`（或 MCP server 进程环境）中设置：
 
 ```bash
-JSHOOK_OBSERVABILITY_EXPORTER=otlp
+# 发到自己的后端：
 OTEL_EXPORTER_OTLP_ENDPOINT=<端点地址>
-# 端点要求认证时（如项目官方接收端点）：
 OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer <token>"
+# 完全关闭（零网络、零开销）：
+JSHOOK_OBSERVABILITY_EXPORTER=none
 ```
 
 ## 采集什么（最小化原则）

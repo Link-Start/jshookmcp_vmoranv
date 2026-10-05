@@ -23,6 +23,10 @@
  * (default 30s) is force-flushed through the same shutdown path.
  */
 import type { InstrumentationContract, MetricType, SpanLike } from './InstrumentationContract';
+import {
+  DEFAULT_TELEMETRY_AUTHORIZATION,
+  DEFAULT_TELEMETRY_ENDPOINT,
+} from '@src/constants/telemetry';
 
 export interface OtlpInstrumentationOptions {
   /**
@@ -157,14 +161,11 @@ export class OtlpInstrumentation implements InstrumentationContract {
         import('@opentelemetry/exporter-metrics-otlp-http'),
       ]);
 
-      // Proxy support: OTLP endpoints on GFW-filtered hosts (e.g. *.workers.dev)
-      // are unreachable directly from proxied networks. The OTel node transport
-      // uses node:http (not fetch), so undici dispatchers and
-      // NODE_USE_ENV_PROXY do NOT apply — the supported hook is a
-      // function-valued `httpAgentOptions` mapped to the agent factory.
-      // HttpsProxyAgent honors HTTP CONNECT; NO_PROXY entries and localhost
-      // endpoints stay direct.
-      const agentOptions = await buildProxyAgentOptions();
+      // Effective exporter targets: explicit options > operator OTel env >
+      // built-in project ingress (opt-out telemetry ships ON). The resolver
+      // is pure and exported for tests.
+      const targets = resolveExporterTargets(this.options);
+      const agentOptions = await buildProxyAgentOptions(targets.traceUrl ?? targets.baseUrl ?? '');
 
       // install.id: persistent anonymous UUID per installation, so
       // distributed telemetry can tell "one install, many sessions" from
@@ -182,8 +183,8 @@ export class OtlpInstrumentation implements InstrumentationContract {
       const traceExporter = this.options.makeTraceExporter
         ? (this.options.makeTraceExporter() as never)
         : new traceExpModule.OTLPTraceExporter({
-            ...(this.options.traceUrl ? { url: this.options.traceUrl } : {}),
-            headers: this.options.headers,
+            ...(targets.traceUrl ? { url: targets.traceUrl } : {}),
+            ...(targets.headers ? { headers: targets.headers } : {}),
             ...agentOptions,
           });
       const spanProvider = new BasicTracerProvider({
@@ -198,8 +199,8 @@ export class OtlpInstrumentation implements InstrumentationContract {
       const metricExporter = this.options.makeMetricExporter
         ? (this.options.makeMetricExporter() as never)
         : new metricExpModule.OTLPMetricExporter({
-            ...(this.options.metricUrl ? { url: this.options.metricUrl } : {}),
-            headers: this.options.headers,
+            ...(targets.metricUrl ? { url: targets.metricUrl } : {}),
+            ...(targets.headers ? { headers: targets.headers } : {}),
             ...agentOptions,
           });
       const metricProvider = new MeterProvider({
@@ -444,14 +445,59 @@ function noopSpan(name: string): SpanLike {
 
 // ── proxy support ──
 
+export interface ExporterTargets {
+  /** Full trace-path URL, or undefined when the exporter should read env. */
+  traceUrl?: string;
+  /** Full metrics-path URL, or undefined when the exporter should read env. */
+  metricUrl?: string;
+  /** Headers to pass; undefined → exporter reads OTEL_EXPORTER_OTLP_HEADERS. */
+  headers?: Record<string, string>;
+  /** Base endpoint actually in effect (for NO_PROXY evaluation). */
+  baseUrl?: string;
+}
+
+/**
+ * Resolve exporter targets with the built-in project ingress as the LAST
+ * resort: explicit options win, operator OTel env vars are honored natively
+ * (nothing passed → exporters read OTEL_EXPORTER_OTLP_* themselves), and a
+ * fresh install with no configuration lands on DEFAULT_TELEMETRY_ENDPOINT
+ * with the public write token. Telemetry therefore ships ON unless the
+ * operator opts out — see docs/guide/telemetry.
+ */
+export function resolveExporterTargets(options: OtlpInstrumentationOptions): ExporterTargets {
+  if (options.traceUrl ?? options.metricUrl ?? options.headers) {
+    return {
+      ...(options.traceUrl ? { traceUrl: options.traceUrl } : {}),
+      ...(options.metricUrl ? { metricUrl: options.metricUrl } : {}),
+      ...(options.headers ? { headers: options.headers } : {}),
+      baseUrl: options.traceUrl,
+    };
+  }
+  const envEndpoint =
+    process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ??
+    process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT ??
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  if (envEndpoint) {
+    // Operator-configured collector: pass nothing so the exporters honor the
+    // full standard env surface (incl. per-signal endpoints and headers).
+    return { baseUrl: envEndpoint };
+  }
+  return {
+    traceUrl: `${DEFAULT_TELEMETRY_ENDPOINT}/v1/traces`,
+    metricUrl: `${DEFAULT_TELEMETRY_ENDPOINT}/v1/metrics`,
+    headers: { authorization: DEFAULT_TELEMETRY_AUTHORIZATION },
+    baseUrl: DEFAULT_TELEMETRY_ENDPOINT,
+  };
+}
+
 /**
  * Build the `httpAgentOptions` constructor injection for the OTLP exporters
- * when (a) a proxy env var is present and (b) the configured OTLP endpoint
+ * when (a) a proxy env var is present and (b) the effective OTLP endpoint
  * host is not covered by NO_PROXY. Returns `{}` (no injection → default
  * direct agents) otherwise. https-proxy-agent is an optional dependency:
  * a missing package degrades to direct connection.
  */
-async function buildProxyAgentOptions(): Promise<Record<string, unknown>> {
+async function buildProxyAgentOptions(baseUrl: string): Promise<Record<string, unknown>> {
   const proxyUrl =
     process.env.https_proxy ??
     process.env.HTTPS_PROXY ??
@@ -459,16 +505,14 @@ async function buildProxyAgentOptions(): Promise<Record<string, unknown>> {
     process.env.ALL_PROXY;
   if (!proxyUrl) return {};
 
-  const endpoint =
-    process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? '';
   let targetHost = '';
   try {
-    targetHost = endpoint ? new URL(endpoint).hostname : '';
+    targetHost = baseUrl ? new URL(baseUrl).hostname : '';
   } catch {
     targetHost = '';
   }
-  // No endpoint configured (or unparseable): the default collector is
-  // localhost — a proxy would only get in the way.
+  // No endpoint resolvable (localhost default) — a proxy would only get in
+  // the way.
   if (!targetHost || isNoProxyMatch(targetHost, process.env.NO_PROXY ?? process.env.no_proxy)) {
     return {};
   }

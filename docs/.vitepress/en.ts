@@ -23,7 +23,7 @@ export const en = defineConfig({
             { text: 'Getting Started', link: '/en/guide/getting-started' },
             { text: 'Best Practices', link: '/en/guide/best-practices' },
             { text: '.env and Configuration', link: '/en/guide/configuration' },
-            { text: 'Telemetry (opt-in)', link: '/en/guide/telemetry' },
+            { text: 'Telemetry', link: '/en/guide/telemetry' },
             { text: 'Tool Selection', link: '/en/guide/tool-selection' },
           ],
         },
