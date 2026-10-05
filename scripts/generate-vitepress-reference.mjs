@@ -650,6 +650,10 @@ async function main() {
   await writeFile(zhSidebarPath, renderSidebarModule(sorted, 'zh'), 'utf8');
   await writeFile(enSidebarPath, renderSidebarModule(sorted, 'en'), 'utf8');
 
+  // Gate AFTER the pages are on disk: a placeholder violation aborts the
+  // build (pre-commit and CI) but must not leave the generated docs wiped.
+  assertNoZhPlaceholders(sorted, await loadZhToolDescriptions());
+
   console.log(`[docs] Generated bilingual reference pages for ${sorted.length} domains`);
 }
 
@@ -948,7 +952,9 @@ async function syncZhCoverage(manifests, zhToolDescriptions) {
       console.log(
         `[docs] Added ${added.length} placeholder Chinese tool descriptions: ${added
           .slice(0, 20)
-          .join(', ')}`,
+          .join(
+            ', ',
+          )} — translate them before committing; the generator now fails on residual placeholders in pre-commit and CI alike.`,
       );
     }
     if (removed.length > 0) {
@@ -960,30 +966,36 @@ async function syncZhCoverage(manifests, zhToolDescriptions) {
     }
   }
 
+  return merged;
+}
+
+/**
+ * Hard gate for untranslated Chinese tool descriptions. Runs AFTER the
+ * reference pages are written so a failed run leaves the generated docs
+ * intact (clearGeneratedPages wipes the reference dirs at start — a throw
+ * before the page write would otherwise destroy them locally).
+ */
+function assertNoZhPlaceholders(manifests, zhToolDescriptions) {
   const placeholders = [];
 
   for (const manifest of manifests) {
     for (const tool of manifest.tools) {
-      const localized = merged[tool.name];
+      const localized = zhToolDescriptions[tool.name];
       if (typeof localized === 'string' && localized.startsWith(zhPlaceholderPrefix)) {
         placeholders.push(`${manifest.domain}.${tool.name}`);
       }
     }
   }
 
-  if (placeholders.length > 0 && isCiEnvironment()) {
+  if (placeholders.length > 0) {
     throw new Error(
       `Placeholder Chinese tool descriptions remain for ${placeholders.length} tools: ${placeholders
         .slice(0, 20)
-        .join(', ')}`,
+        .join(
+          ', ',
+        )}. Add real zh translations to docs/.vitepress/i18n/zh/reference-tool-descriptions.json before committing — CI treats these as untranslated.`,
     );
   }
-
-  return merged;
-}
-
-function isCiEnvironment() {
-  return process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
 }
 
 function assertZhCoverage(manifests, zhToolDescriptions) {
