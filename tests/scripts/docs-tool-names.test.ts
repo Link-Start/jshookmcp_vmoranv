@@ -76,6 +76,10 @@ const NON_TOOL_TOKENS: ReadonlyMap<string, string> = new Map<string, string>([
   ['jshook_plugin_template', 'GitHub repository name, not a tool'],
   ['node_modules', 'directory name, not a tool'],
   ['npm_config_omit', 'npm environment variable, not a tool'],
+  [
+    'search_feedback_used',
+    'OTLP metric emitted on search→tool-call association (see docs/guide/telemetry), not a tool',
+  ],
 ]);
 
 interface ToolNameReference {
