@@ -14,10 +14,11 @@ on:
 #
 # Trusted Publisher (configured on npmjs.com for both packages):
 #   org: vmoranv, repo: jshookmcp, workflow: publish-packages.yml.
-# Auth is OIDC-only by design: npm obtains a short-lived registry token from
-# the runner's GitHub OIDC identity, so NO static NPM_TOKEN secret exists and
-# npm 2FA does not apply. Keep it that way — adding NODE_AUTH_TOKEN back makes
-# npm prefer the static token and the publish fails with E403 2FA.
+# npm 10 (Node 22) needs static registry credentials: registry-side OIDC
+# token exchange (Trusted Publisher) requires npm 11. The NPM_TOKEN secret
+# must be an npmjs Automation/granular token (bypass-2FA) — a legacy token
+# fails with E403. The npmjs Trusted Publisher UI config stays configured so
+# the publish automatically moves to OIDC when the runner moves to Node 24.
 permissions:
   contents: read
   id-token: write
@@ -33,6 +34,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
+          registry-url: https://registry.npmjs.org
+          scope: '@jshookmcp'
           package-manager-cache: false
 
       - name: Enable Corepack pnpm
@@ -73,12 +76,13 @@ jobs:
           # npm CLI's native OIDC exchange with the npmjs Trusted Publisher —
           # pnpm publish's own implementation does not perform the exchange,
           # so it fails ENEEDAUTH on a token-less runner.
-          # DEBUG: prove the runner can mint an OIDC token and surface npm's
-          # exchange attempts before removing this block.
-          echo "actions=$GITHUB_ACTIONS idtoken=${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}"
-          curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN"             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sigstore" -o /tmp/oidc.json             || echo CURL_FAIL
-          python3 -c "import json;print('OIDC_TOKEN_OK', json.load(open('/tmp/oidc.json')).get('value','')[:48])" 2>/dev/null             || head -c 300 /tmp/oidc.json
-          npm publish "$ROOT_TARBALL" --provenance --access public --loglevel=verbose
+          npm publish "$ROOT_TARBALL" --provenance --access public
+        env:
+          # npm 10 (Node 22) requires STATIC registry credentials for publish —
+          # registry-side OIDC exchange needs npm 11 (Node 24). The token must
+          # be an npmjs Automation/granular token (bypass-2FA). The Trusted
+          # Publisher UI config stays for the future npm-11 path.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-extension-sdk:
     runs-on: ubuntu-latest
@@ -90,6 +94,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
+          registry-url: https://registry.npmjs.org
+          scope: '@jshookmcp'
           package-manager-cache: false
 
       - name: Enable Corepack pnpm
@@ -133,3 +139,5 @@ jobs:
           # `--provenance` enables npm SLSA Build L1 attestation via Sigstore Fulcio.
           # Requires `id-token: write` permission (set at workflow level above).
           npm publish "$SDK_TARBALL" --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
