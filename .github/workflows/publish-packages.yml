@@ -73,7 +73,12 @@ jobs:
           # npm CLI's native OIDC exchange with the npmjs Trusted Publisher —
           # pnpm publish's own implementation does not perform the exchange,
           # so it fails ENEEDAUTH on a token-less runner.
-          npm publish "$ROOT_TARBALL" --provenance --access public
+          # DEBUG: prove the runner can mint an OIDC token and surface npm's
+          # exchange attempts before removing this block.
+          echo "actions=$GITHUB_ACTIONS idtoken=${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+present}"
+          curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN"             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sigstore" -o /tmp/oidc.json             || echo CURL_FAIL
+          python3 -c "import json;print('OIDC_TOKEN_OK', json.load(open('/tmp/oidc.json')).get('value','')[:48])" 2>/dev/null             || head -c 300 /tmp/oidc.json
+          npm publish "$ROOT_TARBALL" --provenance --access public --loglevel=verbose
 
   publish-extension-sdk:
     runs-on: ubuntu-latest
