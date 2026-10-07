@@ -12,15 +12,12 @@ on:
 #   - `contents: read` stays for checkout/tag validation.
 #   - Both jobs below inherit this block — no per-job override needed.
 #
-# REMAINING MANUAL STEP (NOT in code):
-#   Configure the Trusted Publisher on npmjs.com for both
-#     @jshookmcp/jshook          https://www.npmjs.com/package/@jshookmcp/jshook/settings
-#     @jshookmcp/extension-sdk   https://www.npmjs.com/package/@jshookmcp/extension-sdk/settings
-#   Add a GitHub Actions trusted publisher pointing at
-#     org: vmoranv, repo: jshookmcp, workflow: publish-packages.yml.
-#   Until that UI step is done, OIDC auth will fail and the publish job will
-#   fall back to NODE_AUTH_TOKEN below (kept intentionally as a bootstrap
-#   safety net during the migration window).
+# Trusted Publisher (configured on npmjs.com for both packages):
+#   org: vmoranv, repo: jshookmcp, workflow: publish-packages.yml.
+# Auth is OIDC-only by design: npm obtains a short-lived registry token from
+# the runner's GitHub OIDC identity, so NO static NPM_TOKEN secret exists and
+# npm 2FA does not apply. Keep it that way — adding NODE_AUTH_TOKEN back makes
+# npm prefer the static token and the publish fails with E403 2FA.
 permissions:
   contents: read
   id-token: write
@@ -36,8 +33,6 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
-          scope: '@jshookmcp'
           package-manager-cache: false
 
       - name: Enable Corepack pnpm
@@ -76,11 +71,6 @@ jobs:
           # `--provenance` enables npm SLSA Build L1 attestation via Sigstore Fulcio.
           # Requires `id-token: write` permission (set at workflow level above).
           pnpm publish "$ROOT_TARBALL" --provenance --no-git-checks
-        env:
-          # Bootstrap-only fallback. Once the Trusted Publisher UI is configured
-          # on npmjs.com (see file header), this env becomes redundant — npm CLI
-          # will use the OIDC token from the runner instead.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-extension-sdk:
     runs-on: ubuntu-latest
@@ -92,8 +82,6 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
-          scope: '@jshookmcp'
           package-manager-cache: false
 
       - name: Enable Corepack pnpm
@@ -137,8 +125,3 @@ jobs:
           # `--provenance` enables npm SLSA Build L1 attestation via Sigstore Fulcio.
           # Requires `id-token: write` permission (set at workflow level above).
           pnpm publish "$SDK_TARBALL" --provenance --no-git-checks
-        env:
-          # Bootstrap-only fallback. Once the Trusted Publisher UI is configured
-          # on npmjs.com (see file header), this env becomes redundant — npm CLI
-          # will use the OIDC token from the runner instead.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
