@@ -70,7 +70,10 @@ jobs:
           test -n "$ROOT_TARBALL"
           # `--provenance` enables npm SLSA Build L1 attestation via Sigstore Fulcio.
           # Requires `id-token: write` permission (set at workflow level above).
-          pnpm publish "$ROOT_TARBALL" --provenance --no-git-checks
+          # npm CLI's native OIDC exchange with the npmjs Trusted Publisher —
+          # pnpm publish's own implementation does not perform the exchange,
+          # so it fails ENEEDAUTH on a token-less runner.
+          npm publish "$ROOT_TARBALL" --provenance --access public
 
   publish-extension-sdk:
     runs-on: ubuntu-latest
@@ -124,4 +127,4 @@ jobs:
           test -n "$SDK_TARBALL"
           # `--provenance` enables npm SLSA Build L1 attestation via Sigstore Fulcio.
           # Requires `id-token: write` permission (set at workflow level above).
-          pnpm publish "$SDK_TARBALL" --provenance --no-git-checks
+          npm publish "$SDK_TARBALL" --provenance --access public
