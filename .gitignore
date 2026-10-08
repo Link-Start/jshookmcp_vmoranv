@@ -122,6 +122,11 @@ DESIGN.md
 .serena/
 AGENTS.md
 .ccg/
+# WorkBuddy agent workspace: cross-session memory + scratch. Local to this
+# machine, never a deliverable. Without this entry the directory is untracked
+# AND unignored, so any `git clean -fd` wipes it — which happened twice on
+# 2026-10-08, taking .workbuddy-ai/memory/*.md with it.
+.workbuddy-ai/
 
 # VitePress build output
 docs/.vitepress/dist/
