@@ -132,14 +132,15 @@ jobs:
           npm install -g npm@12
           NPM_VERSION="$(npm --version)"
           echo "npm CLI in use: $NPM_VERSION"
-          node -e '
-            const [major, minor] = process.argv[1].split(".").map(Number);
-            const ok = major > 11 || (major === 11 && minor >= 21);
-            if (!ok) {
-              console.error("npm " + process.argv[1] + " is below the floor this workflow relies on (>= 11.21.0). Registry OIDC needs >= 11.5.1, `npm stage` needs >= 11.15.0, and OIDC dist-tag management needs >= 11.21.0. A publish from this runner would fall back to a static token and be silently staged instead of released. `npm install -g npm@12` above did not take effect — check that it succeeded.");
-              process.exit(1);
-            }
-          ' "$NPM_VERSION"
+          # The version compare lives in awk rather than in a single-quoted
+          # node -e program on purpose: shellcheck reports SC2016 for backticks
+          # inside single quotes, and actionlint fails the Repo Hygiene job on
+          # any shellcheck finding. The awk program below contains neither $ nor
+          # a backtick, so there is nothing for shellcheck to misread.
+          if ! awk -v v="$NPM_VERSION" 'BEGIN { split(v, a, "."); ok = (a[1] > 11) || (a[1] == 11 && a[2] >= 21); exit(ok ? 0 : 1) }'; then
+            echo "::error title=npm CLI below the floor::npm $NPM_VERSION is below the floor this workflow relies on (>= 11.21.0). Registry OIDC needs >= 11.5.1, npm stage needs >= 11.15.0, and OIDC dist-tag management needs >= 11.21.0. A publish from this runner would fall back to a static token and be silently staged instead of released. The npm install -g npm@12 above did not take effect - check that it succeeded."
+            exit 1
+          fi
           # The OIDC environment is what npm >= 11.5.1 looks for. If it is
           # missing, `id-token: write` was dropped from the workflow permissions
           # and the publish would fall back to a static token (or die ENEEDAUTH).
@@ -346,14 +347,15 @@ jobs:
           npm install -g npm@12
           NPM_VERSION="$(npm --version)"
           echo "npm CLI in use: $NPM_VERSION"
-          node -e '
-            const [major, minor] = process.argv[1].split(".").map(Number);
-            const ok = major > 11 || (major === 11 && minor >= 21);
-            if (!ok) {
-              console.error("npm " + process.argv[1] + " is below the floor this workflow relies on (>= 11.21.0). Registry OIDC needs >= 11.5.1, `npm stage` needs >= 11.15.0, and OIDC dist-tag management needs >= 11.21.0. A publish from this runner would fall back to a static token and be silently staged instead of released. `npm install -g npm@12` above did not take effect — check that it succeeded.");
-              process.exit(1);
-            }
-          ' "$NPM_VERSION"
+          # The version compare lives in awk rather than in a single-quoted
+          # node -e program on purpose: shellcheck reports SC2016 for backticks
+          # inside single quotes, and actionlint fails the Repo Hygiene job on
+          # any shellcheck finding. The awk program below contains neither $ nor
+          # a backtick, so there is nothing for shellcheck to misread.
+          if ! awk -v v="$NPM_VERSION" 'BEGIN { split(v, a, "."); ok = (a[1] > 11) || (a[1] == 11 && a[2] >= 21); exit(ok ? 0 : 1) }'; then
+            echo "::error title=npm CLI below the floor::npm $NPM_VERSION is below the floor this workflow relies on (>= 11.21.0). Registry OIDC needs >= 11.5.1, npm stage needs >= 11.15.0, and OIDC dist-tag management needs >= 11.21.0. A publish from this runner would fall back to a static token and be silently staged instead of released. The npm install -g npm@12 above did not take effect - check that it succeeded."
+            exit 1
+          fi
           # The OIDC environment is what npm >= 11.5.1 looks for. If it is
           # missing, `id-token: write` was dropped from the workflow permissions
           # and the publish would fall back to a static token (or die ENEEDAUTH).
