@@ -69,22 +69,40 @@ jobs:
 
       - name: Check root package publish status
         id: root_publish_status
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           ROOT_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
           echo "version=$ROOT_VERSION" >> "$GITHUB_OUTPUT"
+
+          if npm view "@jshookmcp/jshook@$ROOT_VERSION" version >/dev/null 2>&1; then
+            echo "state=published" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # Three states, not two. A version that is *staged* (uploaded but
           # awaiting a maintainer's 2FA approval) is invisible to `npm view`,
           # so a binary published/not-published check reports "not published"
           # and every re-run retries the publish until it dies with
           # E409 "Cannot publish over previously staged version".
-          # `npm stage list` is the only way to see the staging area. It needs
-          # npm >= 11.15.0, which the Node 22 runner does not ship, so call it
-          # through npx rather than upgrading the runner's npm — the npm that
-          # performs the actual publish must stay on the Node 22 default.
-          if npm view "@jshookmcp/jshook@$ROOT_VERSION" version >/dev/null 2>&1; then
-            echo "state=published" >> "$GITHUB_OUTPUT"
-          elif npx -y npm@12 stage list "@jshookmcp/jshook" 2>/dev/null | grep -qF "$ROOT_VERSION"; then
+          #
+          # `npm stage list` must run with the SAME credential the publish uses.
+          # setup-node writes an .npmrc that references ${NODE_AUTH_TOKEN}; with
+          # that variable unset, npm reads an empty view and cheerfully reports
+          # "no staged versions" — a false negative that sends the publish
+          # straight into E409. That is why NODE_AUTH_TOKEN is set on this step,
+          # and why the error below is NOT swallowed: an unanswerable question
+          # is not the same as "nothing is staged".
+          #
+          # The call goes through npx because `npm stage` needs npm >= 11.15.0,
+          # which the Node 22 runner does not ship. The npm that performs the
+          # actual publish must stay on the Node 22 default.
+          STAGED="$(npx -y npm@12 stage list "@jshookmcp/jshook" --json 2>"$RUNNER_TEMP/stage-list.err")" || {
+            echo "::error title=Cannot determine staged state::'npm stage list' failed, so this workflow cannot tell whether @jshookmcp/jshook@$ROOT_VERSION is already staged. Refusing to guess."
+            cat "$RUNNER_TEMP/stage-list.err"
+            exit 1
+          }
+          if printf '%s' "$STAGED" | grep -qF "$ROOT_VERSION"; then
             echo "state=staged" >> "$GITHUB_OUTPUT"
           else
             echo "state=absent" >> "$GITHUB_OUTPUT"
@@ -94,22 +112,31 @@ jobs:
         if: steps.root_publish_status.outputs.state == 'staged'
         env:
           VERSION: ${{ steps.root_publish_status.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "::error title=Staged version awaiting approval::@jshookmcp/jshook@$VERSION is already in the npm staging area. It will never go live until a maintainer approves it with 2FA. Publishing again returns E409."
+          # Print the real stage list so the approval can be run straight from
+          # the summary — the stage-id is what the approve command needs.
+          STAGE_LIST="$(npx -y npm@12 stage list "@jshookmcp/jshook" 2>&1)"
+          echo "$STAGE_LIST"
           {
             echo "### @jshookmcp/jshook@$VERSION is staged, not published"
             echo
-            echo "The previous publish uploaded this version to npm's staging area and exited 0, so the job looked green while the registry never changed."
+            echo "A previous publish uploaded this version to npm's staging area. Until a maintainer approves it, the registry keeps serving the last live version and every publish attempt returns E409."
             echo
             echo "Approve it, then re-run this workflow:"
             echo
             echo '```bash'
-            echo "npm login"
-            echo "npx -y npm@12 stage list @jshookmcp/jshook"
             echo "npx -y npm@12 stage approve <stage-id>"
             echo '```'
             echo
             echo "Or approve on npmjs.com -> the package page -> **Staged Packages** tab."
+            echo
+            echo "Staged versions visible to this workflow's credential:"
+            echo
+            echo '```'
+            echo "$STAGE_LIST"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
@@ -205,15 +232,26 @@ jobs:
 
       - name: Check SDK package publish status
         id: sdk_publish_status
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           SDK_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('packages/extension-sdk/package.json', 'utf8')).version")"
           echo "version=$SDK_VERSION" >> "$GITHUB_OUTPUT"
 
           # Same three-state check as the root package — a staged version is
-          # invisible to `npm view`. See the root job for the full rationale.
+          # invisible to `npm view`, and `npm stage list` is only trustworthy
+          # when it runs authenticated. See the root job for the full rationale.
           if npm view "@jshookmcp/extension-sdk@$SDK_VERSION" version >/dev/null 2>&1; then
             echo "state=published" >> "$GITHUB_OUTPUT"
-          elif npx -y npm@12 stage list "@jshookmcp/extension-sdk" 2>/dev/null | grep -qF "$SDK_VERSION"; then
+            exit 0
+          fi
+
+          STAGED="$(npx -y npm@12 stage list "@jshookmcp/extension-sdk" --json 2>"$RUNNER_TEMP/stage-list-sdk.err")" || {
+            echo "::error title=Cannot determine staged state::'npm stage list' failed, so this workflow cannot tell whether @jshookmcp/extension-sdk@$SDK_VERSION is already staged. Refusing to guess."
+            cat "$RUNNER_TEMP/stage-list-sdk.err"
+            exit 1
+          }
+          if printf '%s' "$STAGED" | grep -qF "$SDK_VERSION"; then
             echo "state=staged" >> "$GITHUB_OUTPUT"
           else
             echo "state=absent" >> "$GITHUB_OUTPUT"
@@ -223,19 +261,27 @@ jobs:
         if: steps.sdk_publish_status.outputs.state == 'staged'
         env:
           VERSION: ${{ steps.sdk_publish_status.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "::error title=Staged version awaiting approval::@jshookmcp/extension-sdk@$VERSION is already in the npm staging area. It will never go live until a maintainer approves it with 2FA. Publishing again returns E409."
+          STAGE_LIST="$(npx -y npm@12 stage list "@jshookmcp/extension-sdk" 2>&1)"
+          echo "$STAGE_LIST"
           {
             echo "### @jshookmcp/extension-sdk@$VERSION is staged, not published"
             echo
             echo "Approve it, then re-run this workflow:"
             echo
             echo '```bash'
-            echo "npx -y npm@12 stage list @jshookmcp/extension-sdk"
             echo "npx -y npm@12 stage approve <stage-id>"
             echo '```'
             echo
             echo "Or approve on npmjs.com -> the package page -> **Staged Packages** tab."
+            echo
+            echo "Staged versions visible to this workflow's credential:"
+            echo
+            echo '```'
+            echo "$STAGE_LIST"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
