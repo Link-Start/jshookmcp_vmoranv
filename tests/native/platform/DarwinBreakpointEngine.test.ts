@@ -48,8 +48,8 @@ describe('DarwinBreakpointEngine', () => {
   });
 
   describe('removeBreakpoint', () => {
-    it('returns false for non-existent id', () => {
-      expect(Promise.resolve(engine.removeBreakpoint('nonexistent'))).resolves.toBe(false);
+    it('returns false for non-existent id', async () => {
+      await expect(engine.removeBreakpoint('nonexistent')).resolves.toBe(false);
     });
   });
 

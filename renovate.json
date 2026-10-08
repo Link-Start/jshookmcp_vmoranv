@@ -25,6 +25,7 @@
       "matchPackageNames": [
         "vitepress",
         "vitest",
+        "@vitest/coverage-v8",
         "typescript",
         "markdownlint-cli2",
         "@types/node"
