@@ -19,6 +19,21 @@ on:
 # must be an npmjs Automation/granular token (bypass-2FA) — a legacy token
 # fails with E403. The npmjs Trusted Publisher UI config stays configured so
 # the publish automatically moves to OIDC when the runner moves to Node 24.
+#
+# ⚠️ STAGED PUBLISHING — read before debugging a "successful" publish.
+#   If the publishing credential cannot satisfy the account's 2FA requirement,
+#   npm does not fail: it uploads the tarball to the *staging area* and exits 0
+#   ("Your package is being processed and may take a few minutes to become
+#   available"). Nothing appears on the registry. A maintainer must approve the
+#   staged version with 2FA before it goes live:
+#       npx -y npm@12 stage list @jshookmcp/jshook
+#       npx -y npm@12 stage approve <stage-id>
+#   (or npmjs.com -> package page -> Staged Packages tab)
+#   Until then, every re-run of this workflow dies with
+#   E409 "Cannot publish over previously staged version".
+#   Staged versions share the published semver index but are invisible to
+#   `npm view`, which is why the publish-status steps below check three states
+#   (published / staged / absent) instead of two.
 permissions:
   contents: read
   id-token: write
@@ -56,18 +71,54 @@ jobs:
         id: root_publish_status
         run: |
           ROOT_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
+          echo "version=$ROOT_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Three states, not two. A version that is *staged* (uploaded but
+          # awaiting a maintainer's 2FA approval) is invisible to `npm view`,
+          # so a binary published/not-published check reports "not published"
+          # and every re-run retries the publish until it dies with
+          # E409 "Cannot publish over previously staged version".
+          # `npm stage list` is the only way to see the staging area. It needs
+          # npm >= 11.15.0, which the Node 22 runner does not ship, so call it
+          # through npx rather than upgrading the runner's npm — the npm that
+          # performs the actual publish must stay on the Node 22 default.
           if npm view "@jshookmcp/jshook@$ROOT_VERSION" version >/dev/null 2>&1; then
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "state=published" >> "$GITHUB_OUTPUT"
+          elif npx -y npm@12 stage list "@jshookmcp/jshook" 2>/dev/null | grep -qF "$ROOT_VERSION"; then
+            echo "state=staged" >> "$GITHUB_OUTPUT"
           else
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "state=absent" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Fail loudly on an unapproved staged version
+        if: steps.root_publish_status.outputs.state == 'staged'
+        env:
+          VERSION: ${{ steps.root_publish_status.outputs.version }}
+        run: |
+          echo "::error title=Staged version awaiting approval::@jshookmcp/jshook@$VERSION is already in the npm staging area. It will never go live until a maintainer approves it with 2FA. Publishing again returns E409."
+          {
+            echo "### @jshookmcp/jshook@$VERSION is staged, not published"
+            echo
+            echo "The previous publish uploaded this version to npm's staging area and exited 0, so the job looked green while the registry never changed."
+            echo
+            echo "Approve it, then re-run this workflow:"
+            echo
+            echo '```bash'
+            echo "npm login"
+            echo "npx -y npm@12 stage list @jshookmcp/jshook"
+            echo "npx -y npm@12 stage approve <stage-id>"
+            echo '```'
+            echo
+            echo "Or approve on npmjs.com -> the package page -> **Staged Packages** tab."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
       - name: Pack and verify root package
-        if: steps.root_publish_status.outputs.should_publish == 'true'
+        if: steps.root_publish_status.outputs.state == 'absent'
         run: pnpm run package:verify-release
 
       - name: Publish root package
-        if: steps.root_publish_status.outputs.should_publish == 'true'
+        if: steps.root_publish_status.outputs.state == 'absent'
         run: |
           ROOT_TARBALL="$(find .release-artifacts -maxdepth 1 -name '*.tgz' -print -quit)"
           test -n "$ROOT_TARBALL"
@@ -76,13 +127,51 @@ jobs:
           # npm CLI's native OIDC exchange with the npmjs Trusted Publisher —
           # pnpm publish's own implementation does not perform the exchange,
           # so it fails ENEEDAUTH on a token-less runner.
-          npm publish "$ROOT_TARBALL" --provenance --access public
+          #
+          # A publish that lands in the staging area still exits 0, so the exit
+          # code alone cannot tell "went live" from "needs 2FA approval".
+          # Inspect the output and turn the E409 case into an explicit failure
+          # with instructions, instead of a green job that changed nothing.
+          LOG="$RUNNER_TEMP/npm-publish.log"
+          set +e
+          npm publish "$ROOT_TARBALL" --provenance --access public 2>&1 | tee "$LOG"
+          PUBLISH_STATUS="${PIPESTATUS[0]}"
+          set -e
+          if [ "$PUBLISH_STATUS" -ne 0 ]; then
+            if grep -qF 'previously staged version' "$LOG"; then
+              echo "::error title=Staged version awaiting approval::Publish was rejected because @jshookmcp/jshook@${{ steps.root_publish_status.outputs.version }} already exists in the npm staging area. A maintainer must approve it with 2FA (npx -y npm@12 stage approve <stage-id>, or the Staged Packages tab on npmjs.com) before it can go live."
+            fi
+          fi
+          exit "$PUBLISH_STATUS"
         env:
           # npm 10 (Node 22) requires STATIC registry credentials for publish —
           # registry-side OIDC exchange needs npm 11 (Node 24). The token must
           # be an npmjs Automation/granular token (bypass-2FA). The Trusted
           # Publisher UI config stays for the future npm-11 path.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The single most important guard in this workflow.
+      # On 2026-10-07 a publish exited 0 with the normal success output
+      # ("Publishing to https://registry.npmjs.org ... + @jshookmcp/jshook@0.4.0")
+      # and the version still never reached the registry. A green exit code is
+      # not evidence that a release happened — only the registry is. Poll it and
+      # fail if the version does not show up, so "silently did nothing" can never
+      # masquerade as "released".
+      - name: Verify the published version is actually live
+        if: steps.root_publish_status.outputs.state == 'absent'
+        env:
+          VERSION: ${{ steps.root_publish_status.outputs.version }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if npm view "@jshookmcp/jshook@$VERSION" version >/dev/null 2>&1; then
+              echo "@jshookmcp/jshook@$VERSION is live on the registry."
+              exit 0
+            fi
+            echo "Waiting for @jshookmcp/jshook@$VERSION to appear on the registry (${attempt}/30)"
+            sleep 10
+          done
+          echo "::error title=Publish did not go live::npm publish reported success, but @jshookmcp/jshook@$VERSION never appeared on the registry. It was almost certainly staged and now needs a maintainer's 2FA approval — run 'npx -y npm@12 stage list @jshookmcp/jshook' then 'npx -y npm@12 stage approve <stage-id>', or approve it in the Staged Packages tab on npmjs.com."
+          exit 1
 
   publish-extension-sdk:
     runs-on: ubuntu-latest
@@ -118,26 +207,80 @@ jobs:
         id: sdk_publish_status
         run: |
           SDK_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('packages/extension-sdk/package.json', 'utf8')).version")"
+          echo "version=$SDK_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Same three-state check as the root package — a staged version is
+          # invisible to `npm view`. See the root job for the full rationale.
           if npm view "@jshookmcp/extension-sdk@$SDK_VERSION" version >/dev/null 2>&1; then
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "state=published" >> "$GITHUB_OUTPUT"
+          elif npx -y npm@12 stage list "@jshookmcp/extension-sdk" 2>/dev/null | grep -qF "$SDK_VERSION"; then
+            echo "state=staged" >> "$GITHUB_OUTPUT"
           else
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "state=absent" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Fail loudly on an unapproved staged SDK version
+        if: steps.sdk_publish_status.outputs.state == 'staged'
+        env:
+          VERSION: ${{ steps.sdk_publish_status.outputs.version }}
+        run: |
+          echo "::error title=Staged version awaiting approval::@jshookmcp/extension-sdk@$VERSION is already in the npm staging area. It will never go live until a maintainer approves it with 2FA. Publishing again returns E409."
+          {
+            echo "### @jshookmcp/extension-sdk@$VERSION is staged, not published"
+            echo
+            echo "Approve it, then re-run this workflow:"
+            echo
+            echo '```bash'
+            echo "npx -y npm@12 stage list @jshookmcp/extension-sdk"
+            echo "npx -y npm@12 stage approve <stage-id>"
+            echo '```'
+            echo
+            echo "Or approve on npmjs.com -> the package page -> **Staged Packages** tab."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
       - name: Pack SDK package
-        if: steps.sdk_publish_status.outputs.should_publish == 'true'
+        if: steps.sdk_publish_status.outputs.state == 'absent'
         run: |
           rm -rf .release-artifacts-sdk
           mkdir -p .release-artifacts-sdk
           pnpm -C packages/extension-sdk pack --pack-destination ../../.release-artifacts-sdk
 
       - name: Publish extension SDK
-        if: steps.sdk_publish_status.outputs.should_publish == 'true'
+        if: steps.sdk_publish_status.outputs.state == 'absent'
         run: |
           SDK_TARBALL="$(find .release-artifacts-sdk -maxdepth 1 -name '*.tgz' -print -quit)"
           test -n "$SDK_TARBALL"
           # `--provenance` enables npm SLSA Build L1 attestation via Sigstore Fulcio.
           # Requires `id-token: write` permission (set at workflow level above).
-          npm publish "$SDK_TARBALL" --provenance --access public
+          LOG="$RUNNER_TEMP/npm-publish-sdk.log"
+          set +e
+          npm publish "$SDK_TARBALL" --provenance --access public 2>&1 | tee "$LOG"
+          PUBLISH_STATUS="${PIPESTATUS[0]}"
+          set -e
+          if [ "$PUBLISH_STATUS" -ne 0 ]; then
+            if grep -qF 'previously staged version' "$LOG"; then
+              echo "::error title=Staged version awaiting approval::Publish was rejected because @jshookmcp/extension-sdk@${{ steps.sdk_publish_status.outputs.version }} already exists in the npm staging area. A maintainer must approve it with 2FA (npx -y npm@12 stage approve <stage-id>, or the Staged Packages tab on npmjs.com) before it can go live."
+            fi
+          fi
+          exit "$PUBLISH_STATUS"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # See the root job for why this exists: a publish can exit 0 and still
+      # never reach the registry.
+      - name: Verify the published SDK version is actually live
+        if: steps.sdk_publish_status.outputs.state == 'absent'
+        env:
+          VERSION: ${{ steps.sdk_publish_status.outputs.version }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if npm view "@jshookmcp/extension-sdk@$VERSION" version >/dev/null 2>&1; then
+              echo "@jshookmcp/extension-sdk@$VERSION is live on the registry."
+              exit 0
+            fi
+            echo "Waiting for @jshookmcp/extension-sdk@$VERSION to appear on the registry (${attempt}/30)"
+            sleep 10
+          done
+          echo "::error title=Publish did not go live::npm publish reported success, but @jshookmcp/extension-sdk@$VERSION never appeared on the registry. It was almost certainly staged and now needs a maintainer's 2FA approval — run 'npx -y npm@12 stage list @jshookmcp/extension-sdk' then 'npx -y npm@12 stage approve <stage-id>', or approve it in the Staged Packages tab on npmjs.com."
+          exit 1
