@@ -21,20 +21,48 @@ on:
 #   - `contents: read` stays for checkout/tag validation.
 #   - Both jobs below inherit this block — no per-job override needed.
 #
-# Trusted Publisher (configured on npmjs.com for both packages):
-#   org: vmoranv, repo: jshookmcp, workflow: publish-packages.yml.
+# Trusted Publisher — ⚠️ NOT YET CREATED. Verified 2026-10-09 by reading the
+#   live npmjs.com settings page over CDP (Chrome 154.0.8037.98, DevTools port
+#   9308). BOTH packages still render the EMPTY creation form:
+#     - @jshookmcp/jshook         -> provider=GitHub Actions, all fields blank,
+#                                    "Set up connection" button present
+#     - @jshookmcp/extension-sdk  -> still at the "Select your publisher" step
+#   Nothing is stored on npm's side, so the OIDC publish below WILL FAIL until a
+#   connection exists. Do not read a green OIDC-handshake log line as success.
+#   The values to enter — IDENTICAL for both packages, but each package needs
+#   its OWN connection (a connection is scoped to one package):
+#     Publisher            : GitHub Actions
+#     Organization or user : vmoranv
+#     Repository           : jshookmcp
+#     Workflow filename    : publish-packages.yml
+#     Environment name     : (leave blank — no job declares `environment:`)
 #
-#   ⚠️ TWO npmjs.com-SIDE REQUIREMENTS THIS WORKFLOW CANNOT CHECK FOR YOU.
-#     Both live at: package page -> Settings -> Trusted publishing.
-#     1. "Allowed actions" must include DIRECT publishing. `npm stage publish`
-#        is always permitted, but direct `npm publish` has to be enabled
-#        explicitly, and a configuration created after 2026-09-03 defaults to
-#        STAGE ONLY. If it is not enabled the publish below fails even though
-#        the OIDC handshake itself succeeded.
+#   ⚠️ THREE npmjs.com-SIDE FACTS THIS WORKFLOW CANNOT CHECK FOR YOU.
+#     All live at: package page -> Settings.
+#     1. "Allowed actions" -> "Allow npm publish" MUST be ticked. Measured
+#        2026-10-09: both boxes ("Allow npm publish", "Allow npm dist-tag")
+#        render UNCHECKED, and npm's own copy says "npm stage publish is always
+#        allowed" — so leaving them unchecked yields a STAGE-ONLY publisher and
+#        the direct `npm publish` below fails even though the OIDC handshake
+#        succeeded.
 #     2. A newly created trusted publisher must complete its FIRST successful
 #        publish within 2 days. Miss that window and the configuration expires
 #        and can no longer be used or edited — it has to be deleted and
-#        recreated. npm's docs are explicit about this.
+#        recreated. npm's docs are explicit about this. Corollary: clear any
+#        stuck staged version FIRST (an E409 "already staged" is NOT a
+#        validating publish, so it would burn the window).
+#     3. "Publishing access" needs NO change, despite the two packages differing
+#        (measured 2026-10-09):
+#          @jshookmcp/jshook        = "Require two-factor authentication and
+#                                      disallow bypass 2fa tokens (recommended)"
+#          @jshookmcp/extension-sdk = "Require two-factor authentication or a
+#                                      granular access token with bypass 2fa
+#                                      enabled"
+#        npm's page states verbatim: "All publishing access options above are
+#        compatible with OIDC trusted publishers. If you have configured
+#        trusted publishers for this package, they will continue to work
+#        regardless of which option you select." So neither setting blocks this
+#        workflow.
 #
 # ⚠️ WHY THIS IS NO LONGER TOKEN-AUTHENTICATED — changed 2026-10-09.
 #   The previous revision authenticated with `secrets.NPM_TOKEN`, a granular
