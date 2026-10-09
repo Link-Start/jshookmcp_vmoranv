@@ -6,6 +6,8 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { auditReadmeCounts, reportAudit } from './audit-readme-counts.mjs';
+
 const scriptDirUrl = new URL('.', import.meta.url);
 const projectRootUrl = new URL('../', scriptDirUrl);
 const projectRoot = fileURLToPath(projectRootUrl);
@@ -267,20 +269,38 @@ export async function checkMetadata(options = {}) {
     .filter(([, file]) => file.actual !== file.expected)
     .map(([name]) => name);
 
+  // The sync block is only ONE of the two places the tool count lives. The other
+  // is hand-written prose, which nothing else validates — see audit-readme-counts.mjs.
+  const prose = auditReadmeCounts({
+    expectedToolCount: state.summary.toolCount,
+    files: [
+      { name: 'README.md', lang: 'en', text: state.files['README.md'].actual },
+      { name: 'README.zh.md', lang: 'zh', text: state.files['README.zh.md'].actual },
+    ],
+  });
+
   if (!quiet) {
     console.log(
       `[metadata] registry summary: version=${state.summary.packageVersion}, domains=${state.summary.domainCount}, tools=${state.summary.toolCount}`,
     );
-    if (mismatches.length === 0) {
+    if (prose.aborts.length > 0) {
+      reportAudit(prose, { expectedToolCount: state.summary.toolCount });
+    } else if (mismatches.length === 0 && prose.failures.length === 0) {
       console.log('[metadata] OK: metadata is in sync.');
     } else {
-      console.error(`[metadata] STALE: ${mismatches.join(', ')}`);
+      if (mismatches.length > 0) {
+        console.error(`[metadata] STALE: ${mismatches.join(', ')}`);
+      }
+      if (prose.failures.length > 0) {
+        reportAudit(prose, { expectedToolCount: state.summary.toolCount });
+      }
     }
   }
 
   return {
     summary: state.summary,
     mismatches,
+    prose,
   };
 }
 
@@ -296,9 +316,21 @@ export async function syncMetadata() {
     changedFiles.push(name);
   }
 
+  // `sync` rewrites the generated block only. Prose is authored text and is left
+  // alone, so a stale prose count survives a sync by design — report it loudly
+  // here rather than letting the next `check` be the first time anyone hears.
+  const prose = auditReadmeCounts({
+    expectedToolCount: state.summary.toolCount,
+    files: [
+      { name: 'README.md', lang: 'en', text: state.files['README.md'].actual },
+      { name: 'README.zh.md', lang: 'zh', text: state.files['README.zh.md'].actual },
+    ],
+  });
+
   return {
     summary: state.summary,
     changedFiles,
+    prose,
   };
 }
 
@@ -307,7 +339,12 @@ async function main() {
 
   if (mode === 'check') {
     const result = await checkMetadata();
-    process.exit(result.mismatches.length === 0 ? 0 : 1);
+    // ABORT (2) outranks FAIL (1): it means the guard could not reach a verdict,
+    // so a "stale" report would be a guess rather than a finding.
+    if (result.prose.aborts.length > 0) {
+      process.exit(2);
+    }
+    process.exit(result.mismatches.length === 0 && result.prose.failures.length === 0 ? 0 : 1);
   }
 
   const result = await syncMetadata();
@@ -318,6 +355,10 @@ async function main() {
     console.log('[metadata] No file changes were required.');
   } else {
     console.log(`[metadata] Updated: ${result.changedFiles.join(', ')}`);
+  }
+  if (result.prose.aborts.length > 0 || result.prose.failures.length > 0) {
+    reportAudit(result.prose, { expectedToolCount: result.summary.toolCount });
+    console.error('[metadata] WARNING: sync does not rewrite prose — fix the lines above by hand.');
   }
 }
 

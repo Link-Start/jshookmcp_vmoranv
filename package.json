@@ -110,6 +110,8 @@
     "audit:events:selftest": "node scripts/audit-event-contracts.selftest.mjs",
     "audit:promises": "node scripts/audit-promise-assertions.mjs",
     "audit:promises:selftest": "node scripts/audit-promise-assertions.selftest.mjs",
+    "audit:readme-counts": "node scripts/audit-readme-counts.mjs",
+    "audit:readme-counts:selftest": "node scripts/audit-readme-counts.selftest.mjs",
     "git:refresh-noise": "node scripts/refresh-git-noise.mjs",
     "check": "corepack pnpm run metadata:check && corepack pnpm run openapi:check && corepack pnpm run audit:domains && corepack pnpm run audit:events && corepack pnpm run audit:promises && corepack pnpm run lint && corepack pnpm run format:check && corepack pnpm run typecheck && corepack pnpm run test",
     "package": "corepack pnpm pack",
