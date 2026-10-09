@@ -2,16 +2,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-// ── Postinstall scope detection ─────────────────────────────────────────────
-// This script ships in the published package AND runs in the dev checkout.
+// ── Dev-checkout setup (NOT a package lifecycle hook) ───────────────────────
 //
-// In a dev checkout (a git clone carrying the TypeScript source) it may rebuild
-// a native module whose ABI no longer matches the active Node version. Everywhere
-// else — a global install, a plain `npm install` of the published tarball, or an
-// `npx` / `pnpm dlx` cache extraction — the hardcoded pnpm store paths below do
-// not exist, so an ABI check would silently fall through to `npm rebuild`, which
-// *compiles* isolated-vm / better-sqlite3 and peaks at 1.5–2.5 GB — enough to
-// OOM a 2 GB VPS. In those non-dev contexts we skip the ABI check entirely.
+// ⚠️ This script is deliberately NOT wired to the `postinstall` lifecycle event
+// any more, and it is deliberately NOT listed in package.json `files`.
+//
+// Reason: the package is published under npm's Dual-Use Content Policy, where
+// any install-time code execution is a blocking signal for automated review.
+// Shipping a `postinstall` script provided zero value to consumers (it always
+// exited 0 outside a dev checkout — see shouldSkipPostinstall below) while
+// looking exactly like an install-time payload. So it was removed from the
+// published surface entirely.
+//
+// Contributors run it explicitly:  pnpm run hooks:install
+//
+// What it does, in a dev checkout only:
+//   - rebuilds a native module whose ABI no longer matches the active Node
+//     version. The hardcoded pnpm store paths below do not exist elsewhere, so
+//     outside a dev checkout an ABI check would silently fall through to
+//     `npm rebuild`, which *compiles* isolated-vm / better-sqlite3 and peaks at
+//     1.5–2.5 GB — enough to OOM a 2 GB VPS. Hence the skip list.
+//   - installs git hooks via lefthook.
 
 const NATIVE_MODULES = ['better-sqlite3', 'isolated-vm', 'koffi'];
 
@@ -83,10 +94,10 @@ function checkNativeModuleAbi() {
   if (needsRebuild.length === 0) return;
 
   console.log(
-    `[postinstall] Native module ABI mismatch detected for: ${needsRebuild.join(', ')}`
+    `[setup] Native module ABI mismatch detected for: ${needsRebuild.join(', ')}`
   );
   console.log(
-    `[postinstall] Auto-rebuilding for Node ${process.version} (ABI ${process.versions.modules})...`
+    `[setup] Auto-rebuilding for Node ${process.version} (ABI ${process.versions.modules})...`
   );
 
   for (const mod of needsRebuild) {
@@ -103,12 +114,12 @@ function checkNativeModuleAbi() {
     );
 
     if (result.status === 0) {
-      console.log(`[postinstall] ✓ Rebuilt ${mod} successfully`);
+      console.log(`[setup] ✓ Rebuilt ${mod} successfully`);
     } else {
       // Do NOT fall back to `npm rebuild` — compiling native modules can OOM a
       // low-memory machine. Prompt the developer to rebuild explicitly instead.
       console.warn(
-        `[postinstall] ✗ Could not rebuild ${mod} automatically. ` +
+        `[setup] ✗ Could not rebuild ${mod} automatically. ` +
           `Run manually under the active Node version: npm rebuild ${mod} --foreground-scripts`
       );
     }
@@ -129,7 +140,7 @@ function installGitHooks() {
   );
 
   if (!fs.existsSync(localBin)) {
-    console.warn('[postinstall] lefthook not found locally; skipping git hook installation.');
+    console.warn('[setup] lefthook not found locally; skipping git hook installation.');
     process.exit(0);
   }
 
@@ -148,7 +159,7 @@ function installGitHooks() {
     }
 
     console.warn(
-      `[postinstall] core.hooksPath is already set to "${configuredHooksPath}"; skipping git hook installation.`
+      `[setup] core.hooksPath is already set to "${configuredHooksPath}"; skipping git hook installation.`
     );
     process.exit(0);
   }
@@ -161,7 +172,7 @@ function installGitHooks() {
 
   if (result.error) {
     console.warn(
-      `[postinstall] lefthook install failed to spawn: ${result.error.message}; skipping git hook installation.`
+      `[setup] lefthook install failed to spawn: ${result.error.message}; skipping git hook installation.`
     );
   } else if (result.status !== 0) {
     const firstDetailLine = [result.stdout, result.stderr]
@@ -170,7 +181,7 @@ function installGitHooks() {
       .map((line) => line.trim())
       .find(Boolean);
     console.warn(
-      `[postinstall] lefthook install exited with status ${result.status}; skipping git hook installation${firstDetailLine ? ` (${firstDetailLine})` : ''}.`
+      `[setup] lefthook install exited with status ${result.status}; skipping git hook installation${firstDetailLine ? ` (${firstDetailLine})` : ''}.`
     );
   }
 }
@@ -187,7 +198,7 @@ function main() {
     checkNativeModuleAbi();
   } catch (err) {
     // Never let the ABI check block installation
-    console.warn(`[postinstall] ABI check failed (non-fatal): ${err && err.message ? err.message : err}`);
+    console.warn(`[setup] ABI check failed (non-fatal): ${err && err.message ? err.message : err}`);
   }
 
   installGitHooks();

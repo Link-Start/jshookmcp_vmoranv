@@ -103,6 +103,22 @@ on:
 #     3. The declaration is PERSISTENT: "New versions of the Package may not
 #        remove the contentPolicy field or the DISCLOSURE file. Publishes that
 #        remove them may be rejected."
+#     4. Beyond the declaration, the published surface is kept free of the two
+#        things automated review blocks on most readily. CI asserts both in the
+#        "Verify no install-time script or injection helper ships" step:
+#          - NO install-time lifecycle script (`preinstall` / `install` /
+#            `postinstall` / `prepare`). A `postinstall` used to run
+#            `scripts/postinstall.cjs`, which was a no-op for every consumer yet
+#            read to a scanner as exactly an install-time payload. The logic
+#            moved to the dev-only `hooks:install` script, which no lifecycle
+#            event invokes, and the file left `files`.
+#          - NO injection helper. `src/native/scripts/windows/inject-dll.ps1`
+#            declared the canonical injection API chain
+#            (OpenProcess / VirtualAllocEx / WriteProcessMemory /
+#            CreateRemoteThread) without ever calling it, and was reachable only
+#            from `ProcessManager.injectDll`, which always returned false. Both
+#            the file and the `-ExecutionPolicy Bypass` shell call that
+#            referenced it were deleted; the public contract is unchanged.
 #
 #   ⚠️⚠️ THE PUBLISH METHOD IS CONSTRAINED, AND THIS IS COUNTER-INTUITIVE.
 #   The policy lists two methods as NOT PERMITTED:
@@ -417,6 +433,44 @@ jobs:
           fi
 
           echo "Dual-use declaration present: DISCLOSURE + contentPolicy.class=dual-use"
+
+      # The published package must contain NO install-time lifecycle script and NO
+      # injection helper. Both were removed deliberately (2026-10-09) to get past
+      # npm's publish-time automated review:
+      #   - `postinstall` ran `scripts/postinstall.cjs`. That script was a no-op
+      #     for every consumer (it exited 0 unless it could see a dev checkout —
+      #     `.git` / `src/index.ts` / `tsconfig.json`, none of which are
+      #     published), yet a `postinstall` key reads to a scanner as exactly an
+      #     install-time payload. The logic moved to the dev-only `hooks:install`
+      #     script, which no lifecycle event invokes.
+      #   - `inject-dll.ps1` declared the canonical injection API chain
+      #     (OpenProcess / VirtualAllocEx / WriteProcessMemory /
+      #     CreateRemoteThread) without ever calling any of it, and was reachable
+      #     only from `ProcessManager.injectDll`, which always returned false.
+      # A dependency bump, a `files` tidy-up or a revert could reintroduce either
+      # and silently earn another Blocked verdict. Fail loudly instead.
+      - name: Verify no install-time script or injection helper ships
+        if: steps.root_publish_status.outputs.state == 'absent'
+        run: |
+          TARBALL="$(find .release-artifacts -maxdepth 1 -name '*.tgz' -print -quit)"
+          test -n "$TARBALL"
+
+          HOOKS="$(tar -xzOf "$TARBALL" package/package.json | node -p '
+            const s = JSON.parse(require("node:fs").readFileSync(0, "utf8")).scripts ?? {};
+            ["preinstall", "install", "postinstall", "prepare"].filter((k) => k in s).join(", ")
+          ')"
+          if [ -n "$HOOKS" ]; then
+            echo "::error title=Install-time lifecycle script in the published package::package.json inside the tarball declares: $HOOKS. For a dual-use package, executing code at install time is a blocking signal for npm's automated review. Put the logic in a dev-only script (see the 'hooks:install' entry) rather than a lifecycle hook, and keep it out of package.json -> files."
+            exit 1
+          fi
+
+          if tar -tzf "$TARBALL" | grep -qi 'inject-dll'; then
+            echo "::error title=Injection helper shipped in the tarball::The tarball contains an 'inject-dll' file. This was removed deliberately - it declared an injection API chain it never called, and the filename alone reads as malware to automated review. Matching entries:"
+            tar -tzf "$TARBALL" | grep -i 'inject-dll'
+            exit 1
+          fi
+
+          echo "Clean: no install-time lifecycle script, no injection helper"
 
       - name: Publish root package
         if: steps.root_publish_status.outputs.state == 'absent'

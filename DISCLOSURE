@@ -63,6 +63,17 @@ Declared capabilities, stated plainly:
     authorised automation.
   - Runtime introspection. Dumping V8 heap contents, IndexedDB contents, worker
     scripts, and page data for offline analysis.
+  - Native process inspection. Enumerating processes, reading command lines,
+    loaded modules and window handles, and reading or patching the memory of a
+    process the operator owns — the Win32 API on Windows, platform equivalents
+    on Linux and macOS.
+  - Code and shellcode injection interfaces. The package exposes MCP tools
+    (`inject_dll`, `inject_shellcode`) and a memory manager that can load a DLL or
+    shellcode into a target process. On Windows this runs through PowerShell; on
+    other platforms through the platform API. Injection requests pass through a
+    validation layer that inspects the target process and the payload (including
+    an optional expected payload hash) and can require explicit confirmation
+    before proceeding.
 
 None of these are hidden, obfuscated or undocumented. The published `dist/` is
 bundled output of the public TypeScript sources in the repository above; it is
@@ -108,20 +119,32 @@ operator explicitly invokes a tool that does.
 5. NOTES ON THINGS AUTOMATED SCANNING MAY FLAG
 ----------------------------------------------
 
-  - `scripts/postinstall.cjs` is included in the published package. Outside a
-    development checkout it exits immediately without doing anything: it only
-    acts when it can see a `.git` directory, `src/index.ts` or `tsconfig.json`,
-    none of which are published. In a dev checkout it may rebuild native
-    modules (better-sqlite3, isolated-vm, koffi) whose ABI no longer matches the
-    active Node version, and install git hooks via lefthook. It is not part of
-    the installed runtime path.
-  - Native dependencies (`better-sqlite3`, `isolated-vm`, `koffi`) are used for
-    local storage, sandboxed evaluation, and FFI. `isolated-vm` in particular is
-    a sandbox, not an escape from one.
+  - The package declares NO install-time lifecycle script. There is no
+    `preinstall`, `install`, `postinstall` or `prepare` hook, so installing
+    `@jshookmcp/jshook` executes no package code. A dev-only helper
+    (`scripts/postinstall.cjs`) still exists in the repository for contributors,
+    but it is not published, is not wired to any lifecycle event, and is run
+    explicitly with `pnpm run hooks:install`.
+  - Native dependencies (`better-sqlite3`, `isolated-vm`, `koffi`) are optional
+    (`optionalDependencies`) and are used for local storage, sandboxed
+    evaluation, and FFI. `isolated-vm` is a sandbox, not an escape from one.
   - Dynamic evaluation (`Runtime.evaluate`, sandboxed V8 contexts) is a core
     feature of the tool, not an obfuscation technique.
   - The package reads and writes files under the operator's working directory
     for captured artefacts and offloaded payloads.
+  - Process injection (`inject_dll`, `inject_shellcode`) is a DECLARED capability
+    — see section 2. It is gated by the validation layer described there and acts
+    only on a target the operator names explicitly.
+  - PowerShell is an implementation detail on Windows, invoked with
+    `-ExecutionPolicy Bypass -EncodedCommand` (base64 UTF-16LE) so scripts can be
+    passed without shell-quoting hazards. That combination is common in
+    legitimate Windows tooling and equally common in malware; it is declared here
+    so that a reviewer sees it stated rather than discovered.
+  - A Windows helper named `inject-dll.ps1` — which declared the injection API
+    chain (`OpenProcess`, `VirtualAllocEx`, `WriteProcessMemory`,
+    `CreateRemoteThread`) but never called it, and was reachable only from a
+    method that always returned `false` — has been REMOVED, together with the
+    bypass-execution shell call that referenced it. It provided no functionality.
 
 If any of the above is a concern, we are glad to answer questions. The
 maintainer can be reached through the repository's issue tracker at

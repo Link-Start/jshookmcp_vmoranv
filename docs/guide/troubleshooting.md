@@ -32,23 +32,35 @@ node -e "console.log(process.version, process.versions.modules)"
 
 ---
 
-## lefthook Postinstall Warnings
+## Git Hooks Not Installed
 
-**Symptom**: Warning messages during postinstall about `lefthook` or git hooks.
+**Symptom**: after cloning and running `pnpm install`, `git commit` / `git push` do
+not trigger the repository's lefthook hooks.
 
-**Cause**: lefthook is a git hooks manager. Warnings are non-blocking.
+**Cause**: the project no longer installs git hooks automatically from a package
+lifecycle script. It used to, via a `postinstall` hook — but this package is
+published under npm's Dual-Use Content Policy, and an install-time script in the
+published package is a blocking signal for automated review. The hook was removed
+from the published surface; the setup script is now opt-in.
 
-**Solution**:
+**Solution** — run it once per checkout:
 
 ```bash
-# Silence the warning (harmless)
-echo "lefthook: skipped" >> .git/hooks/pre-commit
-
-# Or remove lefthook if not needed
-pnpm remove lefthook
+pnpm run hooks:install
 ```
 
-This is a cosmetic issue and does not affect functionality.
+That installs the lefthook hooks and, if a native module (`better-sqlite3`,
+`isolated-vm`, `koffi`) was built against a different Node ABI, rebuilds it.
+
+**Verification**:
+
+```bash
+git config --local --get core.hooksPath   # -> .git/hooks or the lefthook dir
+ls .git/hooks/pre-commit
+```
+
+If you do not want the hooks at all, just skip the command — nothing else depends
+on it.
 
 ---
 

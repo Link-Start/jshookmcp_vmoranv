@@ -456,33 +456,28 @@ export class ProcessManager {
   }
 
   /**
-   * DLL injection stub — disabled for safety; always returns false.
-   * The PowerShell script path is resolved but never executed successfully;
-   * the method unconditionally returns false regardless of arguments.
+   * DLL injection is not implemented — always returns false.
+   *
+   * This is a hard-disabled stub. It deliberately does NOT spawn a shell and
+   * does NOT execute any script.
+   *
+   * A previous revision shipped an `inject-dll.ps1` helper that declared the
+   * canonical injection APIs (OpenProcess / VirtualAllocEx / WriteProcessMemory /
+   * CreateRemoteThread) but never called them, and invoked it via PowerShell with
+   * `-ExecutionPolicy Bypass`. Both the script and the spawn have been removed:
+   * they performed no work, and shipping a file named `inject-dll.ps1` alongside
+   * a bypass-execution shell call is indistinguishable from malware to automated
+   * review of the published package. The public contract is unchanged — this
+   * method has always returned false.
    */
   async injectDll(_pid: number, _dllPath: string): Promise<boolean> {
-    try {
-      if (!Number.isFinite(_pid) || _pid <= 0) {
-        logger.error(`Invalid PID for injectDll: ${_pid}`);
-        return false;
-      }
-
-      const scriptPath = this.scriptLoader.getScriptPath('inject-dll.ps1');
-      const normalizedPid = Math.trunc(_pid);
-      const escapedDllPath = String(_dllPath).replace(/'/g, "''");
-
-      await execAsync(
-        `${this.powershellPath} -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}" -TargetPid ${normalizedPid} ` +
-          `-DllPath '${escapedDllPath}'`,
-        { maxBuffer: PROCESS_EXEC_MAX_BUFFER_BYTES },
-      );
-
-      logger.warn('DLL injection is disabled for safety in this implementation');
-      return false;
-    } catch (error) {
-      logger.error('DLL injection failed:', error);
+    if (!Number.isFinite(_pid) || _pid <= 0) {
+      logger.error(`Invalid PID for injectDll: ${_pid}`);
       return false;
     }
+
+    logger.warn('DLL injection is disabled for safety in this implementation');
+    return false;
   }
 
   /**

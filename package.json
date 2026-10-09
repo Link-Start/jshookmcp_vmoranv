@@ -1,6 +1,6 @@
 {
   "name": "@jshookmcp/jshook",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "MCP server with built-in tools across multiple domains for AI-assisted JavaScript analysis and security analysis — browser automation, CDP debugging, network monitoring, JS hooks, code analysis, and workflow orchestration",
   "keywords": [
     "ai",
@@ -47,8 +47,7 @@
     "DISCLOSURE",
     "dist",
     "workflows",
-    "src/native/scripts",
-    "scripts/postinstall.cjs"
+    "src/native/scripts"
   ],
   "type": "module",
   "main": "dist/index.mjs",
@@ -115,7 +114,7 @@
     "check": "corepack pnpm run metadata:check && corepack pnpm run openapi:check && corepack pnpm run audit:domains && corepack pnpm run audit:events && corepack pnpm run audit:promises && corepack pnpm run lint && corepack pnpm run format:check && corepack pnpm run typecheck && corepack pnpm run test",
     "package": "corepack pnpm pack",
     "prepublishOnly": "corepack pnpm run check",
-    "postinstall": "node scripts/postinstall.cjs",
+    "hooks:install": "node scripts/postinstall.cjs",
     "install:full": "corepack pnpm install && corepack pnpm exec camoufox-js fetch",
     "metadata:sync": "node scripts/generate-metadata.mjs --write",
     "metadata:check": "node scripts/generate-metadata.mjs --check",
