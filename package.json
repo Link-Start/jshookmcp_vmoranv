@@ -1,6 +1,6 @@
 {
   "name": "@jshookmcp/jshook",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "MCP server with built-in tools across multiple domains for AI-assisted JavaScript analysis and security analysis — browser automation, CDP debugging, network monitoring, JS hooks, code analysis, and workflow orchestration",
   "keywords": [
     "ai",
@@ -44,6 +44,7 @@
     "jshookmcp": "dist/index.mjs"
   },
   "files": [
+    "DISCLOSURE",
     "dist",
     "workflows",
     "src/native/scripts",
@@ -229,6 +230,9 @@
       "lefthook",
       "protobufjs"
     ]
+  },
+  "contentPolicy": {
+    "class": "dual-use"
   },
   "mcpName": "io.github.vmoranv/jshookmcp"
 }

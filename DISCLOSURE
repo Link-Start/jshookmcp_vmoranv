@@ -1,0 +1,128 @@
+DISCLOSURE
+==========
+
+Required declaration under npm's Dual-Use Content Policy.
+  Policy : https://docs.npmjs.com/policies/dual-use
+  Field  : package.json -> "contentPolicy": { "class": "dual-use" }
+
+Package : @jshookmcp/jshook
+License : AGPL-3.0-only
+Repo    : https://github.com/vmoranv/jshookmcp
+
+This file describes the security-relevant capabilities this package
+intentionally provides, and the legitimate purposes for which it is intended.
+It exists so that npm's automated scanning and Trust & Safety review can
+distinguish this package from malware that happens to use similar techniques.
+
+
+1. WHAT THIS PACKAGE IS
+-----------------------
+
+`@jshookmcp/jshook` is a Model Context Protocol (MCP) server. It exposes a set of
+tools that an AI assistant (or a human operator driving one) can call to perform
+JavaScript analysis and browser-side security research.
+
+It is a developer / researcher tool that the operator runs locally against
+targets they choose. It is not a library that executes anything on its own, it
+does not run as a service on behalf of a third party, and it does not contact
+any server we control. It ships as a CLI (`jshook` / `jshookmcp`) plus an MCP
+stdio server.
+
+
+2. WHY IT IS DUAL-USE
+---------------------
+
+The techniques below are the standard toolkit of JavaScript security research.
+They are also the standard toolkit of malicious JavaScript. An automated scanner
+cannot tell the two apart from code alone, which is precisely the situation
+npm's dual-use policy exists to handle.
+
+Declared capabilities, stated plainly:
+
+  - JavaScript hooking and function instrumentation. Intercepting, wrapping and
+    observing function calls in a running page, including replacing
+    implementations and reading arguments and return values.
+  - Chrome DevTools Protocol (CDP) control. Attaching to a browser over CDP,
+    evaluating expressions in a page context, enumerating targets, workers and
+    scripts, and setting breakpoints.
+  - Network monitoring and interception. Observing and modifying request and
+    response traffic produced by the browser under analysis.
+  - TLS key logging and decryption. Chrome can be launched with a TLS key log
+    file; a companion tool parses NSS-format key material (CLIENT_RANDOM /
+    TRAFFIC_SECRET) so that captured traffic from the operator's own browser
+    session can be decrypted. This applies only to traffic the operator's own
+    browser produces.
+  - Deobfuscation and static analysis. Reversing minified, packed or
+    control-flow-flattened JavaScript, including AST-based analysis and
+    cryptography detection.
+  - Anti-detection / stealth browser configuration. Launching Camoufox (a
+    hardened Firefox) or a configured Chrome so that automated browsing is not
+    trivially distinguishable from a human session. Used to study anti-bot
+    systems and to keep research traffic from being misclassified.
+  - CAPTCHA handling. Integration points for solving CAPTCHA challenges during
+    authorised automation.
+  - Runtime introspection. Dumping V8 heap contents, IndexedDB contents, worker
+    scripts, and page data for offline analysis.
+
+None of these are hidden, obfuscated or undocumented. The published `dist/` is
+bundled output of the public TypeScript sources in the repository above; it is
+not deliberately obfuscated to evade review. The repository is public and the
+build is reproducible from source.
+
+
+3. INTENDED LEGITIMATE USE
+--------------------------
+
+  - Malware and phishing analysis: deobfuscating malicious JavaScript, tracing
+    what a suspicious page does, and extracting indicators from it.
+  - Security research and vulnerability disclosure on systems the researcher is
+    authorised to test.
+  - Authorised penetration testing and red-team engagements, under a scope
+    agreed with the target's owner.
+  - Debugging and profiling the operator's own web applications, including
+    production issues that only reproduce in a real browser.
+  - Privacy and supply-chain review of third-party scripts embedded in sites the
+    operator is responsible for.
+  - Academic research, security education, and CTF competition.
+  - Anti-fraud and bot-mitigation research: understanding how automation is
+    detected, in order to build better defences.
+
+Intended users are security researchers, reverse engineers, penetration
+testers, and developers analysing code they are responsible for.
+
+
+4. WHAT IT IS NOT FOR
+---------------------
+
+This package is intended for use only against systems and data the operator owns
+or has explicit written authorisation to test. It must not be used for
+unauthorised access, credential theft, fraud, harassment, or any other activity
+prohibited by npm's Acceptable Use Policies.
+
+The package contains no command-and-control capability, no credential
+exfiltration, no self-propagation, no persistence mechanism, and no code that
+targets a specific third party. It performs no network activity unless the
+operator explicitly invokes a tool that does.
+
+
+5. NOTES ON THINGS AUTOMATED SCANNING MAY FLAG
+----------------------------------------------
+
+  - `scripts/postinstall.cjs` is included in the published package. Outside a
+    development checkout it exits immediately without doing anything: it only
+    acts when it can see a `.git` directory, `src/index.ts` or `tsconfig.json`,
+    none of which are published. In a dev checkout it may rebuild native
+    modules (better-sqlite3, isolated-vm, koffi) whose ABI no longer matches the
+    active Node version, and install git hooks via lefthook. It is not part of
+    the installed runtime path.
+  - Native dependencies (`better-sqlite3`, `isolated-vm`, `koffi`) are used for
+    local storage, sandboxed evaluation, and FFI. `isolated-vm` in particular is
+    a sandbox, not an escape from one.
+  - Dynamic evaluation (`Runtime.evaluate`, sandboxed V8 contexts) is a core
+    feature of the tool, not an obfuscation technique.
+  - The package reads and writes files under the operator's working directory
+    for captured artefacts and offloaded payloads.
+
+If any of the above is a concern, we are glad to answer questions. The
+maintainer can be reached through the repository's issue tracker at
+https://github.com/vmoranv/jshookmcp/issues
