@@ -7,22 +7,58 @@ on:
       - 'v*'
 
 # SLSA Phase 1 (npm publish auth):
-#   - `id-token: write` is REQUIRED for `npm publish --provenance` to mint a
-#     Sigstore Fulcio signing certificate from the GitHub OIDC token. That is
-#     INDEPENDENT of registry authentication: provenance has worked since
-#     npm 9.5, so a "Signed provenance statement" line in the log is NOT
-#     evidence that registry auth succeeded — do not read it as one.
-#     The same OIDC environment is also what npm >= 11.5.1 looks for when it
-#     attempts a Trusted Publisher exchange before falling back to a token.
-#   - Registry AUTH is done with NODE_AUTH_TOKEN, set per-step below. That is
-#     npm's documented CI/CD pattern, and the registry's own policy requires
-#     either 2FA or a bypass-2FA granular token to publish at all.
+#   - Registry AUTH is done with TRUSTED PUBLISHING (OIDC). There is no
+#     long-lived npm token anywhere in this workflow. `id-token: write` lets
+#     GitHub mint an OIDC token, and npm >= 11.5.1 exchanges it with the
+#     registry for a short-lived credential scoped to this workflow. npm's
+#     docs, verbatim: "The npm CLI automatically detects OIDC environments and
+#     uses them for authentication before falling back to traditional tokens."
+#   - `id-token: write` is ALSO what `npm publish --provenance` needs in order
+#     to mint a Sigstore Fulcio signing certificate. Those are two INDEPENDENT
+#     consumers of the same OIDC token: provenance has worked since npm 9.5,
+#     so a "Signed provenance statement" line in the log is NOT evidence that
+#     registry auth succeeded — do not read it as one.
 #   - `contents: read` stays for checkout/tag validation.
 #   - Both jobs below inherit this block — no per-job override needed.
 #
 # Trusted Publisher (configured on npmjs.com for both packages):
 #   org: vmoranv, repo: jshookmcp, workflow: publish-packages.yml.
-#   Left untouched on purpose — this workflow does not depend on it.
+#
+#   ⚠️ TWO npmjs.com-SIDE REQUIREMENTS THIS WORKFLOW CANNOT CHECK FOR YOU.
+#     Both live at: package page -> Settings -> Trusted publishing.
+#     1. "Allowed actions" must include DIRECT publishing. `npm stage publish`
+#        is always permitted, but direct `npm publish` has to be enabled
+#        explicitly, and a configuration created after 2026-09-03 defaults to
+#        STAGE ONLY. If it is not enabled the publish below fails even though
+#        the OIDC handshake itself succeeded.
+#     2. A newly created trusted publisher must complete its FIRST successful
+#        publish within 2 days. Miss that window and the configuration expires
+#        and can no longer be used or edited — it has to be deleted and
+#        recreated. npm's docs are explicit about this.
+#
+# ⚠️ WHY THIS IS NO LONGER TOKEN-AUTHENTICATED — changed 2026-10-09.
+#   The previous revision authenticated with `secrets.NPM_TOKEN`, a granular
+#   access token with "bypass 2FA" enabled, which was npm's documented CI/CD
+#   pattern at the time. That path is being removed:
+#     - bypass-2FA tokens already lost account/package-management actions
+#       (2026-07-31 changelog, "Restricting npm bypass-2FA granular access
+#       tokens");
+#     - they lose DIRECT PUBLISH in January 2027, keeping only "read private
+#       packages" and "stage a publish";
+#     - npm's own recommendation is verbatim: "You should move automated
+#       publishing to trusted publishing (OIDC) or staged publishing."
+#   Account 2FA was enabled on 2026-10-09, which is what made the switch
+#   possible at all: managing trusted-publisher configuration is a 2FA-gated
+#   operation and used to answer E403 "Please enable 2fa for your account".
+#
+#   ⚠️ Assume `secrets.NPM_TOKEN` IS DEAD. Enabling 2FA invalidated the
+#   developer's granular token: it still authenticated on 2026-10-08 (a local
+#   `npm publish` got E403 — i.e. the credential was recognised, it just
+#   lacked bypass-2FA), and by 2026-10-09 every command answered
+#   E401 "your authentication token seems to be invalid", verified against the
+#   registry directly with curl, both direct and through the proxy. Do not
+#   reintroduce the token as a fallback without re-verifying it first — a dead
+#   fallback turns a clean OIDC failure into a confusing one.
 #
 # ⚠️ THE npm CLI VERSION MATTERS — and it is not the Node version.
 #   npm's docs ("Trusted publishing for npm packages") state the requirement
@@ -72,35 +108,28 @@ on:
 #   publish attempt itself (its E409 branch), NOT the pre-flight stage list,
 #   and the only real proof of a release is the registry poll at the end.
 #
-#   ⚠️ ACCOUNT PREREQUISITE, UNRESOLVED AS OF 2026-10-08: 2FA is DISABLED on
-#   the vmoranv6 account (`npm profile get` -> "two-factor auth: disabled").
-#   That matters because the registry now requires, verbatim:
+#   ⚠️ THE 0.4.0 STAGING DEADLOCK — RESOLVED 2026-10-09, KEEP THE HISTORY.
+#   From 2026-10-07 to 2026-10-09 a 0.4.0 upload sat in the staging area and
+#   nothing could move it: approving or clearing a staged version needs an
+#   interactive 2FA challenge, and 2FA was disabled on the account
+#   (`npm profile get` -> "two-factor auth: disabled"). That is why the
+#   staging notes below read the way they do. 2FA is now ENABLED, so
+#   `npm stage list` / `npm stage approve` / `npm stage reject` work again —
+#   but note the workflow no longer uses them for authentication.
+#
+#   Registry policy that still applies, verbatim (npm docs: Requiring 2FA for
+#   package publishing and settings modification):
 #     "All packages now require two-factor authentication (2FA) or a granular
 #      access tokens with bypass 2FA enabled for creating and publishing
 #      packages."
-#     (npm docs: Requiring 2FA for package publishing and settings modification)
-#   A token WITHOUT bypass-2FA gets a hard E403 on publish — verified locally on
-#   2026-10-08 with the developer token:
+#   OIDC satisfies that without any token existing. A granular token WITHOUT
+#   bypass-2FA gets a hard E403 — verified locally on 2026-10-08:
 #     403 Forbidden - PUT .../@jshookmcp%2fjshook - Two-factor authentication or
 #     granular access token with bypass 2fa enabled is required to publish.
-#   So secrets.NPM_TOKEN must be a granular access token with "bypass 2FA"
-#   enabled. The flip side of 2FA being disabled: a staged version can only be
-#   approved through an interactive 2FA challenge, and "modifying a package's
-#   settings also requires two-factor authentication" — so with 2FA off,
-#   anything sitting in the staging area cannot be approved OR cleared from a
-#   token. That is the current deadlock on 0.4.0.
-#
-#   npm is also deprecating this token path: per the 2026-07-31 changelog,
-#   2FA-bypass tokens have already lost account/package-management actions and
-#   will lose DIRECT PUBLISH in January 2027, leaving only "read private
-#   packages" and "stage a publish". Registry OIDC (Trusted Publishing) is the
-#   durable automated path — but it is NOT wired up here, because switching to
-#   it means changing the npmjs.com configuration, and this workflow stays on
-#   npm's documented NODE_AUTH_TOKEN pattern instead.
 #   Staged versions share the published semver index but are invisible to
 #   `npm view`, which is why the publish-status steps below check three states
-#   (published / staged / absent) instead of two — and why the "staged" answer
-#   from a token-authenticated `npm stage list` must not be trusted as final.
+#   (published / staged / absent) instead of two — and why a "staged" answer
+#   from `npm stage list` must not be trusted as final.
 permissions:
   contents: read
   id-token: write
@@ -169,12 +198,12 @@ jobs:
 
       - name: Check root package publish status
         id: root_publish_status
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           ROOT_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
           echo "version=$ROOT_VERSION" >> "$GITHUB_OUTPUT"
 
+          # `npm view` reads the public registry, so it needs no credential and
+          # is unaffected by the switch to OIDC.
           if npm view "@jshookmcp/jshook@$ROOT_VERSION" version >/dev/null 2>&1; then
             echo "state=published" >> "$GITHUB_OUTPUT"
             exit 0
@@ -186,29 +215,26 @@ jobs:
           # and every re-run retries the publish until it dies with
           # E409 "Cannot publish over previously staged version".
           #
-          # `npm stage list` must run with the SAME credential the publish uses.
-          # setup-node writes an .npmrc that references ${NODE_AUTH_TOKEN}; with
-          # that variable unset, npm reads an empty view and cheerfully reports
-          # "no staged versions" — a false negative that sends the publish
-          # straight into E409. That is why NODE_AUTH_TOKEN is set on this step,
-          # and why the error below is NOT swallowed: an unanswerable question
-          # is not the same as "nothing is staged".
-          #
-          # The CLI was upgraded to npm 12 above, so `npm stage` (>= 11.15.0)
-          # no longer needs the npx indirection that the Node 22 default forced.
-          #
-          # ⚠️ A token-authenticated `npm stage list` can answer HTTP 200 with an
-          # empty list while the registry still rejects the publish with
-          # E409 "Cannot publish over previously staged version" — verified
-          # 2026-10-08. So "absent" here means "not provably staged", NOT
-          # "provably not staged". The publish attempt below is the real
-          # detector; the registry poll at the end is the real proof.
+          # ⚠️ This listing is a HINT, never a verdict, and it is deliberately
+          # best-effort:
+          #   - It was proven unreliable under the old token auth. On
+          #     2026-10-08 the registry was answering E409 for 0.4.0 while
+          #     `npm stage list` returned HTTP 200 with `[]` — on this runner
+          #     and on a developer machine, with and without --json, using the
+          #     very same credential the publish used. The listing is filtered
+          #     by what the presented credential may act on.
+          #   - Its behaviour under OIDC is UNVERIFIED. The trusted-publisher
+          #     permission model guarantees `npm stage publish`; the docs say
+          #     nothing about listing.
+          #   So a failure or an empty answer here is reported and then ignored
+          #   rather than treated as fatal. The authoritative detectors are the
+          #   publish attempt (its E409 branch) and the registry poll at the end.
           STAGED="$(npm stage list "@jshookmcp/jshook" --json 2>"$RUNNER_TEMP/stage-list.err")" || {
-            echo "::error title=Cannot determine staged state::'npm stage list' failed, so this workflow cannot tell whether @jshookmcp/jshook@$ROOT_VERSION is already staged. Refusing to guess."
+            echo "::warning title=Staged-state check inconclusive::'npm stage list' failed, so this workflow cannot tell whether @jshookmcp/jshook@$ROOT_VERSION is already staged. Continuing anyway — the publish attempt below is the authoritative detector. Output was:"
             cat "$RUNNER_TEMP/stage-list.err"
-            exit 1
+            STAGED=""
           }
-          if printf '%s' "$STAGED" | grep -qF "$ROOT_VERSION"; then
+          if [ -n "$STAGED" ] && printf '%s' "$STAGED" | grep -qF "$ROOT_VERSION"; then
             echo "state=staged" >> "$GITHUB_OUTPUT"
           else
             echo "state=absent" >> "$GITHUB_OUTPUT"
@@ -218,7 +244,6 @@ jobs:
         if: steps.root_publish_status.outputs.state == 'staged'
         env:
           VERSION: ${{ steps.root_publish_status.outputs.version }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "::error title=Staged version awaiting approval::@jshookmcp/jshook@$VERSION is already in the npm staging area. It will never go live until a maintainer approves it with 2FA. Publishing again returns E409."
           # Print the real stage list so the approval can be run straight from
@@ -255,24 +280,18 @@ jobs:
         run: |
           ROOT_TARBALL="$(find .release-artifacts -maxdepth 1 -name '*.tgz' -print -quit)"
           test -n "$ROOT_TARBALL"
-          # `--provenance` enables npm SLSA Build L1 attestation via Sigstore Fulcio.
-          # Requires `id-token: write` permission (set at workflow level above).
+          # `--provenance` enables npm SLSA Build L1 attestation via Sigstore
+          # Fulcio. Requires `id-token: write` (set at workflow level above).
           #
-          # AUTH: NODE_AUTH_TOKEN is set on this step — a granular access token
-          # with "bypass 2FA" enabled. That is npm's documented CI/CD pattern,
-          # and it is what the registry's own policy asks for:
-          #   "All packages now require two-factor authentication (2FA) or a
-          #    granular access tokens with bypass 2FA enabled for creating and
-          #    publishing packages."
-          # (npm docs: Requiring 2FA for package publishing and settings
-          # modification.) The registry answers E403 when neither is present,
-          # which is exactly what a non-bypass-2FA token gets.
+          # AUTH: OIDC, and nothing else. No NODE_AUTH_TOKEN is set on this step
+          # on purpose — npm >= 11.5.1 detects the OIDC environment and performs
+          # the registry-side Trusted Publisher exchange. Setting a token here
+          # would re-introduce the long-lived credential this workflow exists to
+          # remove, and would silently mask a broken OIDC setup as a working one.
           #
-          # On npm >= 11.5.1 the CLI also detects the OIDC environment and tries
-          # it BEFORE falling back to this token, so nothing here needs to force
-          # either order. `npm publish` is used rather than `pnpm publish`
-          # because pnpm's implementation does not perform the registry OIDC
-          # exchange and fails ENEEDAUTH on a token-less runner.
+          # `npm publish` is used rather than `pnpm publish` because pnpm's
+          # implementation does not perform the registry OIDC exchange and
+          # fails ENEEDAUTH on a token-less runner.
           #
           # A publish that lands in the staging area still exits 0, so the exit
           # code alone cannot tell "went live" from "needs 2FA approval".
@@ -285,18 +304,10 @@ jobs:
           set -e
           if [ "$PUBLISH_STATUS" -ne 0 ]; then
             if grep -qF 'previously staged version' "$LOG"; then
-              echo "::error title=Staged version awaiting approval::Publish was rejected because @jshookmcp/jshook@${{ steps.root_publish_status.outputs.version }} already exists in the npm staging area. A maintainer must approve it with 2FA (npm stage approve <stage-id>, or the Staged Packages tab on npmjs.com) before it can go live. Note that 'npm stage list' can report an empty staging area even when this E409 is returned — trust the E409, not the listing."
+              echo "::error title=Staged version awaiting approval::Publish was rejected because @jshookmcp/jshook@${{ steps.root_publish_status.outputs.version }} already exists in the npm staging area. A maintainer must clear or approve it with 2FA (npm stage list @jshookmcp/jshook, then npm stage approve or reject <stage-id>, or the Staged Packages tab on npmjs.com) before this version can go live. Note that 'npm stage list' can report an empty staging area even when this E409 is returned — trust the E409, not the listing."
             fi
           fi
           exit "$PUBLISH_STATUS"
-        env:
-          # npm's documented CI/CD auth: setup-node writes an .npmrc whose
-          # //registry.npmjs.org/:_authToken points at this variable. The token
-          # must be a granular access token with "bypass 2FA" enabled — the
-          # registry requires 2FA or such a token to publish at all, and answers
-          # E403 "Two-factor authentication or granular access token with bypass
-          # 2fa enabled is required to publish packages" otherwise.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # The single most important guard in this workflow.
       # On 2026-10-07 a publish exited 0 with the normal success output
@@ -318,7 +329,7 @@ jobs:
             echo "Waiting for @jshookmcp/jshook@$VERSION to appear on the registry (${attempt}/30)"
             sleep 10
           done
-          echo "::error title=Publish did not go live::npm publish reported success, but @jshookmcp/jshook@$VERSION never appeared on the registry. It was almost certainly staged and now needs a maintainer's 2FA approval — run 'npm stage list @jshookmcp/jshook' then 'npm stage approve <stage-id>', or approve it in the Staged Packages tab on npmjs.com. Two caveats learned the hard way: (1) 'npm stage list' can print an empty list even when a version is staged, so check the Staged Packages tab too; (2) approving requires 2FA to be ENABLED on the npm account — with 2FA disabled, 'npm trust list' answers E403 'Please enable 2fa for your account' and no staged version can be approved."
+          echo "::error title=Publish did not go live::npm publish reported success, but @jshookmcp/jshook@$VERSION never appeared on the registry. Two likely causes, in order of probability. (1) It was STAGED, not published: the trusted publisher may be configured for 'npm stage publish' only, or the package setting differs from what you expect. Check the Staged Packages tab on npmjs.com, then clear or approve it — 'npm stage list @jshookmcp/jshook', then 'npm stage approve' or 'npm stage reject <stage-id>'. (2) The OIDC exchange silently fell back to a static token: verify the trusted publisher's 'Allowed actions' includes direct publishing, and that its first-publish validation window (2 days from creation) has not expired. Caveat learned the hard way: 'npm stage list' can print an empty list even when a version is staged, so always check the Staged Packages tab as well."
           exit 1
 
   publish-extension-sdk:
@@ -386,28 +397,26 @@ jobs:
 
       - name: Check SDK package publish status
         id: sdk_publish_status
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           SDK_VERSION="$(node -p "JSON.parse(require('node:fs').readFileSync('packages/extension-sdk/package.json', 'utf8')).version")"
           echo "version=$SDK_VERSION" >> "$GITHUB_OUTPUT"
 
-          # Same three-state check as the root package — a staged version is
-          # invisible to `npm view`, and `npm stage list` is only trustworthy
-          # when it runs authenticated. See the root job for the full rationale,
-          # including why an empty `npm stage list` is NOT proof that nothing is
-          # staged and why the publish attempt is the real detector.
+          # Same three-state check as the root package, and the same caveat:
+          # the stage listing is a HINT, not a verdict. See the root job for the
+          # full rationale — including why an empty `npm stage list` is NOT
+          # proof that nothing is staged, why its behaviour under OIDC is
+          # unverified, and why the publish attempt is the real detector.
           if npm view "@jshookmcp/extension-sdk@$SDK_VERSION" version >/dev/null 2>&1; then
             echo "state=published" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           STAGED="$(npm stage list "@jshookmcp/extension-sdk" --json 2>"$RUNNER_TEMP/stage-list-sdk.err")" || {
-            echo "::error title=Cannot determine staged state::'npm stage list' failed, so this workflow cannot tell whether @jshookmcp/extension-sdk@$SDK_VERSION is already staged. Refusing to guess."
+            echo "::warning title=Staged-state check inconclusive::'npm stage list' failed, so this workflow cannot tell whether @jshookmcp/extension-sdk@$SDK_VERSION is already staged. Continuing anyway — the publish attempt below is the authoritative detector. Output was:"
             cat "$RUNNER_TEMP/stage-list-sdk.err"
-            exit 1
+            STAGED=""
           }
-          if printf '%s' "$STAGED" | grep -qF "$SDK_VERSION"; then
+          if [ -n "$STAGED" ] && printf '%s' "$STAGED" | grep -qF "$SDK_VERSION"; then
             echo "state=staged" >> "$GITHUB_OUTPUT"
           else
             echo "state=absent" >> "$GITHUB_OUTPUT"
@@ -417,7 +426,6 @@ jobs:
         if: steps.sdk_publish_status.outputs.state == 'staged'
         env:
           VERSION: ${{ steps.sdk_publish_status.outputs.version }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           echo "::error title=Staged version awaiting approval::@jshookmcp/extension-sdk@$VERSION is already in the npm staging area. It will never go live until a maintainer approves it with 2FA. Publishing again returns E409."
           STAGE_LIST="$(npm stage list "@jshookmcp/extension-sdk" 2>&1)"
@@ -453,10 +461,10 @@ jobs:
         run: |
           SDK_TARBALL="$(find .release-artifacts-sdk -maxdepth 1 -name '*.tgz' -print -quit)"
           test -n "$SDK_TARBALL"
-          # `--provenance` enables npm SLSA Build L1 attestation via Sigstore Fulcio.
-          # Requires `id-token: write` permission (set at workflow level above).
-          # NODE_AUTH_TOKEN is set below — npm's documented CI/CD auth. See the
-          # root job's publish step for the full rationale.
+          # `--provenance` enables npm SLSA Build L1 attestation via Sigstore
+          # Fulcio. Requires `id-token: write` (set at workflow level above).
+          # AUTH is OIDC — no NODE_AUTH_TOKEN is set on this step. See the root
+          # job's publish step for the full rationale.
           LOG="$RUNNER_TEMP/npm-publish-sdk.log"
           set +e
           npm publish "$SDK_TARBALL" --provenance --access public 2>&1 | tee "$LOG"
@@ -464,12 +472,10 @@ jobs:
           set -e
           if [ "$PUBLISH_STATUS" -ne 0 ]; then
             if grep -qF 'previously staged version' "$LOG"; then
-              echo "::error title=Staged version awaiting approval::Publish was rejected because @jshookmcp/extension-sdk@${{ steps.sdk_publish_status.outputs.version }} already exists in the npm staging area. A maintainer must approve it with 2FA (npm stage approve <stage-id>, or the Staged Packages tab on npmjs.com) before it can go live. Note that 'npm stage list' can report an empty staging area even when this E409 is returned — trust the E409, not the listing."
+              echo "::error title=Staged version awaiting approval::Publish was rejected because @jshookmcp/extension-sdk@${{ steps.sdk_publish_status.outputs.version }} already exists in the npm staging area. A maintainer must clear or approve it with 2FA (npm stage list @jshookmcp/extension-sdk, then npm stage approve or reject <stage-id>, or the Staged Packages tab on npmjs.com) before this version can go live. Note that 'npm stage list' can report an empty staging area even when this E409 is returned — trust the E409, not the listing."
             fi
           fi
           exit "$PUBLISH_STATUS"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # See the root job for why this exists: a publish can exit 0 and still
       # never reach the registry.
@@ -486,5 +492,5 @@ jobs:
             echo "Waiting for @jshookmcp/extension-sdk@$VERSION to appear on the registry (${attempt}/30)"
             sleep 10
           done
-          echo "::error title=Publish did not go live::npm publish reported success, but @jshookmcp/extension-sdk@$VERSION never appeared on the registry. It was almost certainly staged and now needs a maintainer's 2FA approval — run 'npm stage list @jshookmcp/extension-sdk' then 'npm stage approve <stage-id>', or approve it in the Staged Packages tab on npmjs.com. Two caveats learned the hard way: (1) 'npm stage list' can print an empty list even when a version is staged, so check the Staged Packages tab too; (2) approving requires 2FA to be ENABLED on the npm account — with 2FA disabled, 'npm trust list' answers E403 'Please enable 2fa for your account' and no staged version can be approved."
+          echo "::error title=Publish did not go live::npm publish reported success, but @jshookmcp/extension-sdk@$VERSION never appeared on the registry. Two likely causes, in order of probability. (1) It was STAGED, not published: the trusted publisher may be configured for 'npm stage publish' only. Check the Staged Packages tab on npmjs.com, then clear or approve it — 'npm stage list @jshookmcp/extension-sdk', then 'npm stage approve' or 'npm stage reject <stage-id>'. (2) The OIDC exchange silently fell back to a static token: verify the trusted publisher's 'Allowed actions' includes direct publishing, and that its first-publish validation window (2 days from creation) has not expired. Caveat learned the hard way: 'npm stage list' can print an empty list even when a version is staged, so always check the Staged Packages tab as well."
           exit 1
